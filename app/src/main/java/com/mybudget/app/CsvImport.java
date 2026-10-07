@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.ResolverStyle;
 import java.util.*;
+import java.util.regex.*;
 
 /**
  * Bank statement CSV import. The user matches columns once (date, payee, amount, or separate money in/out columns);
@@ -31,15 +32,24 @@ public final class CsvImport {
         if(cell.length()>0||!row.isEmpty()){row.add(cell.toString().trim());if(!(row.size()==1&&row.get(0).isEmpty()))rows.add(row);}
         return rows;
     }
-    /** Cents from "$1,234.56", "-12", "(12.00)" (negative), "12.00 DR" (negative) or "12.00 CR"; throws when unreadable. */
+    /**
+     * Cents from "$1,234.56", "-12", "(12.00)" (negative), "12.00 DR" (negative) or "12.00 CR"; throws when unreadable.
+     * A currency symbol or code around the number is ignored ("€12.50", "12.50 EUR", "A$5", "NZ$ 5", "USD -3"): codes only when
+     * they're real ISO 4217 ones, so DR and CR keep their meaning ("12.50 IDR" is rupiah, not a debit). The decimal rules are
+     * unchanged: a comma is always a thousands separator, so "€12,50" reads as 1,250.00 (a decimal comma is ambiguous: "1,250").
+     */
     public static long amount(String s){
-        String t=s.trim().toUpperCase(Locale.ROOT);boolean negative=false;
+        String t=s.trim().toUpperCase(Locale.ROOT).replaceAll("[\\s\\u00A0\\u2007\\u202F]+"," ");boolean negative=false;
+        Matcher code=CODE.matcher(t);StringBuffer kept=new StringBuffer();
+        while(code.find())code.appendReplacement(kept,Budget.knownCurrency(code.group())?"":Matcher.quoteReplacement(code.group()));
+        code.appendTail(kept);t=kept.toString().replaceAll("[A-Z]{0,2}\\p{Sc}","").trim(); // a symbol with its letters: $, €, A$, US$, NZ$, R$
         if(t.endsWith("DR")){negative=true;t=t.substring(0,t.length()-2).trim();}else if(t.endsWith("CR"))t=t.substring(0,t.length()-2).trim();
         if(t.startsWith("(")&&t.endsWith(")")){negative=!negative;t=t.substring(1,t.length()-1);}
-        t=t.replace("$","").replace(",","").replace(" ","").replace("AUD","");if(t.startsWith("+"))t=t.substring(1);
+        t=t.replace(",","").replace(" ","");if(t.startsWith("+"))t=t.substring(1);
         long v=new BigDecimal(t).movePointRight(2).longValueExact();if(Math.abs(v)>10_000_000_000L)throw new IllegalArgumentException("Over 100 million."); // as typed amounts (Budget.evaluate)
         return negative?-Math.abs(v):v;
     }
+    private static final Pattern CODE=Pattern.compile("(?<![A-Z])[A-Z]{3}(?![A-Z])"); // three letters on their own: a currency code when it's a known one
     public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),DateTimeFormatter.ofPattern(format,Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));}
     /** The first format that reads every non-empty value in [column] (after the header row when [header]), or null. */
     public static String detectDateFormat(List<List<String>> rows,int column,boolean header){

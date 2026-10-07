@@ -34,7 +34,7 @@ final class BudgetScreen extends Ui {
             try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The plan from before the reset can't be read. Nothing was changed.");return;}
             android.content.SharedPreferences.Editor edit=main.prefs().edit().remove("before_reset").remove("before_reset_at");
             if(previous==null)edit.remove("data");else edit.putString("data",before);
-            if(!edit.commit()){toast("Could not save to device storage.");return;}
+            if(!edit.commit()){toast("Could not save to device storage.");return;}BudgetWidget.refresh(main);
             if(previous==null){main.budget=new Budget();main.load();}else{main.budget=previous;main.loaded=before;}main.render();
             toast("Budget reset undone.");}).show();
     }

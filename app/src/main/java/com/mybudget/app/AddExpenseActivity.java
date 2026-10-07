@@ -37,7 +37,7 @@ public class AddExpenseActivity extends Activity {
     private void fail(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();finish();}
     private void done(String summary){setResult(RESULT_OK,new Intent().putExtra("summary",summary));finish();}
     private String sender(){ComponentName from=getCallingActivity();if(from==null)return "another app";try{return getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(from.getPackageName(),0)).toString();}catch(Exception e){return "another app";}}
-    private boolean save(){try{String raw=BudgetStore.encode(budget);return getSharedPreferences("budget",0).edit().putString("data",raw).commit();}catch(Exception e){return false;}}
+    private boolean save(){try{String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())return false;BudgetWidget.refresh(this);return true;}catch(Exception e){return false;}} // the widget shows the new money
     // The budget as saved now: MyBudget may have saved changes while this dialog was open, and saving the copy read at the start would drop them.
     private void reload(){String raw=getSharedPreferences("budget",0).getString("data",null);try{budget=raw==null?new Budget():BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("MyBudget couldn't read its saved budget. Open MyBudget to check it.");}}
     private TextView label(LinearLayout f,String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setPadding(0,dp(6),0,dp(2));f.addView(v);return v;}

@@ -186,7 +186,7 @@ final class SettingsScreen extends Ui {
                 // The budget being replaced is kept (empty: there was none) for Undo restore.
                 String current=main.prefs().getString("data",null);
                 try{String raw=BudgetStore.encode(b);
-                    if(!main.prefs().edit().putString("data",raw).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).remove("before_reset").remove("before_reset_at").commit())throw new IllegalStateException();main.loaded=raw;}
+                    if(!main.prefs().edit().putString("data",raw).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).remove("before_reset").remove("before_reset_at").commit())throw new IllegalStateException();main.loaded=raw;BudgetWidget.refresh(main);}
                 catch(Exception e){toast("Could not save the restored budget. Nothing was changed.");return;}
                 main.budget=b;for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();main.render();toast("Budget restored.");
             }).show();
@@ -200,7 +200,7 @@ final class SettingsScreen extends Ui {
                 try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The budget from before the restore can't be read. Nothing was changed.");return;}
                 android.content.SharedPreferences.Editor edit=main.prefs().edit().remove("before_restore").remove("before_restore_at").remove("before_reset").remove("before_reset_at");
                 if(previous==null)edit.remove("data");else edit.putString("data",before);
-                if(!edit.commit()){toast("Could not save to device storage.");return;}
+                if(!edit.commit()){toast("Could not save to device storage.");return;}BudgetWidget.refresh(main);
                 if(previous==null){main.budget=new Budget();main.load();}else{main.budget=previous;main.loaded=before;}
                 for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();main.render();toast("Restore undone.");
             }).show();

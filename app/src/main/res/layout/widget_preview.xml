@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget picker's preview (Android 12+): the widget with example amounts. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical"
+    android:background="@drawable/widget_background" android:paddingStart="14dp" android:paddingEnd="10dp" android:paddingTop="10dp" android:paddingBottom="8dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <ImageView android:layout_width="28dp" android:layout_height="28dp" android:layout_marginEnd="10dp" android:src="@drawable/brand_mark" android:importantForAccessibility="no"/>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="To budget" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/widget_muted"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="$250.00" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/widget_ink"/>
+        </LinearLayout>
+        <TextView android:layout_width="44dp" android:layout_height="44dp" android:gravity="center" android:text="+" android:textSize="26sp" android:textColor="#FFFFFF" android:background="@drawable/widget_add"/>
+    </LinearLayout>
+    <LinearLayout style="@style/WidgetRow" android:visibility="visible"><TextView style="@style/WidgetName" android:text="Groceries"/><TextView style="@style/WidgetAmount" android:text="$182.40" android:textColor="@color/widget_green"/></LinearLayout>
+    <LinearLayout style="@style/WidgetRow" android:visibility="visible"><TextView style="@style/WidgetName" android:text="Dining out"/><TextView style="@style/WidgetAmount" android:text="$45.00" android:textColor="@color/widget_green"/></LinearLayout>
+</LinearLayout>

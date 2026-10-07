@@ -1,5 +1,6 @@
 package com.mybudget.app;
 
+import android.app.AlertDialog;
 import android.widget.*;
 import java.time.*;
 import java.util.*;
@@ -11,6 +12,7 @@ final class HomeScreen extends Ui {
         main.budgetScreen.readyCard();main.content.addView(button("+ Add transaction",()->main.forms.transaction(null)));
         if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(label("Start with the money you have",21,main.ink,true));
             c.addView(label("Add your bank, savings or cash account and its current balance. Then assign that money in your plan.",15,main.muted,false));
+            if(main.budget.brandNew())c.addView(button("Set up my budget",this::setup)); // never for a budget in use
             c.addView(button("Add your first account",main.accountsScreen::addAccount));}
         // Needs attention: each alert opens where it's dealt with.
         main.content.addView(label("Needs attention",20,main.ink,true));int alerts=0;
@@ -46,6 +48,52 @@ final class HomeScreen extends Ui {
         main.content.addView(label("Priority categories",20,main.ink,true));List<Budget.Category> pinned=main.budget.pinned();
         for(Budget.Category c:pinned)main.budgetScreen.categoryCard(c);
         if(pinned.isEmpty())main.content.addView(label("Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.",14,main.muted,false));
+    }
+    // First-run setup, offered on the start card of a brand-new budget (Budget.brandNew): the currency, a first account, the
+    // starter categories, then what To budget is. Each step saves on Next (a change like any other) or can be skipped; Cancel
+    // or Back stops there and keeps what was saved. It removes nothing but starter categories never touched (Budget.removeStarter).
+    void setup(){
+        List<String> codes=Budget.currencyChoices();String[] names=new String[codes.size()];
+        for(int i=0;i<names.length;i++)names[i]=codes.get(i)+" · "+Currency.getInstance(codes.get(i)).getDisplayName(Locale.getDefault());
+        String suggested=main.budget.currency.equals(Budget.DEFAULT_CURRENCY)?Budget.suggestedCurrency(Locale.getDefault()):main.budget.currency;
+        LinearLayout f=form();f.addView(label("Which currency is your money in? Amounts are shown in it. You can change it later in Settings.",14,main.muted,false));
+        Spinner currency=spinner(f,"Currency",names,codes.indexOf(suggested));
+        step("Set up: 1 of 3",f,"Next",()->main.budget.currency=codes.get(currency.getSelectedItemPosition()),this::setupAccount);
+    }
+    private void setupAccount(){
+        LinearLayout f=form();f.addView(label("The account you spend from, with what's in it now. You can add more in Accounts.",14,main.muted,false));
+        Spinner type=spinner(f,"Type",new String[]{"Cash, checking or savings","Credit card"},0);EditText name=field(f,"Account name",false),balance=field(f,"Current balance ("+code()+")",true);
+        onPick(type,()->balance.setHint(type.getSelectedItemPosition()==1?"Amount owed now ("+code()+", 0 if paid off)":"Current balance ("+code()+")"));
+        step("Set up: 2 of 3",f,"Next",()->{String n=required(name);boolean card=type.getSelectedItemPosition()==1;
+            for(Budget.Account a:main.budget.accounts)if(a.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");
+            long amount=Budget.parse(balance.getText().toString().trim().isEmpty()?"0":balance.getText().toString());
+            if(amount<0)throw new IllegalArgumentException(card?"Enter what you owe as a positive amount.":"Use a nonnegative cash opening balance.");
+            if(card){for(Budget.Category c:main.budget.categories)if(c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("A category already has that name. Choose another name for the card.");
+                main.budget.addCard(n,LocalDate.now().toString(),amount);}
+            else main.budget.accounts.add(new Budget.Account(n,LocalDate.now().toString(),amount));},this::setupCategories);
+    }
+    private void setupCategories(){
+        LinearLayout f=form();f.addView(label("Starter categories to give your money jobs. Untick the groups you don't want; you can add, rename or hide categories any time in Budget.",14,main.muted,false));
+        List<String> groups=Budget.starterGroups();List<CheckBox> boxes=new ArrayList<>();
+        for(String g:groups){StringBuilder in=new StringBuilder();boolean have=false;
+            for(String[] s:Budget.STARTER)if(s[1].equals(g)){in.append(in.length()==0?"":", ").append(s[0]);for(Budget.Category c:main.budget.categories)have|=c.name.equals(s[0])&&c.group.equals(g);}
+            CheckBox box=new CheckBox(main);box.setText(g+": "+in);box.setTextColor(main.ink);box.setTextSize(15);box.setChecked(have);box.setMinHeight(dp(48));f.addView(box);boxes.add(box);}
+        f.addView(label("Categories you've already used stay either way.",12,main.muted,false));
+        step("Set up: 3 of 3",f,"Next",()->{List<String> keep=new ArrayList<>();for(int i=0;i<groups.size();i++)if(boxes.get(i).isChecked())keep.add(groups.get(i));
+            main.budget.removeStarter(keep);main.budget.addStarter(keep);},this::setupDone);
+    }
+    private void setupDone(){
+        new AlertDialog.Builder(main).setTitle("You're set up")
+            .setMessage("To budget is money that doesn't have a job yet: "+money(main.budget.spendable(main.month))+" now. In Budget, assign it to your categories until To budget is "+money(0)+", so all of it has a purpose.\n\nNew income goes into To budget, ready to assign.")
+            .setNegativeButton("Later",null).setPositiveButton("Assign money now",(d,w)->{main.tab="Plan";main.month=YearMonth.now();main.render();}).show();
+    }
+    /** A setup step: [next] saves [save] (through commit) and goes on to [then]; Skip goes on without saving; Cancel stops. */
+    private void step(String title,LinearLayout f,String next,Runnable save,Runnable then){
+        ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
+            .setNegativeButton("Cancel",null).setNeutralButton("Skip",null).setPositiveButton(next,null).create();
+        main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
+        d.setOnShowListener(v->{d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(save);main.render();}catch(Exception e){toast(e.getMessage());return;}d.dismiss();then.run();});
+            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(w->{d.dismiss();then.run();});});d.show();
     }
     /** A Home alert: a card with a coloured title and a line of detail; tapping it opens where it's dealt with. */
     private LinearLayout alert(String title,int color,String detail,Runnable open){LinearLayout c=card();c.addView(label(title,16,color,true));

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App shortcuts (long-press the MyBudget icon). Each opens MainActivity with the MainActivity.OPEN extra, as the widget does. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="add" android:enabled="true" android:icon="@drawable/shortcut_add"
+        android:shortcutShortLabel="@string/shortcut_add_short" android:shortcutLongLabel="@string/shortcut_add_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.mybudget.app" android:targetClass="com.mybudget.app.MainActivity">
+            <extra android:name="com.mybudget.app.open" android:value="add"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="budget" android:enabled="true" android:icon="@drawable/shortcut_budget"
+        android:shortcutShortLabel="@string/shortcut_budget_short" android:shortcutLongLabel="@string/shortcut_budget_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.mybudget.app" android:targetClass="com.mybudget.app.MainActivity">
+            <extra android:name="com.mybudget.app.open" android:value="budget"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="transactions" android:enabled="true" android:icon="@drawable/shortcut_transactions"
+        android:shortcutShortLabel="@string/shortcut_transactions_short" android:shortcutLongLabel="@string/shortcut_transactions_long">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="com.mybudget.app" android:targetClass="com.mybudget.app.MainActivity">
+            <extra android:name="com.mybudget.app.open" android:value="transactions"/>
+        </intent>
+    </shortcut>
+</shortcuts>

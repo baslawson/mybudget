@@ -1,0 +1,10 @@
+<resources>
+    <!-- The home-screen widget (picker) and the launcher's app shortcuts. -->
+    <string name="widget_description">To budget this month and your pinned categories, with + to add a transaction</string>
+    <string name="shortcut_add_short">Add transaction</string>
+    <string name="shortcut_add_long">Add a transaction</string>
+    <string name="shortcut_budget_short">Budget</string>
+    <string name="shortcut_budget_long">Open your budget</string>
+    <string name="shortcut_transactions_short">Transactions</string>
+    <string name="shortcut_transactions_long">Open transactions</string>
+</resources>

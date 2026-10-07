@@ -24,7 +24,7 @@ import java.util.*;
  */
 public class AutoBackup extends JobService {
     static final int JOB=1;
-    @Override public boolean onStartJob(JobParameters params){new Thread(()->{run(getApplicationContext(),false);jobFinished(params,false);}).start();return true;}
+    @Override public boolean onStartJob(JobParameters params){new Thread(()->{run(getApplicationContext(),false);jobFinished(params,false);}).start();BudgetWidget.refresh(this);return true;} // daily: a new month on the widget too
     @Override public boolean onStopJob(JobParameters params){return false;}
 
     static void schedule(Context context){

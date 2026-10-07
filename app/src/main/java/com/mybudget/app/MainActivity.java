@@ -59,10 +59,10 @@ public class MainActivity extends Activity {
             fromFilter=state.getString("fromFilter","");toFilter=state.getString("toFilter","");flagFilter=state.getInt("flagFilter",-1);
             clearedFilter=state.getInt("clearedFilter",-1);month=YearMonth.parse(state.getString("month",YearMonth.now().toString()));
             period=Math.max(0,Math.min(ReportsScreen.PERIODS.length-1,state.getInt("period",0)));byGroup=state.getBoolean("byGroup",false);
-            trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;
+            trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;reportYear=state.getInt("reportYear",0);
             String shot=state.getString("cameraFile",null);if(shot!=null)cameraFile=new File(PhotoProvider.dir(this),shot);} // so it's still deleted when the camera returns
         else{File[] left=PhotoProvider.dir(this).listFiles();if(left!=null)for(File f:left)f.delete();} // a fresh start: no capture is in progress
-        load();if(storageReadable){render();cleanupPhotos();}
+        load();if(storageReadable){render();cleanupPhotos();if(state==null)openFrom(getIntent());} // a recreated screen has opened it already
     }
     // The saved data as this screen last read or wrote it. AddExpenseActivity may save an expense from another app
     // meanwhile: when the saved data differs, it's read in (open forms close, as they show the old budget), so the next save keeps it.
@@ -83,14 +83,14 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();if(!storageReadable)return;
         if(pickingPhoto)pickingPhoto=false;else try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();
                 render();}}catch(IllegalStateException e){ui.toast(e.getMessage());}
-        AutoBackup.schedule(this);
+        AutoBackup.schedule(this);BudgetWidget.refresh(this); // the widget may show last month after midnight on the 1st
         if(prefs().getString("auto_backup_tree",null)!=null){boolean asked=backupDue(); // Home's backup reminder goes once this succeeds
             new Thread(()->{AutoBackup.run(getApplicationContext(),false);runOnUiThread(()->{if(asked&&!backupDue()&&tab.equals("Home")&&!isFinishing())render();});}).start();}}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);
         state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("categoryFilter",categoryFilter);
         state.putString("fromFilter",fromFilter);state.putString("toFilter",toFilter);state.putInt("flagFilter",flagFilter);
         state.putInt("clearedFilter",clearedFilter);state.putString("month",month.toString());state.putInt("period",period);
-        state.putBoolean("byGroup",byGroup);state.putString("trendKey",trendKey);state.putInt("trendMonths",trendMonths);
+        state.putBoolean("byGroup",byGroup);state.putString("trendKey",trendKey);state.putInt("trendMonths",trendMonths);state.putInt("reportYear",reportYear);
         if(cameraFile!=null)state.putString("cameraFile",cameraFile.getName());
         super.onSaveInstanceState(state);}
     private void options(View anchor){
@@ -99,10 +99,20 @@ public class MainActivity extends Activity {
         menu.setOnMenuItemClickListener(item->{String t=item.getTitle().toString();
             if(t.equals("Budget reset"))budgetScreen.planReset();
             else if(t.endsWith("amounts")){if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){ui.toast("Could not save that setting.");
-                    return true;}hideAmounts=!hideAmounts;render();}
+                    return true;}hideAmounts=!hideAmounts;render();BudgetWidget.refresh(this);}
             else openSettings();return true;});menu.show();
     }
     void openSettings(){if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}
+    // The widget and the app shortcuts open a screen with the OPEN extra: the Add transaction form, Budget, Transactions or
+    // Home, this month. Without an account yet it's Home, where the start card is. Any app can send it (this is the launcher's
+    // activity), but it only opens a screen or an empty form: nothing is saved without the user's tap.
+    static final String OPEN="com.mybudget.app.open",OPEN_ADD="add",OPEN_HOME="home";
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openFrom(intent);}
+    void openFrom(Intent intent){String what=intent==null?null:intent.getStringExtra(OPEN);if(what==null||!storageReadable)return;intent.removeExtra(OPEN);
+        try{if(reloadIfChanged())for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}catch(IllegalStateException e){ui.toast(e.getMessage());} // before onResume would, so the form stays
+        boolean ready=!budget.accounts.isEmpty();month=YearMonth.now();
+        tab=!ready?"Home":what.equals("budget")?"Plan":what.equals("transactions")?"Spending":"Home";if(tab.equals("Spending"))clearFilters();
+        render();if(ready&&what.equals(OPEN_ADD))forms.transaction(null);}
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
@@ -241,6 +251,7 @@ public class MainActivity extends Activity {
     void clearFilters(){search="";accountFilter="";categoryFilter="";fromFilter="";toFilter="";flagFilter=-1;clearedFilter=-1;}
     // Reports: spending breakdown (period, by category or group), spending trends, the income and expense table. Periods count back from the month on screen.
     int period,trendMonths=6;boolean byGroup;String trendKey="";
+    int reportYear; // the yearly report's year; 0: this year
     void commit(Runnable action){
         if(!storageReadable)throw new IllegalStateException("Saved data could not be read.");
         // Saved meanwhile (split screen: an expense from Planner): open forms hold the old budget, so they close and nothing
@@ -250,7 +261,7 @@ public class MainActivity extends Activity {
         Budget before;try{before=BudgetStore.decode(BudgetStore.encode(budget));
             before.fromPlanner.addAll(budget.fromPlanner);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}
         try{action.run();String raw=BudgetStore.encode(budget);
-            if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");loaded=raw;}
+            if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");loaded=raw;BudgetWidget.refresh(this);}
         catch(Exception e){budget=before;throw new IllegalArgumentException(e.getMessage()==null?"Check your entry.":e.getMessage());}
         undoBefore=null; // another change: a delete's Undo is gone
     }
@@ -294,11 +305,10 @@ public class MainActivity extends Activity {
         for(Budget.Category c:budget.categories)if((!c.hidden&&!c.payment())||c==keep)list.add(c);return list;}
     void load(){
         String raw=getSharedPreferences("budget",0).getString("data",null);loaded=raw;
-        if(raw==null){for(String[] item:new String[][]{{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}}){Budget.Category c=new Budget.Category(item[0]);
-                c.group=item[1];budget.categories.add(c);}return;}
+        if(raw==null){budget.addStarter(Budget.starterGroups());return;} // the starter categories (Budget.STARTER), saved with the first change
         try{budget=BudgetStore.decode(raw);if(!raw.contains("\"version\"")){String updated=BudgetStore.encode(budget);
                 if(!getSharedPreferences("budget",0).edit().putString("legacy_backup",raw).putString("data",updated).commit())throw new IllegalStateException("Migration could not be saved.");
-                loaded=updated;ui.toast("Budget upgraded. Existing balances preserved; monthly assignments begin this month.");}}
+                loaded=updated;BudgetWidget.refresh(this);ui.toast("Budget upgraded. Existing balances preserved; monthly assignments begin this month.");}}
         catch(Exception e){storageReadable=false;new AlertDialog.Builder(this).setTitle("Unable to load budget")
                 .setMessage("Your saved data has been preserved. Close the app to avoid changes.").setPositiveButton("Close",(d,w)->finish())
                 .setCancelable(false).show();}

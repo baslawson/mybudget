@@ -1,3 +1,10 @@
 <resources>
     <color name="brand_primary">#394DA5</color>
+    <!-- The home-screen widget, light (values-night: dark), in the app's colours: indigo, with mint green for money available. -->
+    <color name="widget_surface">#FFFFFF</color>
+    <color name="widget_ink">#1B273E</color>
+    <color name="widget_muted">#6F798C</color>
+    <color name="widget_primary">#394DA5</color>
+    <color name="widget_green">#207355</color>
+    <color name="widget_red">#B23337</color>
 </resources>

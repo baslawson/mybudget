@@ -1,0 +1,9 @@
+<resources>
+    <!-- The home-screen widget in the phone's dark theme. -->
+    <color name="widget_surface">#202635</color>
+    <color name="widget_ink">#EDF1FA</color>
+    <color name="widget_muted">#ABB5C9</color>
+    <color name="widget_primary">#41509F</color>
+    <color name="widget_green">#75DBB1</color>
+    <color name="widget_red">#FF8E96</color>
+</resources>

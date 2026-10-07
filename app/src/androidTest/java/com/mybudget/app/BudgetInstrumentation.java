@@ -30,6 +30,7 @@ public class BudgetInstrumentation extends Instrumentation {
         sentPayments(day);
         currencies(migrated,day);
         dataSafety((MainActivity)activity,day);
+        widgetAndOpen((MainActivity)activity,day);
         backups(migrated);
         // Hidden categories and closed accounts are saved; budgets saved before them read as visible and open.
         Budget flags=BudgetStore.decode(BudgetStore.encode(migrated));flags.categories.get(1).hidden=true;flags.accounts.get(1).closed=true;
@@ -94,7 +95,7 @@ public class BudgetInstrumentation extends Instrumentation {
         finally{if(keptAt==null)bp.edit().remove("planner_bills_at").commit();else bp.edit().putString("planner_bills_at",keptAt).commit();}
         boolean badList=false;try{PlannerBills.clean("{not a list");}catch(JSONException expected){badList=true;}if(!badList)throw new AssertionError("Bad list accepted");
         boolean newer=false;try{BudgetStore.decode(v4.put("version",7).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 7 accepted");
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 7 is refused, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile, and the budget currency round-trips (backups too), older data reads as AUD, and Planner payments and bills in another currency are left out.\n");finish(Activity.RESULT_OK,result);
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 7 is refused, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile, and the budget currency round-trips (backups too), older data reads as AUD, and Planner payments and bills in another currency are left out, the home-screen widget draws for no budget, a budget, Hide amounts and unreadable data, the widget and shortcuts open the Add transaction form, Budget and Transactions (Home without an account), and the first-run setup is offered only for a brand-new budget.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
     // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
     private void backups(Budget b)throws Exception{
@@ -195,6 +196,51 @@ public class BudgetInstrumentation extends Instrumentation {
             for(String[] k:keys)if(k[1]==null)restore.remove(k[0]);else restore.putString(k[0],k[1]);restore.commit();
         }
     }
+    // The home-screen widget, built and drawn (RemoteViews.apply) for no budget, a budget, Hide amounts, few rows and unreadable
+    // data; the OPEN extra (widget "+" and app shortcuts) on the running Activity; the first-run setup only for a brand-new budget.
+    private void widgetAndOpen(MainActivity main,String day)throws Exception{
+        android.content.Context c=getTargetContext();android.content.SharedPreferences prefs=c.getSharedPreferences("budget",0);String saved=prefs.getString("data",null);View screen=main.getWindow().getDecorView();
+        java.text.NumberFormat f=Budget.moneyFormat("AUD",java.util.Locale.getDefault());
+        try{
+            YearMonth now=YearMonth.now();Budget b=new Budget();Budget.Account bank=new Budget.Account("Everyday",now.atDay(1).toString(),100000);b.accounts.add(bank);
+            Budget.Category food=new Budget.Category("Groceries"),fun=new Budget.Category("Fun"),rent=new Budget.Category("Rent");b.categories.add(food);b.categories.add(fun);b.categories.add(rent);
+            b.assign(food,now,30000);b.pin(food,true);b.pin(fun,true);b.entries.add(new Budget.Entry("Shop",fun.id,bank.id,now.atDay(1).toString(),-2500)); // Fun overspent
+            String raw=BudgetStore.encode(b);
+            String shown=widget(c,raw,false,5);
+            for(String want:new String[]{"Groceries","Fun",Budget.money(70000,f),Budget.money(30000,f),Budget.money(-2500,f)})if(!shown.contains(want))throw new AssertionError("Widget lacks "+want+": "+shown);
+            if(shown.contains("Rent")||shown.contains("Pin categories"))throw new AssertionError("Widget shows an unpinned category or the pin hint: "+shown);
+            String hidden=widget(c,raw,true,5);if(!hidden.contains("•••")||hidden.contains(Budget.money(70000,f))||hidden.contains(Budget.money(30000,f))||!hidden.contains("Groceries"))throw new AssertionError("Hide amounts on the widget: "+hidden);
+            String one=widget(c,raw,false,1);if(!one.contains("Groceries")||one.contains("Fun"))throw new AssertionError("One row: "+one);
+            String empty=widget(c,null,false,5);if(!empty.contains(Budget.money(0,f))||!empty.contains("Pin categories"))throw new AssertionError("No budget yet: "+empty);
+            String broken=widget(c,"{broken",false,5);if(!broken.contains("Open MyBudget")||broken.contains("Pin categories"))throw new AssertionError("Unreadable data: "+broken);
+            BudgetWidget.refresh(c); // no widget on the home screen: nothing to do, and no crash
+            // The OPEN extra: with an account, the Add transaction form opens on Home; Budget and Transactions open their tabs.
+            if(!prefs.edit().putString("data",raw).commit())throw new AssertionError("Seed not saved");
+            runOnMainSync(()->{main.month=now.minusMonths(2);main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,MainActivity.OPEN_ADD));
+                if(!main.tab.equals("Home")||!main.month.equals(now)||main.editors.size()!=1||find(main.editors.get(0).getWindow().getDecorView(),"Add transaction",false)==null)throw new AssertionError("+ didn't open the form");
+                for(android.app.AlertDialog d:new java.util.ArrayList<>(main.editors))d.dismiss();});
+            waitForIdleSync();if(!main.editors.isEmpty())throw new AssertionError("Form not closed");
+            runOnMainSync(()->{main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,"budget"));if(!main.tab.equals("Plan")||!main.editors.isEmpty())throw new AssertionError("Budget shortcut");
+                main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,"transactions"));if(!main.tab.equals("Spending"))throw new AssertionError("Transactions shortcut");
+                main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,"nonsense"));if(!main.tab.equals("Home")||!main.editors.isEmpty())throw new AssertionError("Unknown: Home");
+                main.tab="Home";main.render();if(find(screen,"Set up my budget",true)!=null)throw new AssertionError("Setup offered for a budget in use");});
+            // No account yet: "+" stays on Home with the start card; a brand-new budget is offered the setup, one with money assigned isn't.
+            Budget fresh=new Budget();fresh.addStarter(Budget.starterGroups());if(!prefs.edit().putString("data",BudgetStore.encode(fresh)).commit())throw new AssertionError("Seed not saved");
+            runOnMainSync(()->{main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,MainActivity.OPEN_ADD));
+                if(!main.tab.equals("Home")||!main.editors.isEmpty()||find(screen,"Set up my budget",true)==null||find(screen,"Add your first account",true)==null)throw new AssertionError("No account: Home's start card with the setup");});
+            fresh.categories.get(0).assigned.put(YearMonth.now().toString(),100L);if(!prefs.edit().putString("data",BudgetStore.encode(fresh)).commit())throw new AssertionError("Seed not saved");
+            runOnMainSync(()->{main.onNewIntent(new Intent(c,MainActivity.class).putExtra(MainActivity.OPEN,MainActivity.OPEN_HOME));
+                if(find(screen,"Set up my budget",true)!=null||find(screen,"Add your first account",true)==null)throw new AssertionError("Setup offered for a budget with money assigned");});
+        }finally{
+            android.content.SharedPreferences.Editor restore=prefs.edit();if(saved==null)restore.remove("data");else restore.putString("data",saved);restore.commit();
+            runOnMainSync(()->{for(android.app.AlertDialog d:new java.util.ArrayList<>(main.editors))d.dismiss();main.budget=new Budget();main.load();main.tab="Home";main.render();});
+        }
+    }
+    /** The widget for [raw], drawn as the launcher would: the text of every view it shows, joined by "|". */
+    private String widget(android.content.Context c,String raw,boolean hide,int rows){StringBuilder out=new StringBuilder();
+        runOnMainSync(()->{View v=BudgetWidget.views(c,raw,hide,rows).apply(c,new android.widget.FrameLayout(c));texts(v,out);});return out.toString();}
+    private void texts(View v,StringBuilder out){if(v.getVisibility()!=View.VISIBLE)return;if(v instanceof TextView)out.append(((TextView)v).getText()).append("|");
+        if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)texts(((ViewGroup)v).getChildAt(i),out);}
     private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
     // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.
     private void sentPayments(String day)throws Exception{

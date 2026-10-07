@@ -22,7 +22,7 @@ final class ReportsScreen extends Ui {
         breakdownCard();trendsCard(); // card payments, transfers and tracking accounts aren't spending
         // Income vs spending, six months to this one: one axis from zero; the list below is the table view.
         LinearLayout flow=card();flow.addView(label("Income and spending",20,main.ink,true));
-        int income=main.darkTheme?Color.parseColor("#3987E5"):Color.parseColor("#2A78D6"),spend=main.darkTheme?Color.parseColor("#D95926"):Color.parseColor("#EB6834");
+        int income=incomeColor(),spend=spendColor();
         LinearLayout legend=new LinearLayout(main);legend.setGravity(Gravity.CENTER_VERTICAL);
         for(int k=0;k<2;k++){View swatch=new View(main);GradientDrawable s=new GradientDrawable();s.setColor(k==0?income:spend);
             s.setCornerRadius(dp(2));swatch.setBackground(s);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(10),dp(10));
@@ -36,7 +36,7 @@ final class ReportsScreen extends Ui {
         CashFlowChart chart=new CashFlowChart(main,in,out,names,income,spend,main.muted,main.muted,main.buttonSurface,5,show);
         chart.setContentDescription("Income and spending chart for the last six months. The list below has the amounts.");
         flow.addView(chart,new LinearLayout.LayoutParams(-1,-2));
-        incomeExpenseTable();
+        incomeExpenseTable();yearCard();
         // Net worth and Money age.
         LinearLayout worth=card();long now=main.budget.netWorth(main.month),change=now-main.budget.netWorth(main.month.minusMonths(1));
         worth.addView(label("Net worth",20,main.ink,true));worth.addView(label(money(now),26,main.ink,true));
@@ -48,6 +48,46 @@ final class ReportsScreen extends Ui {
         main.content.addView(label("Last six months",20,main.ink,true));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
             main.content.addView(label(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In "+money(main.budget.income(m))+"   Out "+money(main.budget.spending(m)),13,main.muted,false));}
         main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
+    }
+    private int incomeColor(){return main.darkTheme?Color.parseColor("#3987E5"):Color.parseColor("#2A78D6");}
+    private int spendColor(){return main.darkTheme?Color.parseColor("#D95926"):Color.parseColor("#EB6834");}
+    /** The yearly report (Budget.year): pick a year with transactions; income, spending and net, each month, the top 10 categories and every group. */
+    private void yearCard(){LinearLayout card=card();card.addView(label("Yearly report",20,main.ink,true));LinearLayout body=column();card.addView(body);fillYear(body);}
+    private void fillYear(LinearLayout body){
+        body.removeAllViews();int now=LocalDate.now().getYear();int[] range=main.budget.years(now);
+        int year=main.reportYear==0?now:Math.max(range[0],Math.min(range[1],main.reportYear));
+        LinearLayout pick=new LinearLayout(main);pick.setGravity(Gravity.CENTER_VERTICAL);
+        Button back=button("‹",()->{main.reportYear=year-1;fillYear(body);}),next=button("›",()->{main.reportYear=year+1;fillYear(body);});
+        for(Button b:new Button[]{back,next}){b.setTextSize(26);b.setBackground(bg(Color.TRANSPARENT));}
+        back.setContentDescription("Previous year");next.setContentDescription("Next year");back.setEnabled(year>range[0]);next.setEnabled(year<range[1]);
+        back.setAlpha(back.isEnabled()?1f:0.3f);next.setAlpha(next.isEnabled()?1f:0.3f); // only years with transactions
+        TextView title=label(String.valueOf(year),18,main.ink,true);title.setGravity(Gravity.CENTER);
+        pick.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));pick.addView(title,new LinearLayout.LayoutParams(0,-2,1));pick.addView(next,new LinearLayout.LayoutParams(dp(48),dp(48)));body.addView(pick);
+        Budget.Year y=main.budget.year(year);
+        body.addView(label("Income "+money(y.income()),17,main.green,true));body.addView(label("Spending "+money(y.spending()),17,main.ink,true));
+        body.addView(label("Net (income − spending) "+money(y.net()),15,main.blue,true));
+        if(y.income()==0&&y.spending()==0&&y.top.isEmpty()){body.addView(label("No income or spending in "+year+".",14,main.muted,false));return;}
+        // Month by month: the chart (tap a month for its amounts) and the same as a list.
+        String[] names=new String[12];YearMonth[] ms=new YearMonth[12];for(int i=0;i<12;i++){ms[i]=YearMonth.of(year,i+1);names[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMMM"));}
+        TextView picked=label("",13,main.ink,true);body.addView(picked);
+        java.util.function.IntConsumer show=i->picked.setText(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in "+money(y.income[i])+"  ·  out "+money(y.spending[i]));
+        int selected=year==now?LocalDate.now().getMonthValue()-1:11;show.accept(selected);
+        CashFlowChart chart=new CashFlowChart(main,y.income,y.spending,names,incomeColor(),spendColor(),main.muted,main.muted,main.buttonSurface,selected,show);
+        chart.setContentDescription("Income and spending for each month of "+year+". The list below has the amounts.");body.addView(chart,new LinearLayout.LayoutParams(-1,-2));
+        for(int i=0;i<12;i++)body.addView(label(ms[i].format(DateTimeFormatter.ofPattern("MMM"))+"   In "+money(y.income[i])+"   Out "+money(y.spending[i]),13,main.muted,false));
+        // The biggest categories and every group, with their share of the year's spending (as the spending breakdown); tap for transactions.
+        YearMonth[] r={YearMonth.of(year,1),YearMonth.of(year,12)};
+        body.addView(label("Top "+Budget.TOP+" categories",16,main.ink,true));yearRows(body,y.top,r);
+        body.addView(label("By group",16,main.ink,true));yearRows(body,y.groups,r);
+        if(y.refunds>0)body.addView(label("Refunds beyond spending (categories that got more back than they spent): "+money(y.refunds)+", taken off the year's spending.",12,main.muted,false));
+    }
+    private void yearRows(LinearLayout body,List<Budget.Slice> slices,YearMonth[] r){
+        if(slices.isEmpty()){body.addView(label("No spending this year.",14,main.muted,false));return;}
+        for(Budget.Slice s:slices){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(44));
+            row.addView(label(s.name,14,main.ink,false),new LinearLayout.LayoutParams(0,-2,1));
+            TextView amount=label(money(s.amount)+"  ·  "+percent(s.tenths),14,main.ink,true);amount.setGravity(Gravity.END);row.addView(amount);
+            row.setContentDescription(s.name+", "+money(s.amount)+", "+percent(s.tenths)+". Double tap for its transactions.");
+            row.setOnClickListener(v->sliceTransactions(s,r));body.addView(row);}
     }
     static final String[] PERIODS={"This month","Last month","Last 3 months","This year"};
     // Categorical colours in fixed order (the validated chart palette, light and dark steps); Other is grey.

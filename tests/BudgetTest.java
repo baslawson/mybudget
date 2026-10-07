@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format).");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency).");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -673,5 +673,63 @@ public class BudgetTest {
         same(Budget.money(123456,Budget.moneyFormat("EUR",java.util.Locale.GERMANY)).replace(' ',' '),"1.234,56 €","EUR in Germany");
         String yen=Budget.money(100000,Budget.moneyFormat("JPY",au));if(!yen.endsWith("1,000.00")||yen.contains("$"))throw new AssertionError("JPY keeps two decimals: "+yen);
         same(Budget.money(500,Budget.moneyFormat("nonsense",au)),"$5.00","An unknown code shows as AUD");
+    }
+    // Yearly report: the calendar year's income, net spending (as the spending breakdown counts it), top 10 and groups.
+    static void yearly(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2024-12-01",1000000),save=new Budget.Account("Save","2024-12-01",0);b.accounts.add(bank);b.accounts.add(save);
+        Budget.Account visa=b.addCard("Visa","2024-12-01",0),shares=b.addTracking("Shares","2024-12-01",0,false);
+        Budget.Category rent=new Budget.Category("Rent"),food=new Budget.Category("Food"),fun=new Budget.Category("Fun"),gift=new Budget.Category("Gift");rent.group="Bills";gift.group="Gifts";
+        for(Budget.Category c:new Budget.Category[]{rent,food,fun,gift})b.categories.add(c);Budget.Category[] x=new Budget.Category[10];
+        for(int i=0;i<10;i++){x[i]=new Budget.Category("X"+i);x[i].group="Extras";b.categories.add(x[i]);b.entries.add(new Budget.Entry("Shop",x[i].id,bank.id,"2025-07-0"+(1+i%9),-1000L*(i+1)));}
+        b.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2024-12-15",-5000)); // last year
+        b.entries.add(new Budget.Entry("Employer","",bank.id,"2025-01-05",300000));b.entries.add(new Budget.Entry("Landlord",rent.id,bank.id,"2025-01-10",-100000));
+        b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-01-12",-20000)); // on the card: spending
+        b.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2025-02-03",2000)); // a refund
+        b.entries.add(transfer(bank,save,"2025-03-01",-50000));b.entries.add(transfer(bank,visa,"2025-03-02",-20000)); // a transfer and a card payment: not spending
+        Budget.Entry invest=transfer(bank,shares,"2025-04-01",-10000);invest.category=fun.id;b.entries.add(invest); // out to a tracking account: spending
+        b.entries.add(b.valueUpdate(shares,90000,"2025-05-01")); // a tracking account's own change: not spending or income
+        b.entries.add(new Budget.Entry("Store",gift.id,bank.id,"2025-06-01",3000)); // refunds only: left out, comes off the total
+        b.entries.add(new Budget.Entry("Landlord",rent.id,bank.id,"2025-12-31",-100000));b.entries.add(new Budget.Entry("Landlord",rent.id,bank.id,"2026-01-01",-1)); // next year
+        Budget.Year y=b.year(2025);
+        same(java.util.Arrays.toString(y.spending),"[120000, -2000, 0, 10000, 0, -3000, 55000, 0, 0, 0, 0, 100000]","Spending per month, net of refunds");
+        for(int i=0;i<12;i++)equal(y.spending[i],b.spending(YearMonth.of(2025,i+1)),"Each month as the cash flow chart counts it");
+        equal(y.spending(),280000,"The year's net spending");equal(y.income(),300000,"Income: money into To budget");equal(y.net(),20000,"Net: income less spending");equal(y.income[0],300000,"January's income");
+        StringBuilder top=new StringBuilder();int tenths=0;for(Budget.Slice s:y.top){top.append(s.name).append(s.other?"*":"").append(" ").append(s.amount).append(",");tenths+=s.tenths;}
+        same(top.toString(),"Rent 200000,Food 18000,Fun 10000,X9 10000,X8 9000,X7 8000,X6 7000,X5 6000,X4 5000,X3 4000,Other* 6000,","Top 10 (the rest in Other), net, a refund-only category left out");
+        equal(tenths,1000,"Shares add up to 100.0%");equal(y.top.get(0).tenths,707,"Rent's share: 70.7%");equal(Budget.total(y.top)-y.refunds,y.spending(),"Top 10 and Other less refunds: the year's spending");equal(y.refunds,3000,"Refunds beyond spending");
+        StringBuilder groups=new StringBuilder();for(Budget.Slice s:y.groups)groups.append(s.name).append(" ").append(s.amount).append(" ").append(s.tenths).append(",");
+        same(groups.toString(),"Bills 200000 707,Extras 55000 194,Everyday 28000 99,","Every group, biggest first, shares adding to 100%");
+        Budget.Year empty=b.year(2023);equal(empty.spending()+empty.income(),0,"A year with nothing");equal(empty.top.size()+empty.groups.size(),0,"No slices");
+        same(java.util.Arrays.toString(b.years(2025)),"[2024, 2026]","Years with transactions");same(java.util.Arrays.toString(b.years(2027)),"[2024, 2027]","This year in any case");
+        same(java.util.Arrays.toString(new Budget().years(2026)),"[2026, 2026]","Nothing yet: this year");
+    }
+    // CSV amounts: any currency symbol or ISO code around the number; the day/month, decimal and DR/CR rules as before.
+    static void csvCurrencies(){
+        String[][] ok={{"€12.50","1250"},{"12.50 EUR","1250"},{"-£3.20","-320"},{"A$1,234.56","123456"},{"NZ$ 5","500"},{"US$-7.25","-725"},{"USD -3","-300"},{"¥1,000","100000"},
+            {"12.50 IDR","1250"},{"12.50 DR","-1250"},{"12.50 CR","1250"},{"AUD 12.50 DR","-1250"},{"(€12.50)","-1250"},{"₹1,23,456.78","12345678"},{"1 234.56 €","123456"},{"CHF 99","9900"},
+            {"$1,200.00","120000"},{"aud 4.05","405"},{"+R$ 10","1000"},{"€12,50","125000"}}; // the last: a comma is a thousands separator, as before
+        for(String[] c:ok)equal(CsvImport.amount(c[0]),Long.parseLong(c[1]),"Amount "+c[0]);
+        for(String bad:new String[]{"12.50 ABC","EUR","€","7 Oct 2026","1.234,56 €","12.5.0","DR"})rejectsAny(()->CsvImport.amount(bad));
+        if(CsvImport.looksLikeHeader(java.util.Arrays.asList("7/10/2026","Shop","€12.50"))||!CsvImport.looksLikeHeader(java.util.Arrays.asList("Date","Payee","Amount (EUR)")))throw new AssertionError("Header detection with currencies");
+    }
+    // First-run setup: the starter categories (added once, unticked groups removed only while untouched), what counts as brand new, the suggested currency.
+    static void firstRun(){
+        Budget b=new Budget();equal(b.addStarter(Budget.starterGroups()),8,"Starter categories");equal(b.addStarter(Budget.starterGroups()),0,"Not added twice");
+        same(String.join(",",Budget.starterGroups()),"Bills,Everyday,True expenses,Savings","Starter groups in order");
+        if(!b.brandNew())throw new AssertionError("A new budget is brand new");
+        equal(b.removeStarter(java.util.Arrays.asList("Everyday")),5,"Unticked groups' categories go");equal(b.categories.size(),3,"Everyday stays");equal(b.addStarter(java.util.Arrays.asList("Savings")),1,"A group ticked again comes back");
+        Budget used=new Budget();used.addStarter(Budget.starterGroups());java.util.Map<String,Budget.Category> by=new java.util.HashMap<>();for(Budget.Category c:used.categories)by.put(c.name,c);
+        by.get("Rent").target=50000;by.get("Utilities").note="Power and water";by.get("Car repairs").pinned=true;used.billCategories.put("planner-series-i",by.get("Annual insurance").id);
+        by.get("Emergency fund").assigned.put("2025-01",100L);used.rules.add(new Budget.Rule("UBER","",by.get("Transport").id));
+        if(used.brandNew())throw new AssertionError("Money assigned: not brand new");
+        equal(used.removeStarter(java.util.Collections.emptyList()),2,"Only untouched starter categories go");
+        StringBuilder left=new StringBuilder();for(Budget.Category c:used.categories)left.append(c.name).append(",");
+        same(left.toString(),"Rent,Utilities,Transport,Annual insurance,Car repairs,Emergency fund,","Used, targeted, noted, pinned, ruled or linked ones stay");
+        Budget withAccount=new Budget();withAccount.accounts.add(new Budget.Account("Bank","2025-01-01",0));if(withAccount.brandNew())throw new AssertionError("An account: not brand new");
+        Budget withUpcoming=new Budget();withUpcoming.scheduled.add(new Budget.Scheduled("Rent","","a","2030-01-01",-100,"Never"));if(withUpcoming.brandNew())throw new AssertionError("Upcoming: not brand new");
+        Budget renamed=new Budget();Budget.Category mine=new Budget.Category("groceries");renamed.categories.add(mine);equal(renamed.addStarter(java.util.Arrays.asList("Everyday")),2,"A starter name already there isn't added again");
+        same(Budget.suggestedCurrency(java.util.Locale.US),"USD","US");same(Budget.suggestedCurrency(java.util.Locale.forLanguageTag("en-NZ")),"NZD","New Zealand");
+        same(Budget.suggestedCurrency(java.util.Locale.GERMANY),"EUR","Germany");same(Budget.suggestedCurrency(java.util.Locale.forLanguageTag("hi-IN")),"AUD","Not a common currency: AUD");
+        same(Budget.suggestedCurrency(java.util.Locale.ENGLISH),"AUD","No country: AUD");
     }
 }

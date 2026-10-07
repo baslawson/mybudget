@@ -358,11 +358,13 @@ public final class Budget {
      * left out of both views (see refunds), so they add up to the same total.
      * Beyond the biggest SLICES, the rest fold into Other (last). Shares add up to exactly 100.0% (largest remainder).
      */
-    public List<Slice> breakdown(YearMonth from,YearMonth to,boolean byGroup){
+    public List<Slice> breakdown(YearMonth from,YearMonth to,boolean byGroup){return breakdown(from,to,byGroup,SLICES);}
+    /** The breakdown with the biggest [limit] kept apart (the rest into Other). */
+    public List<Slice> breakdown(YearMonth from,YearMonth to,boolean byGroup,int limit){
         Map<String,Long> spent=spentBy(from,to);LinkedHashMap<String,Slice> map=new LinkedHashMap<>();
         for(Category c:categories){long n=spent.getOrDefault(c.id,0L);if(n<=0)continue;String key=byGroup?c.group.trim().toLowerCase(Locale.ROOT):c.id;Slice s=map.get(key);if(s==null)map.put(key,s=new Slice(byGroup?c.group.trim():c.name,false));s.ids.add(c.id);s.amount+=n;}
         List<Slice> list=new ArrayList<>(map.values());list.removeIf(s->s.amount<=0);list.sort((a,b)->Long.compare(b.amount,a.amount));
-        if(list.size()>SLICES){Slice other=new Slice("Other",true);for(Slice s:list.subList(SLICES,list.size())){other.ids.addAll(s.ids);other.amount+=s.amount;}list=new ArrayList<>(list.subList(0,SLICES));list.add(other);}
+        if(list.size()>limit){Slice other=new Slice("Other",true);for(Slice s:list.subList(limit,list.size())){other.ids.addAll(s.ids);other.amount+=s.amount;}list=new ArrayList<>(list.subList(0,limit));list.add(other);}
         long total=0;for(Slice s:list)total+=s.amount;if(total<=0)return list;int given=0;long[] left=new long[list.size()];
         for(int i=0;i<list.size();i++){Slice s=list.get(i);s.tenths=(int)(s.amount*1000/total);left[i]=s.amount*1000%total;given+=s.tenths;}
         while(given<1000){int best=0;for(int i=1;i<left.length;i++)if(left[i]>left[best])best=i;list.get(best).tenths++;left[best]=-1;given++;}
@@ -378,6 +380,21 @@ public final class Budget {
     public long[] trend(Collection<String> ids,YearMonth last,int months){long[] r=new long[months];for(int i=0;i<months;i++){YearMonth m=last.minusMonths(months-1-i);Map<String,Long> s=spentBy(m,m);long n=0;for(String id:ids)n+=s.getOrDefault(id,0L);r[i]=Math.max(0,n);}return r;}
     /** The average of [values], to the cent, half up. */
     public static long average(long[] values){if(values.length==0)return 0;long n=0;for(long v:values)n+=v;return BigDecimal.valueOf(n).divide(BigDecimal.valueOf(values.length),0,java.math.RoundingMode.HALF_UP).longValueExact();}
+    // Yearly report (Reports): a calendar year's income, spending and net, month by month, its biggest categories and every
+    // group's total. Spending is the spending breakdown's: budget accounts only, net of refunds; transfers, card payments and
+    // tracking accounts aren't spending. Income is money into To budget, as in the cash flow chart.
+    public static final int TOP=10;
+    public static final class Year { public final int year;public final long[] income=new long[12],spending=new long[12];public List<Slice> top,groups;public long refunds;
+        Year(int year){this.year=year;}
+        public long income(){long n=0;for(long v:income)n+=v;return n;} public long spending(){long n=0;for(long v:spending)n+=v;return n;} public long net(){return income()-spending();} }
+    /** [year]'s report: each month's income and net spending, the TOP categories by spending (the rest in Other) and each group, with shares of what they spent. */
+    public Year year(int year){
+        Year r=new Year(year);YearMonth from=YearMonth.of(year,1),to=YearMonth.of(year,12);
+        for(int i=0;i<12;i++){YearMonth m=from.plusMonths(i);r.income[i]=income(m);long n=0;for(long v:spentBy(m,m).values())n+=v;r.spending[i]=n;}
+        r.top=breakdown(from,to,false,TOP);r.groups=breakdown(from,to,true,Integer.MAX_VALUE);r.refunds=refunds(from,to);return r;
+    }
+    /** The years the yearly report can show: from the first transaction's year to the last one's, and [current] in any case. */
+    public int[] years(int current){int first=current,last=current;for(Entry e:entries){int y=Integer.parseInt(e.date.substring(0,4));first=Math.min(first,y);last=Math.max(last,y);}return new int[]{first,last};}
     /** A row of the income and expense table: an amount per month; group: a group's subtotal row. */
     public static final class Row { public final String name;public final boolean group;public final long[] amounts; Row(String name,boolean group,int months){this.name=name;this.group=group;amounts=new long[months];}
         public long total(){long n=0;for(long v:amounts)n+=v;return n;} public long average(){return Budget.average(amounts);} boolean empty(){for(long v:amounts)if(v!=0)return false;return true;} }
@@ -417,6 +434,22 @@ public final class Budget {
         if(100*spent*days<(100*day+PACE_MARGIN*days)*base)return null; // spent/base >= day/days + 20%, in whole numbers
         return new Pace((int)Math.min(999,(200*spent+base)/(2*base)),(int)((200*day+days)/(2*days)));
     }
+    // A new budget's starter categories (name, group), added when there's no saved budget; the first-run setup lets you untick groups.
+    public static final String[][] STARTER={{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}};
+    public static List<String> starterGroups(){List<String> g=new ArrayList<>();for(String[] s:STARTER)if(!g.contains(s[1]))g.add(s[1]);return g;}
+    /** Starter categories in [groups] that aren't here yet (by name, any capitals) are added; returns how many. */
+    public int addStarter(Collection<String> groups){int n=0;for(String[] s:STARTER){if(!groups.contains(s[1]))continue;boolean have=false;for(Category c:categories)have|=c.name.trim().equalsIgnoreCase(s[0]);if(have)continue;Category c=new Category(s[0]);c.group=s[1];categories.add(c);n++;}return n;}
+    /**
+     * Starter categories in groups not in [keep] go, but only as they came: never used (no money, transactions or upcoming ones),
+     * with no target, note, pin or hidden mark, and nothing (a Planner bill, an import rule) pointing at them. Returns how many.
+     */
+    public int removeStarter(Collection<String> keep){int n=0;for(String[] s:STARTER){if(keep.contains(s[1]))continue;for(Category c:new ArrayList<>(categories)){
+            if(!c.name.equals(s[0])||!c.group.equals(s[1])||c.payment()||used(c)||c.target!=0||!c.note.isEmpty()||c.pinned||c.hidden||billCategories.containsValue(c.id))continue;
+            boolean ruled=false;for(Rule r:rules)ruled|=r.category.equals(c.id);if(ruled)continue;deleteCategory(c,null);n++;}}return n;}
+    /** A brand-new budget, for the first-run setup: no accounts, transactions or upcoming ones, and no money assigned to any category. */
+    public boolean brandNew(){if(!accounts.isEmpty()||!entries.isEmpty()||!scheduled.isEmpty())return false;for(Category c:categories)for(long v:c.assigned.values())if(v!=0)return false;return true;}
+    /** The currency the first-run setup suggests: [locale]'s country's, when it's one of the common ones; AUD otherwise. */
+    public static String suggestedCurrency(Locale locale){try{String code=Currency.getInstance(locale).getCurrencyCode();if(Arrays.asList(COMMON_CURRENCIES).contains(code))return code;}catch(RuntimeException ignored){}return DEFAULT_CURRENCY;}
     // Home: categories pinned as priorities, and what's due soon.
     public static final int PINS=5;
     /** Pinned categories (at most PINS), in plan order. A hidden one keeps its pin but doesn't show or count. */

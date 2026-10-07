@@ -1,4 +1,11 @@
 <resources>
+    <!-- The home-screen widget's pinned category rows: name on the left, Available on the right. -->
+    <style name="WidgetRow"><item name="android:layout_width">match_parent</item><item name="android:layout_height">24dp</item>
+        <item name="android:orientation">horizontal</item><item name="android:gravity">center_vertical</item><item name="android:visibility">gone</item></style>
+    <style name="WidgetName"><item name="android:layout_width">0dp</item><item name="android:layout_height">wrap_content</item><item name="android:layout_weight">1</item>
+        <item name="android:textSize">14sp</item><item name="android:textColor">@color/widget_ink</item><item name="android:singleLine">true</item><item name="android:ellipsize">end</item></style>
+    <style name="WidgetAmount"><item name="android:layout_width">wrap_content</item><item name="android:layout_height">wrap_content</item><item name="android:layout_marginStart">8dp</item>
+        <item name="android:textSize">14sp</item><item name="android:textStyle">bold</item><item name="android:textColor">@color/widget_ink</item><item name="android:singleLine">true</item></style>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#B3BFFF</item>

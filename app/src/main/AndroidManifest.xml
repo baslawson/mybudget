@@ -2,7 +2,14 @@
     <application android:label="MyBudget" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+            <!-- App shortcuts: Add transaction, Budget, Transactions (the MainActivity.OPEN extra, as the widget). -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
         </activity>
+        <!-- The home-screen widget. Exported only because the system's APPWIDGET_UPDATE needs it; it acts on widget broadcasts only. -->
+        <receiver android:name=".BudgetWidget" android:exported="true" android:label="MyBudget">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/budget_widget"/>
+        </receiver>
         <!-- Planner's "Send paid bills to MyBudget". Open to any app; nothing is saved without the user's tap. -->
         <activity android:name=".AddExpenseActivity" android:exported="true" android:theme="@style/AppTheme.Overlay" android:excludeFromRecents="true">
             <intent-filter><action android:name="com.mybudget.app.action.ADD_EXPENSE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
