@@ -62,7 +62,7 @@ public class AddExpenseActivity extends Activity {
         long sent=intent.getLongExtra("amountCents",0);String date=text(intent,"date",10);
         try{LocalDate.parse(date);}catch(Exception e){date=LocalDate.now().toString();}
         Budget.Entry last=budget.lastForBill(billKey);
-        Budget.Category suggested=last==null?null:budget.category(last.category);Budget.Account lastAccount=last==null?null:budget.account(last.account);
+        Budget.Category suggested=last==null?budget.category(budget.plannerCategory(billKey)):budget.category(last.category);Budget.Account lastAccount=last==null?null:budget.account(last.account);
         if(!categories.contains(suggested))suggested=null;if(!accounts.contains(lastAccount))lastAccount=null;
         LinearLayout f=new LinearLayout(this);f.setOrientation(LinearLayout.VERTICAL);f.setPadding(dp(24),dp(4),dp(24),dp(4));
         label(f,"From "+sender(),12);
@@ -74,7 +74,7 @@ public class AddExpenseActivity extends Activity {
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
         label(f,"Category",12);Spinner category=new Spinner(this);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
-        if(suggested!=null)label(f,"Suggested from last time for this bill.",12);
+        if(suggested!=null)label(f,last!=null?"Suggested from last time for this bill.":"The category you planned this bill from.",12);
         label(f,"Account",12);Spinner account=new Spinner(this);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
         if(!note.isEmpty())label(f,"Note: "+note,12);
         ScrollView scroll=new ScrollView(this);scroll.addView(f);

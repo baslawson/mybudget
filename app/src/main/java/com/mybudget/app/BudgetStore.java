@@ -15,7 +15,8 @@ public final class BudgetStore {
         for(Budget.Entry e:b.entries)entries.put(new JSONObject().put("id",e.id).put("payee",e.payee).put("category",e.category).put("account",e.account).put("destination",e.destination).put("date",e.date).put("amount",e.amount).put("memo",e.memo).put("cleared",e.cleared).put("externalId",e.externalId).put("billKey",e.billKey).put("photo",e.photo));
         for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);if(!e.split())continue;JSONArray parts=new JSONArray();for(Budget.Split p:e.splits)parts.put(new JSONObject().put("category",p.category).put("amount",p.amount).put("memo",p.memo));entries.getJSONObject(i).put("splits",parts);}
         for(Budget.Scheduled s:b.scheduled)scheduled.put(new JSONObject().put("id",s.id).put("payee",s.payee).put("category",s.category).put("account",s.account).put("next",s.next).put("repeat",s.repeat).put("day",s.day).put("amount",s.amount).put("memo",s.memo).put("billKey",s.billKey));
-        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).toString();
+        JSONObject bills=new JSONObject();for(Map.Entry<String,String> m:b.billCategories.entrySet())bills.put(m.getKey(),m.getValue());
+        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).put("billCategories",bills).toString();
     }
     /** A backup file: the saved budget plus what marks it as MyBudget's, and when it was made (local date-time). */
     public static final int BACKUP_VERSION=1;
@@ -44,6 +45,7 @@ public final class BudgetStore {
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split s=new Budget.Split(p.getString("category"),p.getLong("amount"));s.memo=p.optString("memo","");if(!s.category.isEmpty()&&b.category(s.category)==null)throw new JSONException("Invalid split.");e.splits.add(s);}
             if(e.category.equals(Budget.SPLIT)!=e.split())throw new JSONException("Invalid split.");
             if(b.account(e.account)==null||(!e.destination.isEmpty()&&b.account(e.destination)==null)||(!e.category.isEmpty()&&!e.split()&&b.category(e.category)==null))throw new JSONException("Invalid saved transaction.");b.entries.add(e);}
+        JSONObject bills=root.optJSONObject("billCategories");if(bills!=null){Iterator<String> k=bills.keys();while(k.hasNext()){String key=k.next(),id=bills.getString(key);if(key.length()<=100&&b.category(id)!=null)b.billCategories.put(key,id);}} // a deleted category's bills are just forgotten
         JSONArray scheduled=root.optJSONArray("scheduled");
         if(scheduled!=null)for(int i=0;i<scheduled.length();i++){JSONObject j=scheduled.getJSONObject(i);LocalDate.parse(j.getString("next"));Budget.Scheduled s=new Budget.Scheduled(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("next"),j.getLong("amount"),j.getString("repeat"));s.id=j.getString("id");s.day=Math.max(0,Math.min(31,j.optInt("day",s.day)));s.memo=j.optString("memo","");s.billKey=j.optString("billKey","");
             if(b.account(s.account)==null||(!s.category.isEmpty()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");b.scheduled.add(s);}

@@ -34,8 +34,26 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseG(){
+        YearMonth oct=YearMonth.of(2026,10);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);Budget.Category power=new Budget.Category("Utilities"),phone=new Budget.Category("Phone"),spare=new Budget.Category("Spare");b.categories.add(power);b.categories.add(phone);b.categories.add(spare);
+        Budget.Account visa=b.addCard("Visa","2026-01-01",0);
+        // Category for a Planner bill: chosen here first, else its last expense's, else none.
+        Budget.Entry paid=new Budget.Entry("Electricity",power.id,bank.id,"2026-09-09",-14000);paid.billKey="planner-series-e";b.entries.add(paid);
+        same(b.plannerCategory("planner-series-e"),power.id,"From the last expense");same(b.plannerCategory("planner-bill-9"),"","Unknown bill");
+        b.billCategories.put("planner-bill-9",phone.id);same(b.plannerCategory("planner-bill-9"),phone.id,"Chosen here");b.billCategories.put("planner-series-e",phone.id);same(b.plannerCategory("planner-series-e"),phone.id,"Choice wins over history");
+        b.billCategories.put("planner-bill-8",b.paymentCategory(visa).id);same(b.plannerCategory("planner-bill-8"),"","Never a card payment category");
+        // Planner's bills count as upcoming bills (not money), by their category; no category or no amount counts nothing.
+        Budget.Scheduled e=new Budget.Scheduled("Electricity",b.plannerCategory("planner-series-e"),"","2026-10-09",-15000,"Never");Budget.Scheduled unknown=new Budget.Scheduled("Water","","","2026-10-12",-5000,"Never");Budget.Scheduled noAmount=new Budget.Scheduled("Gas",phone.id,"","2026-10-03",0,"Never");
+        b.fromPlanner.add(e);b.fromPlanner.add(unknown);b.fromPlanner.add(noAmount);long cash=b.cash(oct);
+        equal(b.upcoming(phone,oct),15000,"Planner bill planned from Phone");equal(b.fundNeed(phone,oct),15000,"Fund targets covers it");equal(b.cash(oct),cash,"Not money");equal(b.firstDue(phone,oct),9,"Earliest Planner bill with an amount");
+        if(!b.due(java.time.LocalDate.of(2026,12,1)).isEmpty())throw new AssertionError("Planner bills are never due to enter here");
+        // Deleting a category moves (or forgets) the bills planned from it.
+        b.deleteCategory(phone,spare);same(b.billCategories.get("planner-bill-9"),spare.id,"Moved with the category");
+        Budget.Category gone=new Budget.Category("Gone");b.categories.add(gone);b.billCategories.put("planner-bill-7",gone.id);b.deleteCategory(gone,null);if(b.billCategories.containsKey("planner-bill-7"))throw new AssertionError("Forgotten with an unused category");
     }
     static void phaseF(){
         // CSV reading: quotes, commas and line breaks in fields, BOM, CRLF.
@@ -110,7 +128,7 @@ public class BudgetTest {
         bad.splits.get(1).amount=-400;b.validate(bad);bad.splits.remove(1);bad.splits.get(0).amount=-1000;rejects(()->b.validate(bad));
         Budget.Entry zero=new Budget.Entry("x",Budget.SPLIT,bank.id,"2025-01-07",-1000);zero.splits.add(new Budget.Split(food.id,-1000));zero.splits.add(new Budget.Split(home.id,0));rejects(()->b.validate(zero));
         // CSV: one row per part, each with its own category and amount.
-        String csv=b.csv();if(!csv.contains("2025-01-05,Supermarket,Food,Everyday,Bank,,-70.00,,No")||!csv.contains("2025-01-05,Supermarket,Household,Everyday,Bank,,-20.00,,No")||!csv.contains("2025-01-06,Shop with cash back,Ready to Assign,,Bank,,20.00,,No"))throw new AssertionError("Split CSV rows:\n"+csv);
+        String csv=b.csv();if(!csv.contains("2025-01-05,Supermarket,Food,Everyday,Bank,,-70.00,,No")||!csv.contains("2025-01-05,Supermarket,Household,Everyday,Bank,,-20.00,,No")||!csv.contains("2025-01-06,Shop with cash back,To budget,,Bank,,20.00,,No"))throw new AssertionError("Split CSV rows:\n"+csv);
         // Deleting a category moves split parts too.
         if(!b.used(home)||b.entriesIn(home)!=1)throw new AssertionError("Split part counts as use");b.deleteCategory(home,food);equal(b.activity(food,jan),-7000-2000-3000,"Parts moved");same(shop.splits.get(1).category,food.id,"Part's category moved");
     }
@@ -198,7 +216,7 @@ public class BudgetTest {
         b.entries.add(new Budget.Entry("Pay","",bank.id,"2025-01-05",250000));
         Budget.Entry move=new Budget.Entry("Transfer to Cash","",bank.id,"2025-01-01",-500);move.destination=cash.id;b.entries.add(move);
         same(b.csv(),"Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n"
-            +"2025-01-05,Pay,Ready to Assign,,\"Bank, main\",,2500.00,,No\r\n"
+            +"2025-01-05,Pay,To budget,,\"Bank, main\",,2500.00,,No\r\n"
             +"2025-01-03,\"Say \"\"hi\"\"\",'=SUM(A1),Bills,\"Bank, main\",,-12.34,\"'-note\nline 2\",Yes\r\n"
             +"2025-01-01,Transfer to Cash,,,\"Bank, main\",Cash,-5.00,,No\r\n","CSV rows: newest first, quoted, formulas kept as text");
         same(new Budget().csv(),"Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n","Empty budget exports the header");
