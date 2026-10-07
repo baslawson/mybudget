@@ -20,6 +20,8 @@ public final class Budget {
     }
     public static final class Entry {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
+        // Set when another app (Planner) sent this expense: its payment id, and its bill (the same for every month's bill).
+        public String externalId="",billKey="";
         public long amount;
         public boolean cleared;
         public Entry(String payee,String category,String account,String date,long amount) {this.payee=payee;this.category=category;this.account=account;this.date=date;this.amount=amount;}
@@ -28,6 +30,9 @@ public final class Budget {
     public final List<Category> categories=new ArrayList<>();
     public final List<Account> accounts=new ArrayList<>();
     public final List<Entry> entries=new ArrayList<>();
+    public Entry external(String id){if(id==null||id.isEmpty())return null;for(Entry e:entries)if(e.externalId.equals(id))return e;return null;}
+    /** The newest expense from [billKey] (entries are kept newest first), or null: its category is suggested next time. */
+    public Entry lastForBill(String billKey){if(billKey==null||billKey.isEmpty())return null;for(Entry e:entries)if(e.billKey.equals(billKey))return e;return null;}
     public static long parse(String input) {
         try {long v=new BigDecimal(input.trim()).movePointRight(2).longValueExact();if(v < -10_000_000_000L || v>10_000_000_000L)throw new IllegalArgumentException();return v;}
         catch(RuntimeException e){throw new IllegalArgumentException("Enter an amount with at most two decimal places (maximum $100 million).");}

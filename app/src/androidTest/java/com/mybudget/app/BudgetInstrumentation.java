@@ -27,6 +27,33 @@ public class BudgetInstrumentation extends Instrumentation {
         boolean rejected=false;try{BudgetStore.decode("{broken}");}catch(Exception expected){rejected=true;}if(!rejected)throw new AssertionError("Corrupt data accepted");
         Intent intent=new Intent(getTargetContext(),MainActivity.class);intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);Activity activity=startActivitySync(intent);waitForIdleSync();if(activity.isFinishing())throw new AssertionError("Activity closed");
         for(String tab:new String[]{"Plan","Spending","Accounts","Reflect","Home"}){runOnMainSync(()->{View button=find(activity.getWindow().getDecorView(),tab,true);if(button==null)throw new AssertionError("Missing tab "+tab);button.performClick();if(find(activity.getWindow().getDecorView(),tab,false)==null)throw new AssertionError("Missing screen "+tab);});waitForIdleSync();}
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered.\n");finish(Activity.RESULT_OK,result);
+        sentPayments(day);
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
+    // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.
+    private void sentPayments(String day)throws Exception{
+        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String saved=prefs.getString("data",null);
+        try{
+            Budget seed=new Budget();Budget.Account bank=new Budget.Account("Everyday",day,100000);seed.accounts.add(bank);Budget.Category power=new Budget.Category("Utilities");seed.categories.add(power);seed.categories.add(new Budget.Category("Groceries"));
+            Budget.Entry earlier=new Budget.Entry("Electricity",power.id,bank.id,day,-100);earlier.externalId="pay-old";earlier.billKey="planner-series-t";seed.entries.add(earlier);
+            Budget roundTrip=BudgetStore.decode(BudgetStore.encode(seed));if(!roundTrip.entries.get(0).externalId.equals("pay-old")||!roundTrip.entries.get(0).billKey.equals("planner-series-t"))throw new AssertionError("Sent payment ids lost");
+            JSONObject v2=new JSONObject(BudgetStore.encode(seed)).put("version",2);JSONObject v2Entry=v2.getJSONArray("entries").getJSONObject(0);v2Entry.remove("externalId");v2Entry.remove("billKey");
+            if(!BudgetStore.decode(v2.toString()).entries.get(0).externalId.isEmpty())throw new AssertionError("Version 2 not read");
+            if(!prefs.edit().putString("data",BudgetStore.encode(seed)).commit())throw new AssertionError("Seed not saved");
+            Intent add=new Intent(AddExpenseActivity.ACTION_ADD).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("paymentId","pay-t").putExtra("billKey","planner-series-t").putExtra("payee","Electricity").putExtra("amountCents",14280L).putExtra("currency","AUD").putExtra("date",LocalDate.now().toString()).putExtra("note","From Planner");
+            AddExpenseActivity screen=(AddExpenseActivity)startActivitySync(add);waitForIdleSync();
+            runOnMainSync(()->screen.dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());waitForIdleSync();
+            Budget.Entry sent=BudgetStore.decode(prefs.getString("data",null)).external("pay-t");
+            if(sent==null||sent.amount!=-14280||!sent.category.equals(power.id)||!sent.memo.equals("From Planner"))throw new AssertionError("Sent payment not saved with the suggested category");
+            getTargetContext().startActivity(add);waitForIdleSync();Thread.sleep(1500);waitForIdleSync();
+            int copies=0;for(Budget.Entry e:BudgetStore.decode(prefs.getString("data",null)).entries)if(e.externalId.equals("pay-t"))copies++;eq(copies,1);
+            Intent undo=new Intent(AddExpenseActivity.ACTION_UNDONE).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("paymentId","pay-t");
+            AddExpenseActivity ask=(AddExpenseActivity)startActivitySync(undo);waitForIdleSync();
+            runOnMainSync(()->ask.dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());waitForIdleSync();
+            Budget after=BudgetStore.decode(prefs.getString("data",null));if(after.external("pay-t")!=null||after.external("pay-old")==null)throw new AssertionError("Undo removed the wrong expense");
+        }finally{
+            android.content.SharedPreferences.Editor restore=prefs.edit();if(saved==null)restore.remove("data");else restore.putString("data",saved);restore.commit();
+        }
+    }
 }

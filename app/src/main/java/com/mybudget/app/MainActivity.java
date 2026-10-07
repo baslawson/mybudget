@@ -38,6 +38,8 @@ public class MainActivity extends Activity {
         if(state!=null){tab=state.getString("tab","Home");previousTab=state.getString("previousTab","Home");search=state.getString("search","");accountFilter=state.getString("accountFilter","");month=YearMonth.parse(state.getString("month",YearMonth.now().toString()));}
         load();if(storageReadable)render();
     }
+    // AddExpenseActivity may have saved an expense from another app meanwhile: read it in, so the next save keeps it.
+    @Override protected void onRestart(){super.onRestart();String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null||!storageReadable)return;try{budget=BudgetStore.decode(raw);for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}catch(Exception e){toast("Could not reload your budget.");}}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("month",month.toString());super.onSaveInstanceState(state);}
     private void options(View anchor){
         PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");
