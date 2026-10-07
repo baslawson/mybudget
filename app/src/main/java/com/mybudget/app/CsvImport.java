@@ -70,7 +70,7 @@ public final class CsvImport {
             if(cents>0)category=known!=null&&last.amount>0?known.id:"";
             else if(known!=null)category=known.id;
             else{if(toCategorize==null)toCategorize=toCategorize(budget);category=toCategorize.id;}
-            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.memo="Imported";budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
+            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.memo=Budget.IMPORTED;budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
         }
         return r;
     }

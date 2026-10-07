@@ -34,8 +34,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions.");
     }
     static void fixes(){
         YearMonth jan=YearMonth.of(2025,1);
@@ -280,6 +280,22 @@ public class BudgetTest {
         b.rename(wallet,"Purse");same(move.payee,"Transfer to Purse","Transfer payee follows a rename");same(wallet.name,"Purse","Renamed");
     }
     static void same(String actual,String expected,String message){if(!actual.equals(expected))throw new AssertionError(message+":\n"+actual+"\n!=\n"+expected);}
+    static void suggestions(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",0);b.accounts.add(bank);
+        // Groups: plan order, each once (first spelling), card payment groups left out; typed groups take the existing spelling.
+        Budget.Category rent=new Budget.Category("Rent"),food=new Budget.Category("Food"),power=new Budget.Category("Power"),fun=new Budget.Category("Fun");
+        rent.group="Bills";food.group="Everyday";power.group="bills";fun.group=" Wants ";for(Budget.Category c:new Budget.Category[]{rent,food,power,fun})b.categories.add(c);b.addCard("Visa","2025-01-01",0);
+        same(String.join("|",b.groups()),"Bills|Everyday|Wants","Groups in plan order, once each");
+        same(b.existingGroup("bills"),"Bills","Typed group takes the existing spelling");same(b.existingGroup(" EVERYDAY "),"Everyday","Trimmed, any capitals");
+        same(b.existingGroup(" Travel "),"Travel","A new group is kept");same(b.existingGroup("wants"),"Wants","Spelling without spaces");same(b.existingGroup("credit card PAYMENTS"),"Credit card payments","Card group spelling");
+        Budget.Category solo=new Budget.Category("Gym");solo.group="health";b.categories.add(solo);same(b.existingGroup("Health",solo),"Health","Editing the only category in a group can respell it");same(b.existingGroup("Health"),"health","Another category joins it");
+        // Notes: this payee's first, then the rest; newest first, each once, no blanks or automatic ones, at most 50.
+        String[][] rows={{"Shop","2025-01-02","Weekly shop"},{"Cafe","2025-01-05","Lunch"},{"Shop","2025-01-09","Milk"},{"Cafe","2025-01-10","weekly shop"},{"Shop","2025-01-03",""},{"Bank feed","2025-01-11","Imported"},{"Shop","2025-01-01","Party"}};
+        for(String[] r:rows){Budget.Entry e=new Budget.Entry(r[0],food.id,bank.id,r[1],-100);e.memo=r[2];b.entries.add(e);}
+        same(String.join("|",b.memos(" shop ")),"Milk|Weekly shop|Party|Lunch","Payee's notes first, then others, newest first");
+        same(String.join("|",b.memos("")),"weekly shop|Milk|Lunch|Party","No payee: newest first, each once");same(String.join("|",b.memos(null)),"weekly shop|Milk|Lunch|Party","Null payee");
+        for(int i=0;i<60;i++){Budget.Entry e=new Budget.Entry("Many","",bank.id,"2025-02-01",100);e.memo="Note "+i;b.entries.add(e);}equal(b.memos("Shop").size(),50,"At most 50 notes");same(b.memos("Shop").get(0),"Milk","Payee's notes still first");
+    }
     static void csv(){
         Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank, main","2025-01-01",0),cash=new Budget.Account("Cash","2025-01-01",0);b.accounts.add(bank);b.accounts.add(cash);
         Budget.Category odd=new Budget.Category("=SUM(A1)");odd.group="Bills";b.categories.add(odd);

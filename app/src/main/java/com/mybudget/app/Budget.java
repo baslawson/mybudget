@@ -245,6 +245,18 @@ public final class Budget {
     // Payees: newest first, and the last transaction with one (for its category).
     public List<String> payees(){List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));LinkedHashMap<String,String> seen=new LinkedHashMap<>();for(Entry e:ordered)if(!e.transfer())seen.putIfAbsent(e.payee.toLowerCase(Locale.ROOT),e.payee);return new ArrayList<>(seen.values());}
     public Entry lastForPayee(String payee){Entry best=null;for(Entry e:entries)if(!e.transfer()&&e.payee.equalsIgnoreCase(payee.trim())&&(best==null||e.date.compareTo(best.date)>0))best=e;return best;}
+    // Notes: the ones used with [payee] first, then the rest; newest first, each once, at most 50. Automatic notes are left out.
+    public static final String IMPORTED="Imported"; // the note on rows from a bank statement (CsvImport)
+    public List<String> memos(String payee){
+        List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));String p=payee==null?"":payee.trim();LinkedHashMap<String,String> seen=new LinkedHashMap<>();
+        for(int pass=0;pass<2;pass++)for(Entry e:ordered){String m=e.memo.trim();boolean theirs=!p.isEmpty()&&e.payee.trim().equalsIgnoreCase(p);if(m.isEmpty()||m.equals(IMPORTED)||theirs!=(pass==0))continue;seen.putIfAbsent(m.toLowerCase(Locale.ROOT),m);}
+        List<String> list=new ArrayList<>(seen.values());return list.subList(0,Math.min(50,list.size()));
+    }
+    // Groups: each once (first spelling), in plan order. A card payment category's group isn't offered: it's for cards.
+    public List<String> groups(){LinkedHashMap<String,String> seen=new LinkedHashMap<>();for(Category c:categories)if(!c.payment()&&!c.group.trim().isEmpty())seen.putIfAbsent(c.group.trim().toLowerCase(Locale.ROOT),c.group.trim());return new ArrayList<>(seen.values());}
+    /** The group [typed] names, spelled as it already is ("bills" -> "Bills"), not counting [editing]'s own; else [typed] trimmed. */
+    public String existingGroup(String typed,Category editing){String t=typed.trim();for(Category c:categories)if(c!=editing&&c.group.trim().equalsIgnoreCase(t))return c.group.trim();return t;}
+    public String existingGroup(String typed){return existingGroup(typed,null);}
     /** Every transaction as CSV for spreadsheets, newest date first. Export only: a backup is what restores. */
     public String csv(){
         StringBuilder out=new StringBuilder("Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n");List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));
