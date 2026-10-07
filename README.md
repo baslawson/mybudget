@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.3
+## Download 0.0.4
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.3/MyBudget-0.0.3.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.3)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.4/MyBudget-0.0.4.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.4)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.3`, version code `6`, package `com.mybudget.app`. The universal release APK is approximately 105 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.4`, version code `7`, package `com.mybudget.app`. The universal release APK is approximately 105 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -30,7 +30,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 - Light, Dark and Auto appearances persist across restarts. Auto follows the device theme, including changes while the app is open. Settings returns to the previous screen.
 - Latest UI refinements: compact category rows with Available emphasized; secondary Assigned/Activity values; target descriptions, progress and remaining funding; matching navigation icons; tighter spacing with comfortable touch targets.
 - Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
-- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link), **0.0.1** (expenses from Planner), **0.0.2** (backup and import, envelope planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills) and **0.0.3** (fixes: credit-card credits, saving alongside Planner, CSV duplicates, open forms kept, backups). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
+- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link), **0.0.1** (expenses from Planner), **0.0.2** (backup and import, envelope planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills), **0.0.3** (fixes: credit-card credits, saving alongside Planner, CSV duplicates, open forms kept, backups) and **0.0.4** (fixes: card credit carried over, reports, repeating transactions, card payments, photos). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
 - Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
 - Existing budget data is retained during APK updates (0.0.2 converts it to storage version 4; older MyBudget versions can't read that). New in 0.0.2 (all described below): backup, restore and CSV export; automatic daily backup; CSV import; transaction photos; hide/delete/reorder categories; edit/close/delete accounts; reconcile adjustments; a date picker; payee suggestions; quick assign amounts and Cover overspending; snoozed targets, due days and category notes; Budget reset and Hide amounts; the Reports chart, net worth and money age; upcoming (scheduled and repeating) transactions; split transactions; credit cards; Planner's upcoming bills; and MyBudget's own names for the screens (Budget, Transactions, Reports, To budget). No bank sync is implemented.
 - Planner and MyBudget are linked apps. Planner can send paid bills for a confirmed expense and request removal when a payment is undone (from 0.0.1), and its upcoming bills to plan for (from MyBudget 0.0.2 with Planner 0.0.22). BudgetInstrumentation covers adding once and removing on undo, and passed on the Pixel 7 Pro emulator. The full round trip from Planner has not been tested automatically.
