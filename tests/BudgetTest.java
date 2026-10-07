@@ -34,7 +34,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
     }
     static void fixes(){
@@ -77,6 +77,36 @@ public class BudgetTest {
         java.util.List<java.util.List<String>> twice=CsvImport.parse("1/9/2026,Shop,-5.00\n1/9/2026,Shop,-5.00\n2/9/2026,Cafe,-3.00\n2/9/2026,Cafe,-3.00\n");
         CsvImport.Result r=CsvImport.run(c,twice,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.added,3,"Second Shop and both Cafes added");equal(r.duplicates,1,"One Shop already there");
         r=CsvImport.run(c,twice,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.added,0,"Importing again adds nothing");equal(r.duplicates,4,"All four known");
+    }
+    /** To budget + every category = cash, in each month from [from] to [to]. */
+    static void balanced(Budget b,YearMonth from,YearMonth to,String message){for(YearMonth m=from;!m.isAfter(to);m=m.plusMonths(1)){long n=b.ready(m);for(Budget.Category c:b.categories)n+=b.available(c,m)+b.creditOverspent(c,m);equal(n,b.cash(m),message+" "+m);}}
+    static void fixes2(){
+        YearMonth sep=YearMonth.of(2025,9),oct=sep.plusMonths(1),nov=oct.plusMonths(1),dec=nov.plusMonths(1);
+        // M1 A: a card refund after the card was paid leaves the payment category below zero (the card is in credit): it carries on.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-09-01",100000);b.accounts.add(bank);Budget.Category food=new Budget.Category("Groceries");b.categories.add(food);
+        Budget.Account visa=b.addCard("Visa","2025-09-01",0);Budget.Category pay=b.paymentCategory(visa);
+        b.assign(food,sep,10000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-09-05",-5000));Budget.Entry paid=new Budget.Entry("Transfer to Visa","",bank.id,"2025-09-20",-5000);paid.destination=visa.id;b.validate(paid);b.entries.add(paid);
+        equal(b.available(pay,sep),0,"A: paid");equal(b.ready(sep),90000,"A: Sep To budget");
+        b.entries.add(new Budget.Entry("Refund",food.id,visa.id,"2025-10-03",2000));equal(b.available(food,oct),7000,"A: refund back to Groceries");equal(b.available(pay,oct),-2000,"A: card in credit");equal(b.ready(oct),90000,"A: Oct To budget");
+        equal(b.available(pay,nov),-2000,"A: credit carries on");equal(b.ready(nov),90000,"A: Nov To budget unchanged");equal(b.ready(dec),90000,"A: Dec To budget unchanged");
+        equal(b.toCover(pay,oct),0,"A: nothing to cover");equal(b.toPay(visa),0,"A: nothing to pay");balanced(b,sep,dec,"A balanced");
+        // M1 B: a reward to To budget on a card with old debt and nothing set aside: assignable, and stays so.
+        b=new Budget();bank=new Budget.Account("Bank","2025-09-01",100000);b.accounts.add(bank);food=new Budget.Category("Groceries");b.categories.add(food);visa=b.addCard("Visa","2025-09-01",50000);pay=b.paymentCategory(visa);
+        b.entries.add(new Budget.Entry("Cashback","",visa.id,"2025-10-05",1000));equal(b.ready(oct),101000,"B: Oct To budget");b.assign(food,oct,101000);
+        equal(b.ready(oct),0,"B: all assigned");equal(b.ready(nov),0,"B: Nov To budget stays 0");equal(b.available(pay,nov),-1000,"B: carries on");equal(b.toCover(pay,oct),0,"B: nothing to cover");balanced(b,sep,dec,"B balanced");
+        // M1: paying more than was set aside (old debt, nothing assigned) is still overspending: covered, or taken from next month's To budget.
+        b=new Budget();bank=new Budget.Account("Bank","2025-09-01",100000);b.accounts.add(bank);visa=b.addCard("Visa","2025-09-01",50000);pay=b.paymentCategory(visa);
+        Budget.Entry over=new Budget.Entry("Transfer to Visa","",bank.id,"2025-10-10",-60000);over.destination=visa.id;b.entries.add(over);
+        equal(b.available(pay,oct),-60000,"Overpaid");equal(b.toCover(pay,oct),50000,"The $500 old debt is overspending to cover");equal(b.available(pay,nov),-10000,"The $100 card credit carries on");equal(b.ready(nov),50000,"Rest taken from To budget");balanced(b,sep,dec,"Overpaid balanced");
+        // M2: a card payment isn't spending (Reports, quick assign).
+        equal(b.spent(pay,oct),0,"Payment category spent");
+        // M3: a new repeating transaction entered now keeps its photo and Cleared tick.
+        Budget.Scheduled rent=new Budget.Scheduled("Rent","",bank.id,"2025-10-01",-1000,"Monthly");Budget.Entry e=b.enter(rent,"receipt.jpg",true);
+        same(e.photo,"receipt.jpg","Photo kept");if(!e.cleared||b.entries.get(0)!=e)throw new AssertionError("Cleared kept");same(rent.next,"2025-11-01","Repeat continues");
+        // M4: Pay card fills in what's set aside this month, not in the month on screen.
+        b=new Budget();bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);food=new Budget.Category("Food");b.categories.add(food);visa=b.addCard("Visa","2025-01-01",0);pay=b.paymentCategory(visa);
+        YearMonth jan=YearMonth.of(2025,1),now=YearMonth.now();b.assign(food,jan,10000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-01-05",-10000));
+        b.assign(food,now,5000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,java.time.LocalDate.now().toString(),-5000));equal(b.toPay(visa),15000,"Set aside now");
     }
     static void phaseG(){
         YearMonth oct=YearMonth.of(2026,10);

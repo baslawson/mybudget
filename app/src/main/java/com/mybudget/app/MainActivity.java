@@ -47,9 +47,14 @@ public class MainActivity extends Activity {
     // meanwhile: when the saved data differs, it's read in (open forms close, as they show the old budget), so the next save keeps it.
     private String loaded;
     private boolean reloadIfChanged(){String raw=prefs().getString("data",null);if(raw==null||raw.equals(loaded)||!storageReadable)return false;Budget fresh;try{fresh=BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("Could not reload your budget.");}fresh.fromPlanner.addAll(budget.fromPlanner);budget=fresh;loaded=raw;return true;}
-    private boolean pickingPhoto;private java.util.function.Consumer<Uri> photoTarget;
+    private boolean pickingPhoto;private java.util.function.Consumer<Uri> photoTarget;private AlertDialog photoForm;
+    /**
+     * Back from the photo picker: data saved meanwhile is read in, but the form the photo is for stays open (with what was
+     * typed and the photo). Its save looks records up by id, so it saves on the latest data; any other open form closes.
+     */
+    private void photoReturned(){AlertDialog form=photoForm;photoForm=null;try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))if(editor!=form)editor.dismiss();render();}}catch(IllegalStateException e){toast(e.getMessage());}}
     // Automatic backup: today's, if it hasn't run yet (the daily job may not have had a chance).
-    // Not reloaded on return from the photo picker: that would close the form the photo is for (its save still reads the latest data).
+    // Not reloaded on return from the photo picker: photoReturned did that, keeping the form the photo is for open.
     @Override protected void onResume(){super.onResume();if(!storageReadable)return;if(pickingPhoto)pickingPhoto=false;else try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}}catch(IllegalStateException e){toast(e.getMessage());}
         AutoBackup.schedule(this);if(prefs().getString("auto_backup_tree",null)!=null)new Thread(()->AutoBackup.run(getApplicationContext(),false)).start();}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("month",month.toString());super.onSaveInstanceState(state);}
@@ -111,7 +116,7 @@ public class MainActivity extends Activity {
     private String when(String iso){try{return LocalDateTime.parse(iso).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a",Locale.forLanguageTag("en-AU")));}catch(Exception e){return "an unknown date";}}
     private void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){toast("No app on this device can save or open files.");}}
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(request==PHOTO){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);return;}if(result!=RESULT_OK||uri==null||!storageReadable)return;
+        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(request==PHOTO){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);photoReturned();return;}if(result!=RESULT_OK||uri==null||!storageReadable)return;
         if(request==AUTO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception e){toast("MyBudget couldn't keep access to that folder. Choose another.");return;}prefs().edit().putString("auto_backup_tree",uri.toString()).remove("auto_backup_last").remove("auto_backup_error").apply();AutoBackup.schedule(this);String tree=uri.toString();new Thread(()->{String e=AutoBackup.run(this,true);runOnUiThread(()->{toast(e==null?"Automatic backup is on. First backup saved.":e);render();});}).start();return;}
         if(request==IMPORT){List<List<String>> rows;try{rows=CsvImport.parse(read(uri));}catch(Exception e){toast(e instanceof IOException&&e.getMessage()!=null?e.getMessage():"Could not read that file.");return;}if(rows.isEmpty()){toast("That file has no rows.");return;}importDialog(rows);return;}
         if(request==RESTORE){BudgetStore.Backup backup;try{backup=BudgetStore.readBackup(read(uri));}catch(Exception e){String m=e.getMessage();toast((e instanceof org.json.JSONException||e instanceof IOException)&&m!=null?m:"Could not read that file.");return;}confirmRestore(backup);return;}
@@ -231,7 +236,7 @@ public class MainActivity extends Activity {
         LinearLayout nav=new LinearLayout(this);nav.setPadding(0,dp(6),0,0);String[] names={"Home","Plan","Spending","Accounts","Reflect"};int[] icons={R.drawable.nav_home,R.drawable.nav_plan,R.drawable.nav_spending,R.drawable.nav_accounts,R.drawable.nav_reflect};for(int i=0;i<names.length;i++){String name=names[i];boolean selected=tab.equals(name);Button b=button(tabTitle(name),()->{tab=name;accountFilter="";render();});b.setTextSize(10);b.setPadding(dp(2),dp(7),dp(2),dp(5));b.setBackground(bg(selected?primary:Color.TRANSPARENT));b.setTextColor(selected?Color.WHITE:muted);b.setSelected(selected);b.setContentDescription(tabTitle(name)+(selected?", selected":""));if(selected)b.setTypeface(null,Typeface.BOLD);Drawable icon=getDrawable(icons[i]).mutate();icon.setTint(selected?Color.WHITE:muted);icon.setBounds(0,0,dp(20),dp(20));b.setCompoundDrawables(null,icon,null,null);b.setCompoundDrawablePadding(dp(4));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(60),1);p.setMargins(dp(1),0,dp(1),0);nav.addView(b,p);}root.addView(nav);
     }
     private void readyCard(){LinearLayout c=card();c.setBackground(bg(primary));c.addView(label("TO BUDGET",11,Color.WHITE,true));c.addView(label(money(budget.spendable(month)),30,Color.WHITE,true));long future=budget.futureAssigned(month);c.addView(label(future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",12,Color.WHITE,false));}
-    private int overspent(){int n=0;for(Budget.Category c:budget.categories)if(budget.available(c,month)<0)n++;return n;}
+    private int overspent(){int n=0;for(Budget.Category c:budget.categories)if(budget.toCover(c,month)>0)n++;return n;}
     private void home(){
         readyCard();content.addView(button("+ Add transaction",()->transaction(null)));
         int due=budget.due(LocalDate.now()).size();if(due>0){LinearLayout c=card();c.addView(label(count(due,"upcoming transaction is","upcoming transactions are")+" due",19,amber,true));c.addView(label("Enter them so your plan matches your accounts, or skip any that didn't happen.",14,muted,false));c.addView(button("Review",()->{tab="Spending";render();}));}
@@ -242,7 +247,7 @@ public class MainActivity extends Activity {
         content.addView(label("Your priorities",20,ink,true));int count=0;for(Budget.Category c:budget.categories)if(c.target>0&&!c.hidden){count++;categoryCard(c);}if(count==0)content.addView(label("Add targets in Budget for bills, everyday spending and future goals.",15,muted,false));
     }
     private void categoryCard(Budget.Category c){
-        LinearLayout row=card();long available=budget.available(c,month),need=budget.needed(c,month);int status=available<0?red:need>0?amber:green;
+        LinearLayout row=card();long available=budget.available(c,month),need=budget.needed(c,month),cover=budget.toCover(c,month);int status=cover>0?red:need>0||available<0?amber:green;
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);TextView name=label(c.name,16,ink,true);name.setPadding(0,0,dp(8),0);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));LinearLayout balance=column();TextView caption=label("Available",10,muted,false);caption.setGravity(Gravity.END);caption.setPadding(0,0,0,0);balance.addView(caption);TextView value=label(money(available),20,status,true);value.setGravity(Gravity.END);value.setPadding(0,0,0,0);value.setAutoSizeTextTypeUniformWithConfiguration(12,20,1,android.util.TypedValue.COMPLEX_UNIT_SP);balance.addView(value,new LinearLayout.LayoutParams(-1,dp(27)));heading.addView(balance,new LinearLayout.LayoutParams(dp(128),-2));row.addView(heading);
         LinearLayout details=new LinearLayout(this);TextView assigned=label("Assigned  "+money(budget.assigned(c,month)),11,muted,false),activity=label("Activity  "+money(budget.activity(c,month)),11,muted,false);details.addView(assigned,new LinearLayout.LayoutParams(0,-2,1));activity.setGravity(Gravity.END);details.addView(activity,new LinearLayout.LayoutParams(0,-2,1));row.addView(details);
         if(c.target>0){long base=c.targetType.equals("Monthly")?budget.assigned(c,month):c.targetType.equals("Balance")?available:c.target-need;progress(row,base,c.target,status);row.addView(label(targetDescription(c),11,muted,false));row.addView(c.snoozed.equals(month.toString())?label("Target snoozed this month",12,muted,true):label(need==0?"Funded for this month":money(need)+" left to fund this month",12,need>0?amber:green,true));}
@@ -250,7 +255,8 @@ public class MainActivity extends Activity {
         long upcoming=budget.upcoming(c,month);if(upcoming>0)row.addView(label("Upcoming bills this month: "+money(upcoming),12,muted,false));
         long onCredit=budget.creditOverspent(c,month);
         if(available<0&&onCredit>=-available)row.addView(label("Overspent on a credit card by "+money(-available)+": it becomes card debt unless you cover it",12,amber,true));
-        else if(available<0)row.addView(label("Overspent by "+money(-available)+" - tap to cover",12,red,true));
+        else if(cover>0)row.addView(label("Overspent by "+money(cover)+" - tap to cover",12,red,true));
+        else if(available<0)row.addView(label("Below $0 by a refund or credit on the card: it carries on, with nothing to cover",12,amber,false));
         if(c.payment()){Budget.Account card=budget.account(c.cardAccount);if(card!=null){long owed=-budget.balance(card,false);row.addView(label("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),12,muted,false));}}
         row.setOnClickListener(v->categoryDetails(c));
     }
@@ -267,7 +273,7 @@ public class MainActivity extends Activity {
     }
     private void categoryDetails(Budget.Category c){
         List<String> names=new ArrayList<>();List<Runnable> actions=new ArrayList<>();String id=c.id;
-        if(budget.available(c,month)<0){names.add("Cover overspending");actions.add(()->cover(id));}
+        if(budget.toCover(c,month)>0){names.add("Cover overspending");actions.add(()->cover(id));}
         names.add("Assign or return money");actions.add(()->assign(c));names.add("Move money");actions.add(this::move);names.add("Edit category and target");actions.add(()->editCategory(c));
         names.add("View transactions");actions.add(()->{tab="Spending";search=c.name;accountFilter="";render();});
         names.add("Move up");actions.add(()->reorder(id,-1));names.add("Move down");actions.add(()->reorder(id,1));
@@ -292,7 +298,7 @@ public class MainActivity extends Activity {
     }
     /** Cover overspending: pick the envelope the money comes from (categories with money, or To budget). */
     private void cover(String id){
-        Budget.Category c=budget.category(id);if(c==null)return;long missing=-budget.available(c,month);if(missing<=0)return;
+        Budget.Category c=budget.category(id);if(c==null)return;long missing=budget.toCover(c,month);if(missing<=0)return;
         List<Budget.Category> sources=new ArrayList<>();for(Budget.Category o:budget.categories)if(o!=c&&budget.available(o,month)>0)sources.add(o);sources.sort((a,b)->Long.compare(budget.available(b,month),budget.available(a,month)));
         long ready=budget.spendable(month);List<String> labels=new ArrayList<>();if(ready>0)labels.add("To budget ("+money(ready)+")");for(Budget.Category o:sources)labels.add(o.name+" ("+money(budget.available(o,month))+")");
         if(labels.isEmpty()){toast("No category has money to move. Record income or assign money first.");return;}
@@ -339,13 +345,13 @@ public class MainActivity extends Activity {
         if(n==0)list.addView(label("No matching transactions this month.",15,muted,false));
     }
     private void accounts(){
-        for(Budget.Account a:budget.accounts){if(a.closed)continue;LinearLayout c=card();c.addView(label(a.name+(a.credit()?" · credit card":""),20,ink,true));if(a.credit()){long owed=-budget.balance(a,false);Budget.Category p=budget.paymentCategory(a);long ready=p==null?0:budget.available(p,month);c.addView(label(owed>0?"Owed "+money(owed):owed<0?"In credit "+money(-owed):"Paid off",28,ink,true));c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?amber:green,true));c.addView(button("Make a payment",()->payCard(a.id)));}else c.addView(label(money(budget.balance(a,false)),28,ink,true));c.addView(label("Cleared "+money(budget.balance(a,true))+" / Uncleared "+money(budget.balance(a,false)-budget.balance(a,true)),13,muted,false));if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,green,false));c.addView(button("View transactions",()->{accountFilter=a.id;search="";tab="Spending";render();}));c.addView(button("Reconcile",()->reconcile(a)));c.addView(button("Edit account",()->editAccount(a.id)));}
+        for(Budget.Account a:budget.accounts){if(a.closed)continue;LinearLayout c=card();c.addView(label(a.name+(a.credit()?" · credit card":""),20,ink,true));if(a.credit()){long owed=-budget.balance(a,false);Budget.Category p=budget.paymentCategory(a);long ready=p==null?0:Math.max(0,budget.available(p,month));c.addView(label(owed>0?"Owed "+money(owed):owed<0?"In credit "+money(-owed):"Paid off",28,ink,true));c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?amber:green,true));c.addView(button("Make a payment",()->payCard(a.id)));}else c.addView(label(money(budget.balance(a,false)),28,ink,true));c.addView(label("Cleared "+money(budget.balance(a,true))+" / Uncleared "+money(budget.balance(a,false)-budget.balance(a,true)),13,muted,false));if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,green,false));c.addView(button("View transactions",()->{accountFilter=a.id;search="";tab="Spending";render();}));c.addView(button("Reconcile",()->reconcile(a)));c.addView(button("Edit account",()->editAccount(a.id)));}
         content.addView(button("+ Add account",this::addAccount));if(openAccounts().size()>1)content.addView(button("Transfer between accounts",this::transfer));
         boolean anyClosed=false;for(Budget.Account a:budget.accounts)if(a.closed){if(!anyClosed)content.addView(label("Closed accounts",18,blue,true));anyClosed=true;LinearLayout c=card();c.addView(label(a.name,17,muted,true));c.addView(label("Closed. Its transactions stay in your history.",13,muted,false));c.addView(button("View transactions",()->{accountFilter=a.id;search="";tab="Spending";render();}));c.addView(button("Reopen account",()->change(()->accountById(a.id).closed=false)));}content.addView(label("Checking, savings and cash accounts are pooled for your plan. Transfers change where money lives, not its purpose. Spending on a credit card moves the category's money to the card's payment category, ready to pay it.",14,muted,false));
     }
     private void reflect(){
         LinearLayout totals=card();totals.addView(label("This month's cash flow",20,ink,true));totals.addView(label("Income "+money(budget.income(month)),21,green,true));totals.addView(label("Spending "+money(budget.spending(month)),21,ink,true));totals.addView(label("Difference "+money(budget.income(month)-budget.spending(month)),17,blue,true));
-        content.addView(label("Spending by category",20,ink,true));long total=budget.spending(month);for(Budget.Category c:budget.categories){long spent=Math.max(0,-budget.activity(c,month));if(spent==0)continue;LinearLayout r=card();r.addView(label(c.name+"  "+money(spent),16,ink,true));ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setProgress((int)(spent*100/Math.max(1,total)));r.addView(bar);}
+        content.addView(label("Spending by category",20,ink,true));long total=budget.spending(month);for(Budget.Category c:budget.categories){long spent=budget.spent(c,month);if(spent==0)continue;LinearLayout r=card();r.addView(label(c.name+"  "+money(spent),16,ink,true));ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setProgress(total<=0?0:(int)Math.min(100,spent*100/total));r.addView(bar);} // card payments aren't spending
         // Income vs spending, six months to this one: one axis from zero; the list below is the table view.
         LinearLayout flow=card();flow.addView(label("Income and spending",20,ink,true));
         int income=darkTheme?Color.parseColor("#3987E5"):Color.parseColor("#2A78D6"),spend=darkTheme?Color.parseColor("#D95926"):Color.parseColor("#EB6834");
@@ -397,7 +403,7 @@ public class MainActivity extends Activity {
         f.addView(label("Quick amounts",12,muted,true));YearMonth last=month.minusMonths(1);long lastAssigned=budget.assigned(c,last),spentLast=budget.spent(c,last),average=budget.averageSpent(c,month);
         List<String> names=new ArrayList<>();List<Long> changes=new ArrayList<>();
         long needed=budget.needed(c,month);if(c.target>0&&needed>0){names.add("Needed for target: "+money(needed));changes.add(needed);}
-        names.add("Assigned last month: "+money(lastAssigned));changes.add(lastAssigned-now);names.add("Spent last month: "+money(spentLast));changes.add(spentLast-now);names.add("Average spent, last 3 months: "+money(average));changes.add(average-now);
+        names.add("Assigned last month: "+money(lastAssigned));changes.add(lastAssigned-now);if(!c.payment()){names.add("Spent last month: "+money(spentLast));changes.add(spentLast-now);names.add("Average spent, last 3 months: "+money(average));changes.add(average-now);} // a card payment isn't spending
         long reset=budget.resetChange(c,month);if(reset!=0){names.add(reset==-now?"Reset to $0":"Return what's left: "+money(-reset));changes.add(reset);}
         for(int i=0;i<names.size();i++){long change=changes.get(i);Button b=button(names.get(i),()->amount.setText(decimal(change)));b.setTextSize(12);b.setMinHeight(dp(40));b.setMinimumHeight(dp(40));f.addView(b);}
         dialog("Assign to "+c.name,f,()->budget.assign(categoryById(c.id),month,Budget.parse(amount.getText().toString())));
@@ -451,8 +457,8 @@ public class MainActivity extends Activity {
         // A photo (e.g. a receipt), kept on this phone. Picking one leaves this form open (see onRestart).
         String[] photo={old!=null?old.photo:""};LinearLayout photoBox=column();if(sched==null)f.addView(photoBox);Runnable[] showPhotoBox=new Runnable[1];
         showPhotoBox[0]=()->{photoBox.removeAllViews();
-            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->{photoTarget=u->{try{photo[0]=copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}showPhotoBox[0].run();};pickingPhoto=true;
-                try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PHOTO);}catch(Exception e){pickingPhoto=false;photoTarget=null;toast("No app on this device can pick a photo.");}}));
+            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->{photoTarget=u->{try{photo[0]=copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}showPhotoBox[0].run();};pickingPhoto=true;photoForm=editors.isEmpty()?null:editors.get(editors.size()-1); // this form: the newest open one
+                try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PHOTO);}catch(Exception e){pickingPhoto=false;photoTarget=null;photoForm=null;toast("No app on this device can pick a photo.");}}));
             else{android.graphics.Bitmap bm=photoBitmap(photo[0],480);if(bm==null)photoBox.addView(label("The photo isn't on this phone.",13,muted,false));else{ImageView img=new ImageView(this);img.setImageBitmap(bm);img.setAdjustViewBounds(true);img.setScaleType(ImageView.ScaleType.FIT_START);img.setContentDescription("Photo of this transaction. Double tap to view it larger.");img.setOnClickListener(v->viewPhoto(photo[0]));photoBox.addView(img,new LinearLayout.LayoutParams(-1,dp(160)));}
                 photoBox.addView(button("Remove photo",()->{photo[0]="";showPhotoBox[0].run();}));}};
         showPhotoBox[0].run();
@@ -462,13 +468,13 @@ public class MainActivity extends Activity {
         Spinner repeatField=repeat;
         Runnable adapt=()->{int selected=kind.getSelectedItemPosition();boolean income=selected==1;categoryFields.setVisibility(income?View.GONE:View.VISIBLE);payee.setHint(income?"Income source":selected==2?"Refund from":"Payee");guidance.setText(income?"Adds money into To budget.":selected==2?"Returns money to the original spending category.":"Reduces the available money in your category.");};adapt.run();kind.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){adapt.run();}public void onNothingSelected(AdapterView<?> p){}});
         dialog(sched!=null?"Edit upcoming transaction":old==null?"Add transaction":"Edit transaction",f,()->{int k=kind.getSelectedItemPosition();if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
-            boolean isSplit=k!=1&&!parts.isEmpty();
+            boolean isSplit=k!=1&&!parts.isEmpty();if(old!=null&&budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile."); // the data may have been read in again since the form opened
             String p=required(payee),cat=k==1?"":isSplit?Budget.SPLIT:categories.get(category.getSelectedItemPosition()).id,acc=accounts.get(account.getSelectedItemPosition()).id,memoText=memo.getText().toString().trim();long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];LocalDate when=LocalDate.parse((String)day.getTag());
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
                 if(isSplit)throw new IllegalArgumentException("A split can't be upcoming yet. Save it on its day, or use one category.");
                 Budget.Scheduled s=new Budget.Scheduled(p,cat,acc,when.toString(),cents,rep);s.memo=memoText;if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;}
-                if(sched==null&&!when.isAfter(LocalDate.now())){budget.validate(s);budget.enter(s);if(!rep.equals("Never"))budget.scheduled.add(s);return;} // today or earlier: entered now, the repeat continues
+                if(sched==null&&!when.isAfter(LocalDate.now())){budget.validate(s);budget.enter(s,photo[0],cleared.isChecked());if(!rep.equals("Never"))budget.scheduled.add(s);return;} // today or earlier: entered now (with its photo and Cleared tick), the repeat continues
                 budget.validate(s);budget.scheduled.removeIf(t->t.id.equals(s.id));budget.scheduled.add(s);return;
             }
             Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;e.photo=photo[0];if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;e.splits.add(s);}e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
@@ -510,7 +516,7 @@ public class MainActivity extends Activity {
     private final List<AlertDialog> editors=new ArrayList<>();
     private void transfer(){editTransfer(null,null,0);}
     /** A card payment: a transfer from a cash account to the card, for what's set aside (or what's owed, if less). */
-    private void payCard(String id){Budget.Account card=budget.account(id);if(card==null)return;Budget.Category p=budget.paymentCategory(card);long owed=-budget.balance(card,false),ready=p==null?0:Math.max(0,budget.available(p,month));editTransfer(null,id,Math.max(0,Math.min(owed,ready)));}
+    private void payCard(String id){Budget.Account card=budget.account(id);if(card==null)return;editTransfer(null,id,budget.toPay(card));} // what's set aside now, whatever month is on screen
     private void editTransfer(Budget.Entry old){editTransfer(old,null,0);}
     private void editTransfer(Budget.Entry old,String toId,long preset){
         List<Budget.Account> accounts=old==null?openAccounts():openAccounts(budget.account(old.account),budget.account(old.destination));String[] names=accounts.stream().map(a->a.name).toArray(String[]::new);

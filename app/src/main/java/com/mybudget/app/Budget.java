@@ -77,7 +77,9 @@ public final class Budget {
         if(!Arrays.asList(Scheduled.REPEATS).contains(s.repeat))throw new IllegalArgumentException("Choose how often it repeats.");
     }
     /** Enters [s]'s current date as a transaction and moves it to its next date (or removes it). */
-    public Entry enter(Scheduled s){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;e.billKey=s.billKey;validate(e);entries.add(0,e);advance(s);return e;}
+    public Entry enter(Scheduled s){return enter(s,"",false);}
+    /** As enter(s), with a photo and the Cleared tick (a new repeating transaction dated today or earlier). */
+    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
     /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
@@ -105,7 +107,18 @@ public final class Budget {
     public long activity(Category c,YearMonth m){if(c.payment())return paymentActivity(c,m);long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn(c.id);return n;}
     private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));
         if(c.payment()){Account card=account(c.cardAccount);if(card!=null&&YearMonth.from(LocalDate.parse(card.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(card.date));}return first;}
-    public long available(Category c,YearMonth month){long n=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1))n=Math.max(0,n)+assigned(c,m)+activity(c,m);return n;}
+    // Overspending (a negative balance) resets each month: it's taken from To budget. A card payment category's negative
+    // balance that is card credit (a refund after the card was paid, a reward sent to To budget) carries on instead.
+    public long available(Category c,YearMonth month){long n=0,start=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1)){n=n<0&&c.payment()?Math.max(n,-cardCredit(c,m.minusMonths(1),start)):Math.max(0,n);start=n;n+=assigned(c,m)+activity(c,m);}return n;}
+    /**
+     * How far payment category [pc] may stay below zero after [m] (which it started at [start]): the card's credit, what
+     * already carried, and its To budget parts in [m]. Below that, more was paid than was set aside: overspending.
+     */
+    private long cardCredit(Category pc,YearMonth m,long start){Account card=account(pc.cardAccount);if(card==null)return 0;long freed=0;for(Entry e:entries)if(!e.transfer()&&e.account.equals(card.id)&&e.date.startsWith(m.toString()))freed+=e.amountIn("");return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,freed);}
+    /** Overspending to cover in [m]. A payment category below zero by card credit has nothing to cover: it carries on. */
+    public long toCover(Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
+    /** What Pay card fills in: what's set aside this month (below zero is nothing to pay), or what's owed, if less. */
+    public long toPay(Account card){Category p=paymentCategory(card);long owed=-balance(card,false),ready=p==null?0:Math.max(0,available(p,YearMonth.now()));return Math.max(0,Math.min(owed,ready));}
     /**
      * Money in cash accounts at the end of [month] (what the plan assigns). Credit cards hold debt, not money: their
      * spending isn't cash (it moves money between categories instead), but a payment from a cash account is. A part
@@ -225,7 +238,7 @@ public final class Budget {
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference (on a card, see paymentActivity). */
     public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
     // Quick assign: what each choice adds to this month's Assigned.
-    public long spent(Category c,YearMonth m){return Math.max(0,-activity(c,m));}
+    public long spent(Category c,YearMonth m){return c.payment()?0:Math.max(0,-activity(c,m));} // a card payment isn't spending
     public long averageSpent(Category c,YearMonth m){long n=0;for(int i=1;i<=3;i++)n+=spent(c,m.minusMonths(i));return n/3;}
     /** Change that puts Assigned at 0, or as near as the rules allow (money already spent can't be returned). */
     public long resetChange(Category c,YearMonth m){long a=assigned(c,m);return a<=0?-a:-Math.min(a,Math.max(0,available(c,m)));}
