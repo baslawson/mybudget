@@ -5,12 +5,16 @@ import java.util.*;
 
 /** Versioned storage; old snapshots are retained separately by the Activity. */
 public final class BudgetStore {
+    // Version 4 adds scheduled transactions (and, in later fields of the same version, splits and credit cards):
+    // MyBudget before it would drop them, so it must refuse the data instead of reading it.
+    public static final int VERSION=4;
     public static String encode(Budget b) throws JSONException {
-        JSONObject root=new JSONObject().put("version",3);JSONArray categories=new JSONArray(),accounts=new JSONArray(),entries=new JSONArray();
+        JSONObject root=new JSONObject().put("version",VERSION);JSONArray categories=new JSONArray(),accounts=new JSONArray(),entries=new JSONArray(),scheduled=new JSONArray();
         for(Budget.Category c:b.categories){JSONObject assigned=new JSONObject();for(Map.Entry<String,Long> a:c.assigned.entrySet())assigned.put(a.getKey(),a.getValue());categories.put(new JSONObject().put("id",c.id).put("name",c.name).put("group",c.group).put("target",c.target).put("targetType",c.targetType).put("due",c.due).put("hidden",c.hidden).put("snoozed",c.snoozed).put("note",c.note).put("dueDay",c.dueDay).put("assigned",assigned));}
         for(Budget.Account a:b.accounts)accounts.put(new JSONObject().put("id",a.id).put("name",a.name).put("date",a.date).put("opening",a.opening).put("reconciled",a.reconciled).put("closed",a.closed));
         for(Budget.Entry e:b.entries)entries.put(new JSONObject().put("id",e.id).put("payee",e.payee).put("category",e.category).put("account",e.account).put("destination",e.destination).put("date",e.date).put("amount",e.amount).put("memo",e.memo).put("cleared",e.cleared).put("externalId",e.externalId).put("billKey",e.billKey));
-        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).toString();
+        for(Budget.Scheduled s:b.scheduled)scheduled.put(new JSONObject().put("id",s.id).put("payee",s.payee).put("category",s.category).put("account",s.account).put("next",s.next).put("repeat",s.repeat).put("day",s.day).put("amount",s.amount).put("memo",s.memo).put("billKey",s.billKey));
+        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).toString();
     }
     /** A backup file: the saved budget plus what marks it as MyBudget's, and when it was made (local date-time). */
     public static final int BACKUP_VERSION=1;
@@ -29,12 +33,15 @@ public final class BudgetStore {
     public static Budget decode(String raw) throws JSONException {
         JSONObject root=new JSONObject(raw);if(root.optInt("version",1)==1)return migrate(root);
         // Version 3 added expenses sent by other apps (externalId, billKey); version 2 reads without them. Optional
-        // fields added later read with defaults (category hidden/snoozed/note/dueDay, account closed): no new version.
-        int version=root.getInt("version");if(version!=2&&version!=3)throw new JSONException("Unsupported budget version.");
+        // fields added later read with defaults (category hidden/snoozed/note/dueDay, account closed). Version 4: scheduled.
+        int version=root.getInt("version");if(version<2||version>VERSION)throw new JSONException("Unsupported budget version.");
         Budget b=new Budget();JSONArray cats=root.getJSONArray("categories"),accounts=root.getJSONArray("accounts"),entries=root.getJSONArray("entries");
         for(int i=0;i<cats.length();i++){JSONObject j=cats.getJSONObject(i);Budget.Category c=new Budget.Category(j.getString("name"));c.id=j.getString("id");c.group=j.getString("group");c.target=j.getLong("target");c.targetType=j.getString("targetType");c.due=j.getString("due");c.hidden=j.optBoolean("hidden",false);c.snoozed=j.optString("snoozed","");c.note=j.optString("note","");c.dueDay=Math.max(0,Math.min(31,j.optInt("dueDay",0)));JSONObject assigned=j.getJSONObject("assigned");Iterator<String> keys=assigned.keys();while(keys.hasNext()){String key=keys.next();YearMonth.parse(key);c.assigned.put(key,assigned.getLong(key));}b.categories.add(c);}
         for(int i=0;i<accounts.length();i++){JSONObject j=accounts.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Account a=new Budget.Account(j.getString("name"),j.getString("date"),j.getLong("opening"));a.id=j.getString("id");a.reconciled=j.optString("reconciled","");a.closed=j.optBoolean("closed",false);b.accounts.add(a);}
         for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");if(b.account(e.account)==null||(!e.destination.isEmpty()&&b.account(e.destination)==null)||(!e.category.isEmpty()&&b.category(e.category)==null))throw new JSONException("Invalid saved transaction.");b.entries.add(e);}
+        JSONArray scheduled=root.optJSONArray("scheduled");
+        if(scheduled!=null)for(int i=0;i<scheduled.length();i++){JSONObject j=scheduled.getJSONObject(i);LocalDate.parse(j.getString("next"));Budget.Scheduled s=new Budget.Scheduled(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("next"),j.getLong("amount"),j.getString("repeat"));s.id=j.getString("id");s.day=Math.max(0,Math.min(31,j.optInt("day",s.day)));s.memo=j.optString("memo","");s.billKey=j.optString("billKey","");
+            if(b.account(s.account)==null||(!s.category.isEmpty()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");b.scheduled.add(s);}
         return b;
     }
     private static Budget migrate(JSONObject root)throws JSONException {

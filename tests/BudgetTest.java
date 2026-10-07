@@ -33,8 +33,31 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();
+        csv();batchOne();phaseB();phaseC();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseC(){
+        java.time.LocalDate d=java.time.LocalDate.of(2025,1,31);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);Budget.Category rent=new Budget.Category("Rent"),food=new Budget.Category("Food");b.categories.add(rent);b.categories.add(food);
+        // Monthly repeats keep their day: 31 Jan, 28 Feb, 31 Mar.
+        Budget.Scheduled s=new Budget.Scheduled("Landlord",rent.id,bank.id,d.toString(),-50000,"Monthly");same(s.after(d).toString(),"2025-02-28","Short month");same(s.after(s.after(d)).toString(),"2025-03-31","Day kept");
+        same(new Budget.Scheduled("x","",bank.id,"2025-01-01",1,"Every 2 weeks").after(java.time.LocalDate.of(2025,1,1)).toString(),"2025-01-15","Fortnightly");if(new Budget.Scheduled("x","",bank.id,"2025-01-01",1,"Never").after(d)!=null)throw new AssertionError("Never repeats");
+        b.validate(s);b.scheduled.add(s);
+        // Due, enter, skip.
+        if(b.due(java.time.LocalDate.of(2025,1,30)).size()!=0||b.due(d).size()!=1)throw new AssertionError("Due on its day");
+        Budget.Entry e=b.enter(s);same(e.date,"2025-01-31","Entered on its date");equal(e.amount,-50000,"Entered amount");same(s.next,"2025-02-28","Moves to the next date");equal(b.entries.size(),1,"One entry");
+        b.advance(s);same(s.next,"2025-03-31","Skipped");equal(b.entries.size(),1,"Skip adds nothing");
+        Budget.Scheduled once=new Budget.Scheduled("Gift",food.id,bank.id,"2025-01-10",-1000,"Never");b.scheduled.add(once);b.advance(once);if(b.scheduled.contains(once))throw new AssertionError("A one-off goes when skipped");
+        // Upcoming bills feed Fund targets: need = upcoming - available, by the earliest date.
+        YearMonth mar=YearMonth.of(2025,3);Budget.Scheduled weekly=new Budget.Scheduled("Shop",food.id,bank.id,"2025-03-03",-2000,"Weekly");b.scheduled.add(weekly);
+        equal(b.datesIn(weekly,mar).size(),5,"Five Mondays in March 2025");equal(b.upcoming(food,mar),10000,"Weekly bills in the month");equal(b.upcoming(rent,mar),50000,"Monthly bill");
+        b.assign(food,mar,4000);equal(b.fundNeed(food,mar),6000,"Upcoming minus available");food.target=20000;food.targetType="Monthly";equal(b.fundNeed(food,mar),16000,"Target need when larger");
+        same(b.fundOrder(mar).get(0).name,"Food","Earliest bill first (3rd before 31st)");
+        // Scheduled transactions count as use.
+        Budget.Account spare=new Budget.Account("Spare","2025-01-01",0);b.accounts.add(spare);weekly.account=spare.id;rejects(()->b.close(spare));rejects(()->b.deleteAccount(spare));
+        Budget.Category other=new Budget.Category("Other");b.categories.add(other);rejects(()->b.deleteCategory(food,null));b.deleteCategory(food,other);same(weekly.category,other.id,"Scheduled moves with a deleted category");
+        // Validation: no zero, no unknown repeat, not before the account opened.
+        rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2025-05-01",0,"Monthly")));rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2025-05-01",-1,"Daily")));rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2024-12-01",-1,"Never")));
     }
     static void phaseB(){
         YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1);
@@ -44,7 +67,7 @@ public class BudgetTest {
         // Snooze: nothing needed in that month only.
         equal(b.needed(rent,jan),50000,"Needed before snooze");rent.snoozed=jan.toString();equal(b.needed(rent,jan),0,"Snoozed month");equal(b.needed(rent,feb),50000,"Next month asks again");rent.snoozed="";
         // Fund order: earliest due day first, no day last, otherwise plan order.
-        same(b.fundOrder().get(0).name+","+b.fundOrder().get(1).name+","+b.fundOrder().get(2).name,"Phone,Rent,Food","Fund order by due day");
+        same(b.fundOrder(jan).get(0).name+","+b.fundOrder(jan).get(1).name+","+b.fundOrder(jan).get(2).name,"Phone,Rent,Food","Fund order by due day");
         // Plan reset returns every positive Available; overspent stays.
         b.assign(rent,jan,40000);b.assign(food,jan,30000);b.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2025-01-11",-10000));
         Budget.Entry over=new Budget.Entry("Bill",phone.id,bank.id,"2025-01-12",-500);b.entries.add(over);

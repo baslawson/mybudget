@@ -167,9 +167,10 @@ public class MainActivity extends Activity {
     private int overspent(){int n=0;for(Budget.Category c:budget.categories)if(budget.available(c,month)<0)n++;return n;}
     private void home(){
         readyCard();content.addView(button("+ Add transaction",()->transaction(null)));
+        int due=budget.due(LocalDate.now()).size();if(due>0){LinearLayout c=card();c.addView(label(count(due,"upcoming transaction is","upcoming transactions are")+" due",19,amber,true));c.addView(label("Enter them so your plan matches your accounts, or skip any that didn't happen.",14,muted,false));c.addView(button("Review",()->{tab="Spending";render();}));}
         if(budget.accounts.isEmpty()){LinearLayout c=card();c.addView(label("Start with the money you have",21,ink,true));c.addView(label("Add your bank, savings or cash account and its current balance. Then assign that money in your plan.",15,muted,false));c.addView(button("Add your first account",this::addAccount));}
         if(overspent()>0){LinearLayout c=card();c.addView(label("Cover "+count(overspent(),"overspent category","overspent categories"),19,red,true));c.addView(label("Move money to cover spending before trusting other available balances.",14,muted,false));c.addView(button("Review plan",()->{tab="Plan";render();}));}
-        long need=0;for(Budget.Category c:budget.categories)if(!c.hidden)need+=budget.needed(c,month);
+        long need=0;for(Budget.Category c:budget.categories)if(!c.hidden)need+=budget.fundNeed(c,month);
         LinearLayout progress=card();progress.addView(label("Your funding progress",19,ink,true));progress.addView(label(money(need)+" still needed this month",16,need>0?amber:green,true));progress.addView(label("Targets tell you what to fund. They do not create money.",14,muted,false));
         content.addView(label("Your priorities",20,ink,true));int count=0;for(Budget.Category c:budget.categories)if(c.target>0&&!c.hidden){count++;categoryCard(c);}if(count==0)content.addView(label("Add targets in Plan for bills, everyday spending and future goals.",15,muted,false));
     }
@@ -179,6 +180,7 @@ public class MainActivity extends Activity {
         LinearLayout details=new LinearLayout(this);TextView assigned=label("Assigned  "+money(budget.assigned(c,month)),11,muted,false),activity=label("Activity  "+money(budget.activity(c,month)),11,muted,false);details.addView(assigned,new LinearLayout.LayoutParams(0,-2,1));activity.setGravity(Gravity.END);details.addView(activity,new LinearLayout.LayoutParams(0,-2,1));row.addView(details);
         if(c.target>0){long base=c.targetType.equals("Monthly")?budget.assigned(c,month):c.targetType.equals("Balance")?available:c.target-need;progress(row,base,c.target,status);row.addView(label(targetDescription(c),11,muted,false));row.addView(c.snoozed.equals(month.toString())?label("Target snoozed this month",12,muted,true):label(need==0?"Funded for this month":money(need)+" left to fund this month",12,need>0?amber:green,true));}
         if(!c.note.isEmpty())row.addView(label(c.note,12,muted,false));
+        long upcoming=budget.upcoming(c,month);if(upcoming>0)row.addView(label("Upcoming bills this month: "+money(upcoming),12,muted,false));
         if(available<0)row.addView(label("Overspent by "+money(-available)+" - tap to cover",12,red,true));
         row.setOnClickListener(v->categoryDetails(c));
     }
@@ -230,8 +232,16 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel",null).setPositiveButton("Cover",(d2,w)->change(()->{if(fromId==null)budget.assign(categoryById(id),month,amount);else budget.move(categoryById(fromId),categoryById(id),month,amount);})).show();
         }).show();
     }
+    /** Spending's Upcoming section: scheduled transactions by date; due ones first and marked. */
+    private void upcomingList(){
+        if(budget.scheduled.isEmpty())return;List<Budget.Scheduled> list=new ArrayList<>(budget.scheduled);list.sort(Comparator.comparing(s->s.next));
+        content.addView(label("Upcoming",18,blue,true));
+        for(Budget.Scheduled s:list){if(!accountFilter.isEmpty()&&!s.account.equals(accountFilter))continue;boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=budget.category(s.category);Budget.Account a=budget.account(s.account);
+            LinearLayout row=card();row.addView(label(s.payee,17,ink,true));row.addView(label((s.category.isEmpty()?"Ready to Assign":c==null?"":c.name)+" / "+(a==null?"":a.name)+" / "+pretty(s.next)+" · "+repeatLabel(s),12,muted,false));
+            row.addView(label(money(s.amount),17,s.amount>0?green:ink,true));if(isDue)row.addView(label("Due - tap to enter or skip",12,amber,true));String id=s.id;row.setOnClickListener(v->dueActions(id));}
+    }
     private void spending(){
-        content.addView(button("+ Add transaction",()->transaction(null)));if(!accountFilter.isEmpty())content.addView(label("Account: "+budget.account(accountFilter).name,14,blue,true));
+        content.addView(button("+ Add transaction",()->transaction(null)));upcomingList();if(!accountFilter.isEmpty())content.addView(label("Account: "+budget.account(accountFilter).name,14,blue,true));
         EditText query=field(content,"Search payee, category or memo",false);query.setText(search);LinearLayout list=column();content.addView(list);fillEntries(list);
         query.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();fillEntries(list);}public void afterTextChanged(Editable e){}});
     }
@@ -271,10 +281,12 @@ public class MainActivity extends Activity {
     private String date(EditText e){LocalDate d=LocalDate.parse((String)e.getTag());if(d.isAfter(LocalDate.now())||d.getYear()<1900)throw new IllegalArgumentException("Use a date between 1900 and today.");return d.toString();}
     static String pretty(String iso){try{return LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("d MMM yyyy",Locale.forLanguageTag("en-AU")));}catch(Exception e){return iso;}}
     /** A date shown as "7 Oct 2026" that opens the date picker (1900 to today); the ISO date is kept in its tag. */
-    private EditText dateField(LinearLayout f,String iso){
+    private EditText dateField(LinearLayout f,String iso){return dateField(f,iso,false);}
+    /** [future]: dates after today allowed (up to five years), for upcoming transactions. */
+    private EditText dateField(LinearLayout f,String iso,boolean future){
         EditText e=new EditText(this);e.setTag(iso);e.setText(pretty(iso));e.setTextColor(ink);e.setFocusable(false);e.setCursorVisible(false);e.setContentDescription("Date, "+pretty(iso)+". Double tap to change.");
         e.setOnClickListener(v->{LocalDate d=LocalDate.parse((String)e.getTag());DatePickerDialog picker=new DatePickerDialog(this,(p,y,m,day)->{String chosen=LocalDate.of(y,m+1,day).toString();e.setTag(chosen);e.setText(pretty(chosen));e.setContentDescription("Date, "+pretty(chosen)+". Double tap to change.");},d.getYear(),d.getMonthValue()-1,d.getDayOfMonth());
-            picker.getDatePicker().setMaxDate(System.currentTimeMillis());picker.getDatePicker().setMinDate(LocalDate.of(1900,1,1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli());picker.show();});
+            picker.getDatePicker().setMaxDate(future?LocalDate.now().plusYears(5).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli():System.currentTimeMillis());picker.getDatePicker().setMinDate(LocalDate.of(1900,1,1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli());picker.show();});
         f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;
     }
     private void onText(EditText e,Runnable changed){e.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){changed.run();}public void afterTextChanged(Editable x){}});}
@@ -303,7 +315,7 @@ public class MainActivity extends Activity {
     }
     private String[] availableNames(){return budget.categories.stream().map(c->c.name+" ("+money(budget.available(c,month))+")").toArray(String[]::new);}
     private void move(){if(budget.categories.size()<2){toast("Create two categories first.");return;}LinearLayout f=form();Spinner from=spinner(f,"From",availableNames(),0),to=spinner(f,"To",availableNames(),1);EditText amount=field(f,"Amount (AUD)",true);dialog("Move money",f,()->budget.move(budget.categories.get(from.getSelectedItemPosition()),budget.categories.get(to.getSelectedItemPosition()),month,Budget.cents(amount.getText().toString())));}
-    private void autoAssign(){long remaining=Math.max(0,budget.spendable(month));long total=0;for(Budget.Category c:budget.categories)if(!c.hidden)total+=budget.needed(c,month);long fund=Math.min(remaining,total);if(fund==0){toast("No available money or underfunded targets.");return;}new AlertDialog.Builder(this).setTitle("Fund targets").setMessage("Assign "+money(fund)+" to underfunded targets, earliest due first?").setNegativeButton("Cancel",null).setPositiveButton("Fund",(d,w)->{try{commit(()->{long left=Math.max(0,budget.spendable(month));for(Budget.Category c:budget.fundOrder()){if(c.hidden)continue;long n=Math.min(left,budget.needed(c,month));if(n>0){budget.assign(c,month,n);left-=n;}}});render();}catch(Exception e){toast(e.getMessage());}}).show();}
+    private void autoAssign(){long remaining=Math.max(0,budget.spendable(month));long total=0;for(Budget.Category c:budget.categories)if(!c.hidden)total+=budget.fundNeed(c,month);long fund=Math.min(remaining,total);if(fund==0){toast("No available money or underfunded targets.");return;}new AlertDialog.Builder(this).setTitle("Fund targets").setMessage("Assign "+money(fund)+" to underfunded targets and upcoming bills, earliest due first?").setNegativeButton("Cancel",null).setPositiveButton("Fund",(d,w)->{try{commit(()->{long left=Math.max(0,budget.spendable(month));for(Budget.Category c:budget.fundOrder(month)){if(c.hidden)continue;long n=Math.min(left,budget.fundNeed(c,month));if(n>0){budget.assign(c,month,n);left-=n;}}});render();}catch(Exception e){toast(e.getMessage());}}).show();}
     private void editCategory(Budget.Category existing){
         LinearLayout f=form();EditText name=field(f,"Category name",false),group=field(f,"Group (Bills, Everyday, Savings...)",false);String[] types={"Refill each month","Set aside each month","Save toward a balance"};Spinner type=spinner(f,"Target behavior",types,existing==null?0:existing.targetType.equals("Monthly")?1:existing.targetType.equals("Balance")?2:0);TextView explanation=label("",13,muted,false);f.addView(explanation);EditText amount=field(f,"Target amount (0 for none)",true);LinearLayout deadline=column();f.addView(deadline);EditText due=field(deadline,"Due month (YYYY-MM, optional)",false);
         LinearLayout dayRow=column();f.addView(dayRow);EditText dueDay=field(dayRow,"Due day of the month (1-31, optional)",false);dueDay.setInputType(InputType.TYPE_CLASS_NUMBER);dayRow.addView(label("Fund targets funds the earliest due first.",12,muted,false));
@@ -313,22 +325,52 @@ public class MainActivity extends Activity {
         dialog(existing==null?"New category":"Edit category & target",f,()->{String n=required(name),g=required(group);for(Budget.Category c:budget.categories)if((existing==null||!c.id.equals(existing.id))&&c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That category already exists.");long target=amount.getText().toString().trim().isEmpty()?0:Budget.parse(amount.getText().toString());if(target<0)throw new IllegalArgumentException("Target cannot be negative.");String dueMonth=type.getSelectedItemPosition()==2?due.getText().toString().trim():"";if(!dueMonth.isEmpty()){YearMonth m=YearMonth.parse(dueMonth);if(m.getYear()<1900||m.getYear()>2100)throw new IllegalArgumentException("Choose a due year between 1900 and 2100.");}Budget.Category c=existing==null?new Budget.Category(n):budget.category(existing.id);c.name=n;c.group=g;c.target=target;c.targetType=new String[]{"Refill","Monthly","Balance"}[type.getSelectedItemPosition()];c.due=dueMonth;String day=dueDay.getText().toString().trim();int d=0;if(type.getSelectedItemPosition()!=2&&!day.isEmpty()){try{d=Integer.parseInt(day);}catch(NumberFormatException e){d=-1;}if(d<1||d>31)throw new IllegalArgumentException("Enter a due day from 1 to 31, or leave it empty.");}c.dueDay=d;c.note=note.getText().toString().trim();if(existing==null)budget.categories.add(c);});
     }
     private void addAccount(){LinearLayout f=form();EditText name=field(f,"Account name",false),opening=field(f,"Current cash balance (AUD)",true);f.addView(label("Opening date",12,muted,true));EditText day=dateField(f,LocalDate.now().toString());f.addView(label("Add cash, checking or savings. Enter transactions from the opening date onward. Credit accounts are not supported yet.",13,muted,false));dialog("Add account",f,()->{String n=required(name);for(Budget.Account a:budget.accounts)if(a.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");long balance=Budget.parse(opening.getText().toString());if(balance<0)throw new IllegalArgumentException("Use a nonnegative cash opening balance.");budget.accounts.add(new Budget.Account(n,date(day),balance));});}
-    private void transaction(Budget.Entry old){
+    private static final String[] REPEAT_LABELS={"Doesn't repeat","Weekly","Every 2 weeks","Monthly","Every 3 months","Yearly"};
+    private void transaction(Budget.Entry old){transaction(old,null);}
+    /**
+     * Adds or edits a transaction ([old]) or an upcoming one ([sched]). A new one with a future date or a repeat
+     * becomes upcoming: it waits in Spending until its day, when the user enters or skips it.
+     */
+    private void transaction(Budget.Entry old,Budget.Scheduled sched){
         if(budget.accounts.isEmpty()){toast("Add an account first.");addAccount();return;}if(old!=null&&old.transfer()){editTransfer(old);return;}
-        List<Budget.Account> accounts=old==null?openAccounts():openAccounts(budget.account(old.account));List<Budget.Category> categories=visibleCategories(old==null?null:budget.category(old.category));
+        String keepAccount=old!=null?old.account:sched!=null?sched.account:null,keepCategory=old!=null?old.category:sched!=null?sched.category:"";long oldAmount=old!=null?old.amount:sched!=null?sched.amount:-1;
+        List<Budget.Account> accounts=keepAccount==null?openAccounts():openAccounts(budget.account(keepAccount));List<Budget.Category> categories=visibleCategories(budget.category(keepCategory));
         if(accounts.isEmpty()){toast("All your accounts are closed. Reopen one in Accounts first.");return;}
-        LinearLayout f=form();Spinner kind=spinner(f,"Type",new String[]{"Expense","Income","Category refund"},old==null?0:old.amount<0?0:old.category.isEmpty()?1:2);TextView guidance=label("",12,muted,false);f.addView(guidance);
+        LinearLayout f=form();Spinner kind=spinner(f,"Type",new String[]{"Expense","Income","Category refund"},oldAmount<0?0:keepCategory.isEmpty()?1:2);TextView guidance=label("",12,muted,false);f.addView(guidance);
         // Payees used before are suggested; picking one on a new transaction fills in the category it had last time.
         AutoCompleteTextView payee=new AutoCompleteTextView(this);payee.setSingleLine(true);payee.setTextColor(ink);payee.setThreshold(1);payee.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_dropdown_item_1line,budget.payees()));f.addView(payee,new LinearLayout.LayoutParams(-1,-2));
-        f.addView(label("Amount (AUD)",12,muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);f.addView(label("Date",12,muted,true));EditText day=dateField(f,old==null?LocalDate.now().toString():old.date);Spinner account=spinner(f,"Account",accounts.stream().map(a->a.name).toArray(String[]::new),old==null?0:accounts.indexOf(budget.account(old.account)));LinearLayout categoryFields=column();f.addView(categoryFields);Spinner category=spinner(categoryFields,"Category",categories.stream().map(c->c.name).toArray(String[]::new),old==null?0:categories.indexOf(budget.category(old.category)));
-        boolean[] categoryChosen={old!=null};category.setOnTouchListener((v,ev)->{categoryChosen[0]=true;return false;});
+        f.addView(label("Amount (AUD)",12,muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);f.addView(label("Date",12,muted,true));EditText day=dateField(f,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);Spinner account=spinner(f,"Account",accounts.stream().map(a->a.name).toArray(String[]::new),keepAccount==null?0:accounts.indexOf(budget.account(keepAccount)));LinearLayout categoryFields=column();f.addView(categoryFields);Spinner category=spinner(categoryFields,"Category",categories.stream().map(c->c.name).toArray(String[]::new),keepCategory.isEmpty()?0:categories.indexOf(budget.category(keepCategory)));
+        boolean[] categoryChosen={old!=null||sched!=null};category.setOnTouchListener((v,ev)->{categoryChosen[0]=true;return false;});
         payee.setOnItemClickListener((p,v,position,id)->{Budget.Entry last=budget.lastForPayee(payee.getText().toString());if(old!=null||categoryChosen[0]||last==null)return;
             if(last.category.isEmpty()){kind.setSelection(1);return;}int i=categories.indexOf(budget.category(last.category));if(i<0)return;category.setSelection(i);if(kind.getSelectedItemPosition()==1)kind.setSelection(last.amount<0?0:2);});
         LinearLayout noteFields=column();EditText memo=field(noteFields,"Note (optional)",false);Button note=button(old!=null&&!old.memo.isEmpty()?"Hide note":"+ Add a note",()->{});f.addView(note);f.addView(noteFields);noteFields.setVisibility(old!=null&&!old.memo.isEmpty()?View.VISIBLE:View.GONE);note.setOnClickListener(v->{boolean show=noteFields.getVisibility()!=View.VISIBLE;noteFields.setVisibility(show?View.VISIBLE:View.GONE);note.setText(show?"Hide note":"+ Add a note");});CheckBox cleared=new CheckBox(this);cleared.setText("Cleared at the bank");cleared.setMinHeight(dp(48));f.addView(cleared);
+        Spinner repeat=null;if(old==null){repeat=spinner(f,"Repeat",REPEAT_LABELS,sched==null?0:Arrays.asList(Budget.Scheduled.REPEATS).indexOf(sched.repeat));f.addView(label("A future date or a repeat makes it upcoming: it waits in Spending, and you enter it when the day comes.",12,muted,false));}
+        if(sched!=null){cleared.setVisibility(View.GONE);payee.setText(sched.payee,false);amount.setText(decimal(Math.abs(sched.amount)));memo.setText(sched.memo);if(!sched.memo.isEmpty()){noteFields.setVisibility(View.VISIBLE);note.setText("Hide note");}f.addView(button("Delete upcoming transaction",()->deleteScheduled(sched.id)));}
         if(old!=null){payee.setText(old.payee,false);amount.setText(decimal(Math.abs(old.amount)));memo.setText(old.memo);cleared.setChecked(old.cleared);f.addView(button("Delete transaction",()->delete(old)));}
+        Spinner repeatField=repeat;
         Runnable adapt=()->{int selected=kind.getSelectedItemPosition();boolean income=selected==1;categoryFields.setVisibility(income?View.GONE:View.VISIBLE);payee.setHint(income?"Income source":selected==2?"Refund from":"Payee");guidance.setText(income?"Adds money to Ready to Assign.":selected==2?"Returns money to the original spending category.":"Reduces the available money in your category.");};adapt.run();kind.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){adapt.run();}public void onNothingSelected(AdapterView<?> p){}});
-        dialog(old==null?"Add transaction":"Edit transaction",f,()->{int k=kind.getSelectedItemPosition();if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");Budget.Entry e=new Budget.Entry(required(payee),k==1?"":categories.get(category.getSelectedItemPosition()).id,accounts.get(account.getSelectedItemPosition()).id,date(day),Budget.cents(amount.getText().toString())*(k==0?-1:1));e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
+        dialog(sched!=null?"Edit upcoming transaction":old==null?"Add transaction":"Edit transaction",f,()->{int k=kind.getSelectedItemPosition();if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
+            String p=required(payee),cat=k==1?"":categories.get(category.getSelectedItemPosition()).id,acc=accounts.get(account.getSelectedItemPosition()).id,memoText=memo.getText().toString().trim();long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
+            String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];LocalDate when=LocalDate.parse((String)day.getTag());
+            if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
+                Budget.Scheduled s=new Budget.Scheduled(p,cat,acc,when.toString(),cents,rep);s.memo=memoText;if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;}
+                if(sched==null&&!when.isAfter(LocalDate.now())){budget.validate(s);budget.enter(s);if(!rep.equals("Never"))budget.scheduled.add(s);return;} // today or earlier: entered now, the repeat continues
+                budget.validate(s);budget.scheduled.removeIf(t->t.id.equals(s.id));budget.scheduled.add(s);return;
+            }
+            Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
     }
+    private Budget.Scheduled scheduledById(String id){for(Budget.Scheduled s:budget.scheduled)if(s.id.equals(id))return s;throw new IllegalArgumentException("That upcoming transaction no longer exists.");}
+    private void deleteScheduled(String id){new AlertDialog.Builder(this).setTitle("Delete upcoming transaction?").setMessage("It and its repeats are removed. Transactions already entered stay.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(change(()->budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}).show();}
+    /** A due upcoming transaction: enter it (it becomes money), skip this date, or edit it. */
+    private void dueActions(String id){
+        Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){return;}
+        boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());
+        List<String> names=new ArrayList<>();List<Runnable> actions=new ArrayList<>();
+        if(isDue){names.add("Enter it now");actions.add(()->{if(change(()->budget.enter(scheduledById(id))))toast("Entered "+s.payee+".");});names.add(s.repeat.equals("Never")?"Skip it (delete)":"Skip this one");actions.add(()->change(()->budget.advance(scheduledById(id))));}
+        names.add("Edit");actions.add(()->transaction(null,s));
+        new AlertDialog.Builder(this).setTitle(s.payee+" · "+money(s.amount)).setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()).show();
+    }
+    private String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
     private void delete(Budget.Entry e){new AlertDialog.Builder(this).setTitle("Delete transaction?").setMessage("Account and category balances will be recalculated.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{try{commit(()->budget.entries.removeIf(t->t.id.equals(e.id)));render();for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}catch(Exception ex){toast(ex.getMessage());}}).show();}
     private final List<AlertDialog> editors=new ArrayList<>();
     private void transfer(){editTransfer(null);}
