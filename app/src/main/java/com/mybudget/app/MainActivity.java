@@ -309,7 +309,9 @@ public class MainActivity extends Activity {
     }
     /** Planner's upcoming bills: what's coming, with the category each is planned from (tap to choose or change it). */
     private void plannerList(){
-        if(budget.fromPlanner.isEmpty()||!accountFilter.isEmpty())return;
+        if(!accountFilter.isEmpty())return;
+        if(PlannerBills.stale(this)&&!prefs().getString("planner_bills","[]").equals("[]")){content.addView(label("Planner's upcoming bills are from "+when(prefs().getString("planner_bills_at",""))+", so they aren't planned for. Open Planner to send them again.",12,muted,false));return;}
+        if(budget.fromPlanner.isEmpty())return;
         content.addView(label("Coming up in Planner",18,blue,true));
         String at=prefs().getString("planner_bills_at",null);content.addView(label("Sent by Planner"+(at==null?"":" on "+when(at))+". They're added here when you mark them paid in Planner.",12,muted,false));
         for(Budget.Scheduled s:budget.fromPlanner){Budget.Category c=budget.category(s.category);LinearLayout row=card();row.addView(label(s.payee,17,ink,true));

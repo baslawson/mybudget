@@ -33,9 +33,27 @@ public class PlannerBills extends BroadcastReceiver {
             if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0||c>10_000_000_000L)continue;o.put("amountCents",c);}out.put(o);}
         return out.toString();
     }
+    /** A list older than this is ignored: Planner sends one each time it opens, so it's out of date (or Planner is gone). */
+    static final int STALE_DAYS=7;
+    static boolean stale(Context context){String at=context.getSharedPreferences("budget",0).getString("planner_bills_at",null);try{return at!=null&&LocalDateTime.parse(at).isBefore(LocalDateTime.now().minusDays(STALE_DAYS));}catch(Exception e){return true;}}
+    /**
+     * A bill was just paid (its expense added): drop it from the list now, rather than plan for it twice until Planner
+     * next sends. By its entry id from Planner; without one (an older Planner), the earliest entry for the same bill.
+     */
+    static void dropPaid(Context context,String upcomingId,String billKey){
+        android.content.SharedPreferences prefs=context.getSharedPreferences("budget",0);
+        try{String kept=without(prefs.getString("planner_bills","[]"),upcomingId,billKey);if(kept!=null)prefs.edit().putString("planner_bills",kept).apply();}catch(Exception ignored){}
+    }
+    /** [list] less the paid entry (see dropPaid), or null when nothing matches. */
+    static String without(String list,String upcomingId,String billKey)throws JSONException{
+        JSONArray a=new JSONArray(list);int drop=-1;
+        for(int i=0;i<a.length()&&drop<0;i++)if(upcomingId!=null&&!upcomingId.isEmpty()&&upcomingId.equals(a.getJSONObject(i).optString("id")))drop=i;
+        if(drop<0&&(upcomingId==null||upcomingId.isEmpty())&&billKey!=null&&!billKey.isEmpty())for(int i=0;i<a.length();i++)if(billKey.equals(a.getJSONObject(i).optString("billKey"))&&(drop<0||a.getJSONObject(i).optString("due").compareTo(a.getJSONObject(drop).optString("due"))<0))drop=i;
+        if(drop<0)return null;a.remove(drop);return a.toString();
+    }
     /** The saved list as upcoming transactions (amount negative, 0 = no amount), each with its planned category. */
     static List<Budget.Scheduled> read(Context context,Budget budget){
-        List<Budget.Scheduled> list=new ArrayList<>();
+        List<Budget.Scheduled> list=new ArrayList<>();if(stale(context))return list;
         try{JSONArray a=new JSONArray(context.getSharedPreferences("budget",0).getString("planner_bills","[]"));
             for(int i=0;i<a.length();i++){JSONObject b=a.getJSONObject(i);String key=b.getString("billKey");Budget.Scheduled s=new Budget.Scheduled(b.getString("payee"),budget.plannerCategory(key),"",b.getString("due"),-b.optLong("amountCents",0),"Never");s.id=b.getString("id");s.billKey=key;list.add(s);}
         }catch(Exception ignored){}

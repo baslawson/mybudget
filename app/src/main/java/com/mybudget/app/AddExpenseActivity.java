@@ -52,7 +52,7 @@ public class AddExpenseActivity extends Activity {
 
     private void add(Intent intent,String id){
         Budget.Entry existing=budget.external(id);
-        if(existing!=null){done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
+        if(existing!=null){PlannerBills.dropPaid(this,text(intent,"upcomingId",100),text(intent,"billKey",100));done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
         if(!"AUD".equals(intent.getStringExtra("currency"))){fail("MyBudget records AUD only, so this payment wasn't added.");return;}
         // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
         List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
@@ -88,7 +88,7 @@ public class AddExpenseActivity extends Activity {
                 Budget.Entry e=new Budget.Entry(payeeField.getText().toString().trim(),c.id,a.id,day,-cents);e.memo=note;e.externalId=id;e.billKey=billKey;
                 budget.validate(e);budget.entries.add(0,e);
                 if(!save()){budget.entries.remove(e);throw new IllegalStateException("Could not save to device storage.");}
-                setResult(RESULT_OK,new Intent().putExtra("summary","Added to MyBudget: "+c.name+" −"+money(cents)));dialog.dismiss();
+                PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey);setResult(RESULT_OK,new Intent().putExtra("summary","Added to MyBudget: "+c.name+" −"+money(cents)));dialog.dismiss();
             }catch(java.time.format.DateTimeParseException ex){Toast.makeText(this,"Enter the date as YYYY-MM-DD.",Toast.LENGTH_LONG).show();}
             catch(RuntimeException ex){Toast.makeText(this,ex.getMessage()==null?"Check your entry.":ex.getMessage(),Toast.LENGTH_LONG).show();}
         }));
