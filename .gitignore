@@ -16,3 +16,5 @@ signing.properties
 .codex/
 *.apk
 *.aab
+NOTES.md
+AGENTS.md

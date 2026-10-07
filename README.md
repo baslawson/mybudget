@@ -22,24 +22,18 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 <img src="docs/screenshots/spending-dark.png" width="220" alt="Fictional spending transactions"> <img src="docs/screenshots/accounts-dark.png" width="220" alt="Fictional cash accounts"> <img src="docs/screenshots/settings-light.png" width="220" alt="Light theme appearance settings">
 
-## Project notes — 7 October 2026
+## Versions
 
-- Native Android app built with Java and Android framework widgets, with no third-party runtime libraries. Android 8+; AUD; local device storage.
-- MyBudget branding uses an indigo envelope with a mint checkmark, a matching adaptive launcher icon, and the tagline “Your money. Your plan.” All artwork is vector-based.
-- Navigation: Home, Budget, Transactions, Accounts and Reports. The three-dot options menu opens Settings; theme selection lives under Settings > Theme.
-- Light, Dark and Auto appearances persist across restarts. Auto follows the device theme, including changes while the app is open. Settings returns to the previous screen.
-- Latest UI refinements: compact category rows with Available emphasized; secondary Assigned/Activity values; target descriptions, progress and remaining funding; matching navigation icons; tighter spacing with comfortable touch targets.
-- Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
-- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link), **0.0.1** (expenses from Planner), **0.0.2** (backup and import, envelope planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills), **0.0.3** (fixes: credit-card credits, saving alongside Planner, CSV duplicates, open forms kept, backups), **0.0.4** (fixes: card credit carried over, reports, repeating transactions, card payments, photos), **0.0.5** (suggestions as you type for groups, payees and notes), **0.0.6** (new targets, tracking accounts and loans, flags, filters, review, payee tools, reports, Home; storage version 5) and **0.0.7** (fixes: re-imports after renaming payees, yearly repeats on 29 February, damaged-data checks, part payments of Planner bills). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
-- Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
-- Existing budget data is retained during APK updates (0.0.2 converts it to storage version 4; older MyBudget versions can't read that). New in 0.0.2 (all described below): backup, restore and CSV export; automatic daily backup; CSV import; transaction photos; hide/delete/reorder categories; edit/close/delete accounts; reconcile adjustments; a date picker; payee suggestions; quick assign amounts and Cover overspending; snoozed targets, due days and category notes; Budget reset and Hide amounts; the Reports chart, net worth and money age; upcoming (scheduled and repeating) transactions; split transactions; credit cards; Planner's upcoming bills; and MyBudget's own names for the screens (Budget, Transactions, Reports, To budget). No bank sync is implemented.
-- Planner and MyBudget are linked apps. Planner can send paid bills for a confirmed expense and request removal when a payment is undone (from 0.0.1), and its upcoming bills to plan for (from MyBudget 0.0.2 with Planner 0.0.22). BudgetInstrumentation covers adding once and removing on undo, and passed on the Pixel 7 Pro emulator. The full round trip from Planner has not been tested automatically.
+- **0.0.7**: fixes for re-imports after renaming payees, yearly repeats on 29 February, damaged-data checks and part payments of Planner bills.
+- **0.0.6**: new targets, tracking accounts and loans, flags, filters, review of imported transactions, payee tools, reports and Home.
+- **0.0.5**: suggestions as you type for groups, payees and notes.
+- **0.0.4**: fixes for card credit, reports, repeating transactions, card payments and photos.
+- **0.0.3**: fixes for credit-card credits, saving alongside Planner, CSV duplicates, open forms and backups.
+- **0.0.2**: backup and import, planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills.
+- **0.0.1**: expenses from Planner.
+- **0.0.0**: first release.
 
-## Working agreement
-
-Before future coding, present a plan describing the proposed changes and wait for the user's approval. Implement only after approval. The user likes the current visual direction; preserve the branding and overall style when refining it.
-
-Treat Planner and MyBudget as linked apps in all future plans, code changes and testing. Preserve the payment handoff, duplicate prevention, undo confirmation and stored link identifiers. Changes to the integration contract must account for both apps.
+Updates keep your budget. Nothing has been checked on a physical phone yet, only on an emulator.
 
 ## Planner integration
 
