@@ -32,9 +32,9 @@ public class MainActivity extends Activity {
     private boolean storageReadable=true,showHidden=false;
     private final NumberFormat currency=NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-AU"));
     @Override public void onCreate(Bundle state){
-        themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");
+        themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");hideAmounts=getSharedPreferences("appearance",0).getBoolean("hideAmounts",false);
         boolean dark=themeMode.equals("Dark")||(themeMode.equals("Auto")&&(getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES);
-        setTheme(dark?R.style.AppTheme:R.style.AppTheme_Light);
+        setTheme(dark?R.style.AppTheme:R.style.AppTheme_Light);darkTheme=dark;
         super.onCreate(state);
         if(dark){ink=Color.rgb(237,241,250);blue=Color.rgb(179,191,255);muted=Color.rgb(171,181,201);red=Color.rgb(255,142,150);amber=Color.rgb(245,198,110);green=Color.rgb(117,219,177);canvas=Color.rgb(17,21,31);surface=Color.rgb(32,38,53);buttonSurface=Color.rgb(43,52,78);primary=Color.rgb(65,80,159);}
         else{ink=Color.rgb(27,39,62);blue=Color.rgb(57,77,165);muted=Color.rgb(111,121,140);red=Color.rgb(178,51,55);amber=Color.rgb(159,104,12);green=Color.rgb(32,115,85);canvas=Color.rgb(243,245,250);surface=Color.WHITE;buttonSurface=Color.rgb(231,235,249);primary=blue;}
@@ -46,8 +46,29 @@ public class MainActivity extends Activity {
     @Override protected void onRestart(){super.onRestart();String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null||!storageReadable)return;try{budget=BudgetStore.decode(raw);for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}catch(Exception e){toast("Could not reload your budget.");}}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("month",month.toString());super.onSaveInstanceState(state);}
     private void options(View anchor){
-        PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");
-        menu.setOnMenuItemClickListener(item->{if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();return true;});menu.show();
+        PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");menu.getMenu().add(hideAmounts?"Show amounts":"Hide amounts");menu.getMenu().add("Plan reset");
+        menu.setOnMenuItemClickListener(item->{String t=item.getTitle().toString();
+            if(t.equals("Plan reset"))planReset();
+            else if(t.endsWith("amounts")){if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){toast("Could not save that setting.");return true;}hideAmounts=!hideAmounts;render();}
+            else{if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}return true;});menu.show();
+    }
+    /** YNAB's Plan Reset: every category's money in this month goes back to Ready to Assign. The budget before is kept for Undo. */
+    private void planReset(){
+        if(!storageReadable)return;if(month.isAfter(YearMonth.now())){toast("Reset this month or an earlier one.");return;}
+        long total=0;int n=0;for(Budget.Category c:budget.categories){long a=budget.available(c,month);if(a>0){total+=a;n++;}}
+        if(n==0){toast("No category has money to return this month.");return;}
+        String monthName=month.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
+        new AlertDialog.Builder(this).setTitle("Plan reset").setMessage("Return "+money(total)+" from "+count(n,"category","categories")+" to Ready to Assign in "+monthName+", then assign it again by today's priorities?\n\nTargets and transactions stay. You can undo this on Plan.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Reset",(d,w)->{String before=prefs().getString("data",null);
+                if(change(()->budget.planReset(month))){if(!prefs().edit().putString("before_reset",before==null?"":before).putString("before_reset_at",LocalDateTime.now().withNano(0).toString()).commit())toast("Reset done, but Undo couldn't be saved.");else{tab="Plan";render();}}}).show();
+    }
+    private void undoPlanReset(){
+        new AlertDialog.Builder(this).setTitle("Undo plan reset?").setMessage("Puts back the plan you had before the reset on "+when(prefs().getString("before_reset_at",""))+". Changes made since are lost.").setNegativeButton("Cancel",null).setPositiveButton("Undo reset",(d,w)->{
+            String before=prefs().getString("before_reset",null);if(before==null){render();return;}
+            Budget previous;try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The plan from before the reset can't be read. Nothing was changed.");return;}
+            android.content.SharedPreferences.Editor edit=prefs().edit().remove("before_reset").remove("before_reset_at");if(previous==null)edit.remove("data");else edit.putString("data",before);
+            if(!edit.commit()){toast("Could not save to device storage.");return;}
+            if(previous==null){budget=new Budget();load();}else budget=previous;render();toast("Plan reset undone.");}).show();
     }
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
@@ -91,7 +112,7 @@ public class MainActivity extends Activity {
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->{
                 // The budget being replaced is kept (empty: there was none) for Undo restore.
                 String current=prefs().getString("data",null);
-                try{if(!prefs().edit().putString("data",BudgetStore.encode(b)).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).commit())throw new IllegalStateException();}
+                try{if(!prefs().edit().putString("data",BudgetStore.encode(b)).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).remove("before_reset").remove("before_reset_at").commit())throw new IllegalStateException();}
                 catch(Exception e){toast("Could not save the restored budget. Nothing was changed.");return;}
                 budget=b;for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();toast("Budget restored.");
             }).show();
@@ -101,7 +122,7 @@ public class MainActivity extends Activity {
             .setNegativeButton("Cancel",null).setPositiveButton("Undo restore",(d,w)->{
                 String before=prefs().getString("before_restore",null);if(before==null){render();return;}
                 Budget previous;try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The budget from before the restore can't be read. Nothing was changed.");return;}
-                android.content.SharedPreferences.Editor edit=prefs().edit().remove("before_restore").remove("before_restore_at");if(previous==null)edit.remove("data");else edit.putString("data",before);
+                android.content.SharedPreferences.Editor edit=prefs().edit().remove("before_restore").remove("before_restore_at").remove("before_reset").remove("before_reset_at");if(previous==null)edit.remove("data");else edit.putString("data",before);
                 if(!edit.commit()){toast("Could not save to device storage.");return;}
                 if(previous==null){budget=new Budget();load();}else budget=previous;for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();toast("Restore undone.");
             }).show();
@@ -115,7 +136,9 @@ public class MainActivity extends Activity {
         }).setNegativeButton("Cancel",null).show();
     }
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
-    private String money(long cents){return currency.format(java.math.BigDecimal.valueOf(cents,2));}
+    // Hide amounts (⋮ menu) shows dots instead of money everywhere on screen, for showing the plan to someone.
+    private boolean hideAmounts,darkTheme;
+    private String money(long cents){return hideAmounts?"$•••":currency.format(java.math.BigDecimal.valueOf(cents,2));}
     private String decimal(long cents){return java.math.BigDecimal.valueOf(cents,2).toPlainString();}
     private LinearLayout column(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v;}
     private TextView label(String text,int size,int color,boolean bold){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setTextColor(color);v.setPadding(0,dp(4),0,dp(4));if(bold)v.setTypeface(null,Typeface.BOLD);return v;}
@@ -123,7 +146,8 @@ public class MainActivity extends Activity {
     private LinearLayout card(){LinearLayout v=column();v.setPadding(dp(14),dp(10),dp(14),dp(10));v.setBackground(bg(surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));content.addView(v,p);return v;}
     private Button button(String text,Runnable action){Button b=new Button(this);b.setText(text);b.setAllCaps(false);b.setTextSize(13);b.setTextColor(blue);b.setBackground(bg(buttonSurface));b.setStateListAnimator(null);b.setElevation(0);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(12),dp(8),dp(12),dp(8));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));b.setLayoutParams(p);b.setOnClickListener(v->action.run());return b;}
     private void progress(LinearLayout parent,long funded,long goal,int color){ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(100);bar.setProgress((int)Math.max(0,Math.min(100,funded*100/Math.max(1,goal))));bar.setProgressTintList(ColorStateList.valueOf(color));bar.setProgressBackgroundTintList(ColorStateList.valueOf(buttonSurface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(6));p.setMargins(0,dp(5),0,dp(5));parent.addView(bar,p);}
-    private String targetDescription(Budget.Category c){if(c.targetType.equals("Monthly"))return "Set aside "+money(c.target)+" each month";if(c.targetType.equals("Balance"))return "Save to "+money(c.target)+(c.due.isEmpty()?"":" by "+YearMonth.parse(c.due).format(DateTimeFormatter.ofPattern("MMM yyyy")));return "Refill to "+money(c.target)+" each month";}
+    static String ordinal(int d){return d+(d%100>=11&&d%100<=13?"th":d%10==1?"st":d%10==2?"nd":d%10==3?"rd":"th");}
+    private String targetDescription(Budget.Category c){String by=c.dueDay>0?" by the "+ordinal(c.dueDay):"";if(c.targetType.equals("Monthly"))return "Set aside "+money(c.target)+by+" each month";if(c.targetType.equals("Balance"))return "Save to "+money(c.target)+(c.due.isEmpty()?"":" by "+YearMonth.parse(c.due).format(DateTimeFormatter.ofPattern("MMM yyyy")));return "Refill to "+money(c.target)+by+" each month";}
     private void render(){
         root=column();root.setBackgroundColor(canvas);root.setPadding(dp(16),dp(12),dp(16),dp(8));setContentView(root);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(dp(16),i.getSystemWindowInsetTop()+dp(8),dp(16),i.getSystemWindowInsetBottom()+dp(4));return i;});
@@ -153,12 +177,16 @@ public class MainActivity extends Activity {
         LinearLayout row=card();long available=budget.available(c,month),need=budget.needed(c,month);int status=available<0?red:need>0?amber:green;
         LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);TextView name=label(c.name,16,ink,true);name.setPadding(0,0,dp(8),0);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));LinearLayout balance=column();TextView caption=label("Available",10,muted,false);caption.setGravity(Gravity.END);caption.setPadding(0,0,0,0);balance.addView(caption);TextView value=label(money(available),20,status,true);value.setGravity(Gravity.END);value.setPadding(0,0,0,0);value.setAutoSizeTextTypeUniformWithConfiguration(12,20,1,android.util.TypedValue.COMPLEX_UNIT_SP);balance.addView(value,new LinearLayout.LayoutParams(-1,dp(27)));heading.addView(balance,new LinearLayout.LayoutParams(dp(128),-2));row.addView(heading);
         LinearLayout details=new LinearLayout(this);TextView assigned=label("Assigned  "+money(budget.assigned(c,month)),11,muted,false),activity=label("Activity  "+money(budget.activity(c,month)),11,muted,false);details.addView(assigned,new LinearLayout.LayoutParams(0,-2,1));activity.setGravity(Gravity.END);details.addView(activity,new LinearLayout.LayoutParams(0,-2,1));row.addView(details);
-        if(c.target>0){long base=c.targetType.equals("Monthly")?budget.assigned(c,month):c.targetType.equals("Balance")?available:c.target-need;progress(row,base,c.target,status);row.addView(label(targetDescription(c),11,muted,false));row.addView(label(need==0?"Funded for this month":money(need)+" left to fund this month",12,need>0?amber:green,true));}
+        if(c.target>0){long base=c.targetType.equals("Monthly")?budget.assigned(c,month):c.targetType.equals("Balance")?available:c.target-need;progress(row,base,c.target,status);row.addView(label(targetDescription(c),11,muted,false));row.addView(c.snoozed.equals(month.toString())?label("Target snoozed this month",12,muted,true):label(need==0?"Funded for this month":money(need)+" left to fund this month",12,need>0?amber:green,true));}
+        if(!c.note.isEmpty())row.addView(label(c.note,12,muted,false));
         if(available<0)row.addView(label("Overspent by "+money(-available)+" - tap to cover",12,red,true));
         row.setOnClickListener(v->categoryDetails(c));
     }
     private void plan(){
-        readyCard();if(overspent()>0)content.addView(label(count(overspent(),"category","categories")+" overspent - tap to cover",14,red,true));
+        readyCard();
+        String resetAt=prefs().getString("before_reset_at",null);
+        if(resetAt!=null){LinearLayout r=card();r.addView(label("Plan reset on "+when(resetAt)+". Assign your money again by today's priorities.",13,muted,false));LinearLayout buttons=new LinearLayout(this);Button undo=button("Undo plan reset",this::undoPlanReset),keep=button("Keep",()->{prefs().edit().remove("before_reset").remove("before_reset_at").apply();render();});buttons.addView(undo,new LinearLayout.LayoutParams(0,-2,2));LinearLayout.LayoutParams kp=new LinearLayout.LayoutParams(0,-2,1);kp.setMargins(dp(8),0,0,0);buttons.addView(keep,kp);r.addView(buttons);}
+        if(overspent()>0)content.addView(label(count(overspent(),"category","categories")+" overspent - tap to cover",14,red,true));
         content.addView(button("Fund targets",this::autoAssign));LinkedHashSet<String> groups=new LinkedHashSet<>();for(Budget.Category c:budget.categories)if(!c.hidden)groups.add(c.group);
         for(String group:groups){content.addView(label(group,18,blue,true));for(Budget.Category c:budget.categories)if(!c.hidden&&c.group.equals(group))categoryCard(c);}
         content.addView(button("+ Add category",()->editCategory(null)));content.addView(button("Move money",this::move));
@@ -171,6 +199,7 @@ public class MainActivity extends Activity {
         names.add("Assign or return money");actions.add(()->assign(c));names.add("Move money");actions.add(this::move);names.add("Edit category and target");actions.add(()->editCategory(c));
         names.add("View transactions");actions.add(()->{tab="Spending";search=c.name;accountFilter="";render();});
         names.add("Move up");actions.add(()->reorder(id,-1));names.add("Move down");actions.add(()->reorder(id,1));
+        if(c.target>0){boolean snoozed=c.snoozed.equals(month.toString());String m=month.toString();names.add(snoozed?"Unsnooze target":"Snooze target this month");actions.add(()->change(()->categoryById(id).snoozed=snoozed?"":m));}
         names.add(c.hidden?"Unhide":"Hide");actions.add(()->hide(id,!c.hidden));names.add("Delete category");actions.add(()->deleteCategory(id));
         new AlertDialog.Builder(this).setTitle(c.name).setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()).show();
     }
@@ -206,7 +235,8 @@ public class MainActivity extends Activity {
         EditText query=field(content,"Search payee, category or memo",false);query.setText(search);LinearLayout list=column();content.addView(list);fillEntries(list);
         query.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();fillEntries(list);}public void afterTextChanged(Editable e){}});
     }
-    private String categoryName(Budget.Entry e){return e.transfer()?"Transfer":e.category.isEmpty()?"Income":budget.category(e.category).name;}
+    // Money not given to a category goes to Ready to Assign (income and reconcile adjustments), as YNAB labels it.
+    private String categoryName(Budget.Entry e){return e.transfer()?"Transfer":e.category.isEmpty()?"Ready to Assign":budget.category(e.category).name;}
     private void fillEntries(LinearLayout list){
         list.removeAllViews();List<Budget.Entry> ordered=new ArrayList<>(budget.entries);ordered.sort((a,b)->b.date.compareTo(a.date));int n=0;
         for(Budget.Entry e:ordered){String text=e.payee+" "+categoryName(e)+" "+e.memo+" "+budget.account(e.account).name;if(!e.date.startsWith(month.toString())||!text.toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT))||(!accountFilter.isEmpty()&&!e.account.equals(accountFilter)&&!e.destination.equals(accountFilter)))continue;n++;LinearLayout row=column();row.setPadding(dp(14),dp(10),dp(14),dp(10));row.setBackground(bg(surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(5));list.addView(row,p);row.addView(label(e.payee,17,ink,true));row.addView(label(categoryName(e)+" / "+budget.account(e.account).name+" / "+pretty(e.date),12,muted,false));row.addView(label(money(e.amount)+(e.cleared?"  Cleared":"  Uncleared"),17,e.amount>0?green:ink,true));if(!e.memo.isEmpty())row.addView(label(e.memo,12,muted,false));row.setOnClickListener(v->transaction(e));}
@@ -220,6 +250,17 @@ public class MainActivity extends Activity {
     private void reflect(){
         LinearLayout totals=card();totals.addView(label("This month's cash flow",20,ink,true));totals.addView(label("Income "+money(budget.income(month)),21,green,true));totals.addView(label("Spending "+money(budget.spending(month)),21,ink,true));totals.addView(label("Difference "+money(budget.income(month)-budget.spending(month)),17,blue,true));
         content.addView(label("Spending by category",20,ink,true));long total=budget.spending(month);for(Budget.Category c:budget.categories){long spent=Math.max(0,-budget.activity(c,month));if(spent==0)continue;LinearLayout r=card();r.addView(label(c.name+"  "+money(spent),16,ink,true));ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setProgress((int)(spent*100/Math.max(1,total)));r.addView(bar);}
+        // Income vs spending, six months to this one: one axis from zero; the list below is the table view.
+        LinearLayout flow=card();flow.addView(label("Income and spending",20,ink,true));
+        int income=darkTheme?Color.parseColor("#3987E5"):Color.parseColor("#2A78D6"),spend=darkTheme?Color.parseColor("#D95926"):Color.parseColor("#EB6834");
+        LinearLayout legend=new LinearLayout(this);legend.setGravity(Gravity.CENTER_VERTICAL);for(int k=0;k<2;k++){View swatch=new View(this);GradientDrawable s=new GradientDrawable();s.setColor(k==0?income:spend);s.setCornerRadius(dp(2));swatch.setBackground(s);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(10),dp(10));sp.setMargins(k==0?0:dp(14),0,dp(6),0);legend.addView(swatch,sp);legend.addView(label(k==0?"Income":"Spending",12,ink,false));}flow.addView(legend);
+        long[] in=new long[6],out=new long[6];String[] names=new String[6];YearMonth[] ms=new YearMonth[6];for(int i=0;i<6;i++){YearMonth m=month.minusMonths(5-i);ms[i]=m;in[i]=budget.income(m);out[i]=budget.spending(m);names[i]=m.format(DateTimeFormatter.ofPattern("MMM"));}
+        TextView picked=label("",13,ink,true);flow.addView(picked);java.util.function.IntConsumer show=i->picked.setText(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in "+money(in[i])+"  ·  out "+money(out[i]));show.accept(5);
+        CashFlowChart chart=new CashFlowChart(this,in,out,names,income,spend,muted,muted,buttonSurface,5,show);chart.setContentDescription("Income and spending chart for the last six months. The list below has the amounts.");flow.addView(chart,new LinearLayout.LayoutParams(-1,-2));
+        // Net worth and Age of Money.
+        LinearLayout worth=card();long now=budget.netWorth(month),change=now-budget.netWorth(month.minusMonths(1));worth.addView(label("Net worth",20,ink,true));worth.addView(label(money(now),26,ink,true));worth.addView(label((change>=0?"Up ":"Down ")+money(Math.abs(change))+" since the end of last month",13,muted,false));
+        LinearLayout age=card();LocalDate until=month.isBefore(YearMonth.now())?month.atEndOfMonth():LocalDate.now();int days=budget.ageOfMoney(until);age.addView(label("Age of Money",20,ink,true));
+        age.addView(label(days<0?"Not enough spending yet":count(days,"day","days"),26,days>=30?green:ink,true));age.addView(label("How old your money is when you spend it, over your last 10 outflows. 30 days or more means you're spending last month's income.",13,muted,false));
         content.addView(label("Last six months",20,ink,true));for(int i=5;i>=0;i--){YearMonth m=month.minusMonths(i);content.addView(label(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In "+money(budget.income(m))+"   Out "+money(budget.spending(m)),13,muted,false));}
         content.addView(label("AUD / Saved on this device. Back up or export it in Settings. Credit cards and bank sync are not included.",12,muted,false));
     }
@@ -262,12 +303,14 @@ public class MainActivity extends Activity {
     }
     private String[] availableNames(){return budget.categories.stream().map(c->c.name+" ("+money(budget.available(c,month))+")").toArray(String[]::new);}
     private void move(){if(budget.categories.size()<2){toast("Create two categories first.");return;}LinearLayout f=form();Spinner from=spinner(f,"From",availableNames(),0),to=spinner(f,"To",availableNames(),1);EditText amount=field(f,"Amount (AUD)",true);dialog("Move money",f,()->budget.move(budget.categories.get(from.getSelectedItemPosition()),budget.categories.get(to.getSelectedItemPosition()),month,Budget.cents(amount.getText().toString())));}
-    private void autoAssign(){long remaining=Math.max(0,budget.spendable(month));long total=0;for(Budget.Category c:budget.categories)if(!c.hidden)total+=budget.needed(c,month);long fund=Math.min(remaining,total);if(fund==0){toast("No available money or underfunded targets.");return;}new AlertDialog.Builder(this).setTitle("Fund targets").setMessage("Assign "+money(fund)+" to underfunded targets in category order?").setNegativeButton("Cancel",null).setPositiveButton("Fund",(d,w)->{try{commit(()->{long left=Math.max(0,budget.spendable(month));for(Budget.Category c:budget.categories){if(c.hidden)continue;long n=Math.min(left,budget.needed(c,month));if(n>0){budget.assign(c,month,n);left-=n;}}});render();}catch(Exception e){toast(e.getMessage());}}).show();}
+    private void autoAssign(){long remaining=Math.max(0,budget.spendable(month));long total=0;for(Budget.Category c:budget.categories)if(!c.hidden)total+=budget.needed(c,month);long fund=Math.min(remaining,total);if(fund==0){toast("No available money or underfunded targets.");return;}new AlertDialog.Builder(this).setTitle("Fund targets").setMessage("Assign "+money(fund)+" to underfunded targets, earliest due first?").setNegativeButton("Cancel",null).setPositiveButton("Fund",(d,w)->{try{commit(()->{long left=Math.max(0,budget.spendable(month));for(Budget.Category c:budget.fundOrder()){if(c.hidden)continue;long n=Math.min(left,budget.needed(c,month));if(n>0){budget.assign(c,month,n);left-=n;}}});render();}catch(Exception e){toast(e.getMessage());}}).show();}
     private void editCategory(Budget.Category existing){
         LinearLayout f=form();EditText name=field(f,"Category name",false),group=field(f,"Group (Bills, Everyday, Savings...)",false);String[] types={"Refill each month","Set aside each month","Save toward a balance"};Spinner type=spinner(f,"Target behavior",types,existing==null?0:existing.targetType.equals("Monthly")?1:existing.targetType.equals("Balance")?2:0);TextView explanation=label("",13,muted,false);f.addView(explanation);EditText amount=field(f,"Target amount (0 for none)",true);LinearLayout deadline=column();f.addView(deadline);EditText due=field(deadline,"Due month (YYYY-MM, optional)",false);
-        if(existing!=null){name.setText(existing.name);group.setText(existing.group);amount.setText(decimal(existing.target));due.setText(existing.due);}else group.setText("Everyday");
-        Runnable describe=()->{int selected=type.getSelectedItemPosition();deadline.setVisibility(selected==2?View.VISIBLE:View.GONE);explanation.setText(new String[]{"Top up what remained from last month. Example: a $500 target with $100 left asks for $400. Spending this month does not restart the target.","Add a fresh amount every month. Example: set aside $100 for repairs, even if $300 remains from earlier months.","Build up to a total balance. Example: a $1,200 goal with $300 saved and 3 months remaining asks for $300 this month. A due month is optional."}[selected]);};describe.run();type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){describe.run();}public void onNothingSelected(AdapterView<?> p){}});
-        dialog(existing==null?"New category":"Edit category & target",f,()->{String n=required(name),g=required(group);for(Budget.Category c:budget.categories)if((existing==null||!c.id.equals(existing.id))&&c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That category already exists.");long target=amount.getText().toString().trim().isEmpty()?0:Budget.parse(amount.getText().toString());if(target<0)throw new IllegalArgumentException("Target cannot be negative.");String dueMonth=type.getSelectedItemPosition()==2?due.getText().toString().trim():"";if(!dueMonth.isEmpty()){YearMonth m=YearMonth.parse(dueMonth);if(m.getYear()<1900||m.getYear()>2100)throw new IllegalArgumentException("Choose a due year between 1900 and 2100.");}Budget.Category c=existing==null?new Budget.Category(n):budget.category(existing.id);c.name=n;c.group=g;c.target=target;c.targetType=new String[]{"Refill","Monthly","Balance"}[type.getSelectedItemPosition()];c.due=dueMonth;if(existing==null)budget.categories.add(c);});
+        LinearLayout dayRow=column();f.addView(dayRow);EditText dueDay=field(dayRow,"Due day of the month (1-31, optional)",false);dueDay.setInputType(InputType.TYPE_CLASS_NUMBER);dayRow.addView(label("Fund targets funds the earliest due first.",12,muted,false));
+        EditText note=field(f,"Note (optional)",false);
+        if(existing!=null){name.setText(existing.name);group.setText(existing.group);amount.setText(decimal(existing.target));due.setText(existing.due);dueDay.setText(existing.dueDay>0?String.valueOf(existing.dueDay):"");note.setText(existing.note);}else group.setText("Everyday");
+        Runnable describe=()->{int selected=type.getSelectedItemPosition();deadline.setVisibility(selected==2?View.VISIBLE:View.GONE);dayRow.setVisibility(selected==2?View.GONE:View.VISIBLE);explanation.setText(new String[]{"Top up what remained from last month. Example: a $500 target with $100 left asks for $400. Spending this month does not restart the target.","Add a fresh amount every month. Example: set aside $100 for repairs, even if $300 remains from earlier months.","Build up to a total balance. Example: a $1,200 goal with $300 saved and 3 months remaining asks for $300 this month. A due month is optional."}[selected]);};describe.run();type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){describe.run();}public void onNothingSelected(AdapterView<?> p){}});
+        dialog(existing==null?"New category":"Edit category & target",f,()->{String n=required(name),g=required(group);for(Budget.Category c:budget.categories)if((existing==null||!c.id.equals(existing.id))&&c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That category already exists.");long target=amount.getText().toString().trim().isEmpty()?0:Budget.parse(amount.getText().toString());if(target<0)throw new IllegalArgumentException("Target cannot be negative.");String dueMonth=type.getSelectedItemPosition()==2?due.getText().toString().trim():"";if(!dueMonth.isEmpty()){YearMonth m=YearMonth.parse(dueMonth);if(m.getYear()<1900||m.getYear()>2100)throw new IllegalArgumentException("Choose a due year between 1900 and 2100.");}Budget.Category c=existing==null?new Budget.Category(n):budget.category(existing.id);c.name=n;c.group=g;c.target=target;c.targetType=new String[]{"Refill","Monthly","Balance"}[type.getSelectedItemPosition()];c.due=dueMonth;String day=dueDay.getText().toString().trim();int d=0;if(type.getSelectedItemPosition()!=2&&!day.isEmpty()){try{d=Integer.parseInt(day);}catch(NumberFormatException e){d=-1;}if(d<1||d>31)throw new IllegalArgumentException("Enter a due day from 1 to 31, or leave it empty.");}c.dueDay=d;c.note=note.getText().toString().trim();if(existing==null)budget.categories.add(c);});
     }
     private void addAccount(){LinearLayout f=form();EditText name=field(f,"Account name",false),opening=field(f,"Current cash balance (AUD)",true);f.addView(label("Opening date",12,muted,true));EditText day=dateField(f,LocalDate.now().toString());f.addView(label("Add cash, checking or savings. Enter transactions from the opening date onward. Credit accounts are not supported yet.",13,muted,false));dialog("Add account",f,()->{String n=required(name);for(Budget.Account a:budget.accounts)if(a.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");long balance=Budget.parse(opening.getText().toString());if(balance<0)throw new IllegalArgumentException("Use a nonnegative cash opening balance.");budget.accounts.add(new Budget.Account(n,date(day),balance));});}
     private void transaction(Budget.Entry old){
@@ -318,7 +361,7 @@ public class MainActivity extends Activity {
         if(balance==0)f.addView(button("Close account",()->new AlertDialog.Builder(this).setTitle("Close "+a.name+"?").setMessage("It moves to Closed accounts and isn't offered for new transactions. Its history stays, and you can reopen it.").setNegativeButton("Cancel",null).setPositiveButton("Close account",(d,w)->{if(change(()->budget.close(accountById(id))))for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}).show()));
         else f.addView(label("To close it, first move its "+money(balance)+" to another account: an account closes at $0.",13,muted,false));
         if(!budget.usedAccount(a))f.addView(button("Delete account",()->new AlertDialog.Builder(this).setTitle("Delete "+a.name+"?").setMessage("It has no transactions. Its opening balance of "+money(a.opening)+" leaves your plan.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(change(()->budget.deleteAccount(accountById(id))))for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}).show()));
-        dialog("Edit account",f,()->{String n=required(name);for(Budget.Account o:budget.accounts)if(!o.id.equals(id)&&o.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");accountById(id).name=n;});
+        dialog("Edit account",f,()->{String n=required(name);for(Budget.Account o:budget.accounts)if(!o.id.equals(id)&&o.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");budget.rename(accountById(id),n);});
     }
     private void load(){
         String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null){for(String[] item:new String[][]{{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}}){Budget.Category c=new Budget.Category(item[0]);c.group=item[1];budget.categories.add(c);}return;}

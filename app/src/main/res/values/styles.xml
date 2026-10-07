@@ -12,6 +12,7 @@
         <item name="android:navigationBarColor">#11151F</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:datePickerDialogTheme">@style/DatePickerDialog.Dark</item>
     </style>
     <style name="AppTheme.Light" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
@@ -37,5 +38,16 @@
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
+    </style>
+    <!-- The date picker in dark: MyBudget's indigo header and dialog colours instead of Material's grey. -->
+    <style name="DatePickerDialog.Dark" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#B3BFFF</item>
+        <item name="android:colorBackgroundFloating">#202635</item>
+        <item name="android:textColorPrimary">#EDF1FA</item>
+        <item name="android:textColorSecondary">#ABB5C9</item>
+        <item name="android:datePickerStyle">@style/DatePicker.Dark</item>
+    </style>
+    <style name="DatePicker.Dark" parent="android:style/Widget.Material.DatePicker">
+        <item name="android:headerBackground">#41509F</item>
     </style>
 </resources>

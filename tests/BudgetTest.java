@@ -33,8 +33,30 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();
+        csv();batchOne();phaseB();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseB(){
+        YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);
+        Budget.Category rent=new Budget.Category("Rent"),phone=new Budget.Category("Phone"),food=new Budget.Category("Food");b.categories.add(rent);b.categories.add(phone);b.categories.add(food);
+        rent.targetType="Monthly";rent.target=50000;rent.dueDay=28;phone.targetType="Monthly";phone.target=3000;phone.dueDay=3;food.targetType="Monthly";food.target=20000;
+        // Snooze: nothing needed in that month only.
+        equal(b.needed(rent,jan),50000,"Needed before snooze");rent.snoozed=jan.toString();equal(b.needed(rent,jan),0,"Snoozed month");equal(b.needed(rent,feb),50000,"Next month asks again");rent.snoozed="";
+        // Fund order: earliest due day first, no day last, otherwise plan order.
+        same(b.fundOrder().get(0).name+","+b.fundOrder().get(1).name+","+b.fundOrder().get(2).name,"Phone,Rent,Food","Fund order by due day");
+        // Plan reset returns every positive Available; overspent stays.
+        b.assign(rent,jan,40000);b.assign(food,jan,30000);b.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2025-01-11",-10000));
+        Budget.Entry over=new Budget.Entry("Bill",phone.id,bank.id,"2025-01-12",-500);b.entries.add(over);
+        long cash=b.cash(jan);equal(b.planReset(jan),60000,"Reset total");equal(b.available(rent,jan),0,"Rent emptied");equal(b.available(food,jan),0,"Food emptied");equal(b.available(phone,jan),-500,"Overspending stays");equal(b.cash(jan),cash,"Reset keeps cash");equal(b.ready(jan),cash+500,"All back to Ready to Assign");
+        rejects(()->b.planReset(YearMonth.now().plusMonths(1)));
+        equal(b.netWorth(jan),100000-10000-500,"Net worth is cash");
+        // Age of Money: oldest money first.
+        Budget a=new Budget();Budget.Account acc=new Budget.Account("Bank","2025-01-01",100000);a.accounts.add(acc);Budget.Category c=new Budget.Category("Stuff");a.categories.add(c);
+        equal(a.ageOfMoney(java.time.LocalDate.of(2025,3,1)),-1,"No outflows yet");
+        a.entries.add(new Budget.Entry("A",c.id,acc.id,"2025-01-11",-10000));a.entries.add(new Budget.Entry("Pay","",acc.id,"2025-02-01",50000));a.entries.add(new Budget.Entry("B",c.id,acc.id,"2025-02-11",-100000));
+        equal(a.ageOfMoney(java.time.LocalDate.of(2025,1,31)),10,"First outflow: 10 days");equal(a.ageOfMoney(java.time.LocalDate.of(2025,3,1)),24,"Average of 10 and 37.9 days");
+        Budget.Entry move=new Budget.Entry("Transfer","",acc.id,"2025-02-12",-1000);move.destination=acc.id;a.entries.add(move);equal(a.ageOfMoney(java.time.LocalDate.of(2025,3,1)),24,"Transfers aren't spending");
     }
     static void batchOne(){
         YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1),mar=feb.plusMonths(1),apr=mar.plusMonths(1);
@@ -65,6 +87,7 @@ public class BudgetTest {
         // Payees: newest first, case-insensitive, transfers left out.
         b.entries.add(new Budget.Entry("cafe",food.id,bank.id,"2025-02-20",-500));Budget.Entry move=new Budget.Entry("Transfer to Wallet","",bank.id,"2025-02-21",-1);move.destination=wallet.id;b.entries.add(move);
         same(String.join("|",b.payees()),"cafe|Reconciliation adjustment|Shop","Payees: newest spelling, no transfers");if(b.lastForPayee(" CAFE ").date.compareTo("2025-02-20")!=0)throw new AssertionError("Newest for payee");
+        b.rename(wallet,"Purse");same(move.payee,"Transfer to Purse","Transfer payee follows a rename");same(wallet.name,"Purse","Renamed");
     }
     static void same(String actual,String expected,String message){if(!actual.equals(expected))throw new AssertionError(message+":\n"+actual+"\n!=\n"+expected);}
     static void csv(){
@@ -74,7 +97,7 @@ public class BudgetTest {
         b.entries.add(new Budget.Entry("Pay","",bank.id,"2025-01-05",250000));
         Budget.Entry move=new Budget.Entry("Transfer to Cash","",bank.id,"2025-01-01",-500);move.destination=cash.id;b.entries.add(move);
         same(b.csv(),"Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n"
-            +"2025-01-05,Pay,Income,,\"Bank, main\",,2500.00,,No\r\n"
+            +"2025-01-05,Pay,Ready to Assign,,\"Bank, main\",,2500.00,,No\r\n"
             +"2025-01-03,\"Say \"\"hi\"\"\",'=SUM(A1),Bills,\"Bank, main\",,-12.34,\"'-note\nline 2\",Yes\r\n"
             +"2025-01-01,Transfer to Cash,,,\"Bank, main\",Cash,-5.00,,No\r\n","CSV rows: newest first, quoted, formulas kept as text");
         same(new Budget().csv(),"Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n","Empty budget exports the header");

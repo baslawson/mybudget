@@ -11,6 +11,8 @@ public final class Budget {
         public String id=Budget.id(), name, group="Everyday", targetType="Refill", due="";
         public long target;
         public boolean hidden; // left out of Plan and pickers; its money still counts
+        public String snoozed="",note=""; // snoozed: the month (YYYY-MM) its target asks for nothing
+        public int dueDay; // 1-31 for "by the 15th" on Refill/Monthly targets; 0 = end of month
         public final Map<String,Long> assigned=new TreeMap<>();
         public Category(String name) { this.name=name; }
     }
@@ -54,7 +56,7 @@ public final class Budget {
     public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);}
     public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);}
     public long needed(Category c,YearMonth m){
-        if(c.target<=0)return 0;
+        if(c.target<=0||c.snoozed.equals(m.toString()))return 0;
         if(c.targetType.equals("Monthly"))return Math.max(0,c.target-assigned(c,m));
         if(c.targetType.equals("Balance")&&!c.due.isEmpty()){YearMonth due=YearMonth.parse(c.due);long remaining=Math.max(0,c.target-available(c,m));long months=Math.max(1,ChronoUnit.MONTHS.between(m,due)+1);return(remaining+months-1)/months;}
         long base=c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1))))+assigned(c,m):available(c,m);
@@ -62,6 +64,34 @@ public final class Budget {
     }
     public long spending(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&!e.category.isEmpty()&&e.date.startsWith(m.toString()))n-=e.amount;return n;}
     public long income(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.category.isEmpty()&&e.date.startsWith(m.toString()))n+=e.amount;return n;}
+    /** Fund targets' order: earliest due day first (no day = end of month), otherwise as in the plan. */
+    public List<Category> fundOrder(){List<Category> list=new ArrayList<>(categories);list.sort(Comparator.comparingInt(c->c.dueDay==0?32:c.dueDay));return list;}
+    /** Plan reset: every category's positive Available in [m] goes back to Ready to Assign. Returns the total. */
+    public long planReset(YearMonth m){
+        if(m.isAfter(YearMonth.now()))throw new IllegalArgumentException("Reset this month or an earlier one.");
+        long total=0;for(Category c:categories){long a=available(c,m);if(a>0){assign(c,m,-a);total+=a;}}return total;
+    }
+    /** Net worth at the end of [m]: everything in the accounts. */
+    public long netWorth(YearMonth m){return cash(m);}
+    /**
+     * Age of Money (YNAB's rule 4): money spent is matched to the oldest money received (opening balances and
+     * inflows), first in first out; each outflow's age is its matched days weighted by amount. The result is
+     * the average over the last 10 outflows up to [until], or -1 when there are none.
+     */
+    public int ageOfMoney(LocalDate until){
+        List<long[]> events=new ArrayList<>(); // day, amount (+ in, - out)
+        for(Account a:accounts)if(a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
+        for(Entry e:entries)if(!e.transfer()&&e.amount!=0&&!LocalDate.parse(e.date).isAfter(until))events.add(new long[]{LocalDate.parse(e.date).toEpochDay(),e.amount});
+        events.sort((x,y)->x[0]!=y[0]?Long.compare(x[0],y[0]):Long.compare(y[1],x[1])); // a day's money in before money out
+        ArrayDeque<long[]> pool=new ArrayDeque<>();List<Double> ages=new ArrayList<>();
+        for(long[] ev:events){
+            if(ev[1]>0){pool.add(new long[]{ev[0],ev[1]});continue;}
+            long left=-ev[1],matched=0;double days=0;
+            while(left>0&&!pool.isEmpty()){long[] head=pool.peek();long use=Math.min(left,head[1]);days+=(double)use*(ev[0]-head[0]);matched+=use;left-=use;head[1]-=use;if(head[1]==0)pool.poll();}
+            if(matched>0)ages.add(days/matched);
+        }
+        if(ages.isEmpty())return -1;double sum=0;List<Double> last=ages.subList(Math.max(0,ages.size()-10),ages.size());for(double a:last)sum+=a;return(int)Math.round(sum/last.size());
+    }
     // Categories: delete (moving history to another), reorder within a group.
     public boolean used(Category c){for(Entry e:entries)if(e.category.equals(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
     public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.category.equals(c.id))n++;return n;}
@@ -75,6 +105,8 @@ public final class Budget {
     public boolean reorder(Category c,int direction){int i=categories.indexOf(c);for(int j=i+direction;j>=0&&j<categories.size();j+=direction)if(categories.get(j).group.equals(c.group)){Collections.swap(categories,i,j);return true;}return false;}
     // Accounts: close at zero, delete only unused.
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;return false;}
+    /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
+    public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;a.name=name;}
     public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a $0 balance.");a.closed=true;}
     public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");accounts.remove(a);}
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow to Ready to Assign for the difference. */
@@ -91,7 +123,7 @@ public final class Budget {
     public String csv(){
         StringBuilder out=new StringBuilder("Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n");List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));
         for(Entry e:ordered){Category c=category(e.category);Account a=account(e.account),to=account(e.destination);
-            out.append(String.join(",",e.date,cell(e.payee),cell(e.transfer()?"":c==null?"Income":c.name),cell(e.transfer()||c==null?"":c.group),cell(a==null?"":a.name),cell(to==null?"":to.name),BigDecimal.valueOf(e.amount,2).toPlainString(),cell(e.memo),e.cleared?"Yes":"No")).append("\r\n");}
+            out.append(String.join(",",e.date,cell(e.payee),cell(e.transfer()?"":c==null?"Ready to Assign":c.name),cell(e.transfer()||c==null?"":c.group),cell(a==null?"":a.name),cell(to==null?"":to.name),BigDecimal.valueOf(e.amount,2).toPlainString(),cell(e.memo),e.cleared?"Yes":"No")).append("\r\n");}
         return out.toString();
     }
     // A spreadsheet runs text starting with = + - @ as a formula: a leading ' keeps it text. Quoted when needed.
