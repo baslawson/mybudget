@@ -5,3 +5,14 @@ app/build/
 local.properties
 *.iml
 .idea/
+.private/
+.env
+.env.*
+*.jks
+*.keystore
+key.properties
+signing.properties
+.aws/
+.codex/
+*.apk
+*.aab

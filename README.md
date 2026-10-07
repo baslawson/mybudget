@@ -2,6 +2,22 @@
 
 A native, offline envelope budgeting app with an original interface, informed by YNAB's official method and product documentation. Give the money you have a purpose: record income, assign it to categories, track expenses, and move money to cover overspending.
 
+## Download 0.0.0
+
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.0/MyBudget-0.0.0.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.0) · [Add to Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.mybudget.app%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbaslawson%2Fmybudget%22%2C%22author%22%3A%22baslawson%22%2C%22name%22%3A%22MyBudget%22%7D)
+
+Android 8+ (API 26). Version `0.0.0`, version code `3`, package `com.mybudget.app`. The universal release APK is approximately 46 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+
+This initial release uses local device storage and manual entries. It does not sync accounts or back up/export budgets. The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
+
+## Screenshots
+
+All accounts, payees, amounts and transactions shown below are fictional demo data from a separate preview installation.
+
+<img src="docs/screenshots/home-dark.png" width="220" alt="Home with fictional funding progress in dark theme"> <img src="docs/screenshots/plan-dark.png" width="220" alt="Monthly plan with grouped categories and funding targets">
+
+<img src="docs/screenshots/spending-dark.png" width="220" alt="Fictional spending transactions"> <img src="docs/screenshots/accounts-dark.png" width="220" alt="Fictional cash accounts"> <img src="docs/screenshots/settings-light.png" width="220" alt="Light theme appearance settings">
+
 ## Project notes — 7 October 2026
 
 - Native Android app built with Java and Android framework widgets, with no third-party runtime libraries. Android 8+; AUD; local device storage.
@@ -10,7 +26,7 @@ A native, offline envelope budgeting app with an original interface, informed by
 - Light, Dark and Auto appearances persist across restarts. Auto follows the device theme, including changes while the app is open. Settings returns to the previous screen.
 - Latest UI refinements: compact category rows with Available emphasized; secondary Assigned/Activity values; target descriptions, progress and remaining funding; matching navigation icons; tighter spacing with comfortable touch targets.
 - Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
-- Latest debug APK: **76,243 bytes** (76.2 KB / 74.5 KiB), measured from `app/build/outputs/apk/debug/app-debug.apk`. This is a development build; size may change with subsequent builds.
+- Initial published version: **0.0.0**, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link. The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
 - Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
 - Existing budget data is retained during APK updates. No bank sync, credit-card handling or cloud/export backup is implemented.
 
@@ -50,6 +66,12 @@ This version supports multiple cash accounts and saves locally on the device. It
 Compile `Budget.java` and `tests/BudgetTest.java` with a JDK, then run `BudgetTest`. Checks cover exact cents, monthly assignments, rollover, overspending, edit/delete recalculation, targets, transfers, cleared balances, refunds and future reservations.
 
 Build Android tests with `gradlew.bat assembleDebugAndroidTest`. Install both debug APKs and run `adb shell am instrument -w com.mybudget.app.test/com.mybudget.app.BudgetInstrumentation`. Tests exercise migration and persistence using Android's real JSON implementation and launch the actual Activity.
+
+## Release signing
+
+`gradlew.bat assembleRelease` creates an unsigned APK. Published APKs are aligned and signed separately with the private MyBudget release key; signing files are excluded from Git and release uploads. Keep a secure backup of the signing key and its password to preserve Android update compatibility, and increment `versionCode` for each future release.
+
+The release certificate SHA-256 fingerprint is `f895800a96ba9478851cf4620d6bcbfc4d1acfa2a1974167c5af69aa0dcd52cd`. Verify the APK download against the `SHA256SUMS.txt` asset included in each release. The certificate fingerprint is public; the signing key and password are private.
 
 ## Design references
 
