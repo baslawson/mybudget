@@ -58,7 +58,7 @@ public class AddExpenseActivity extends Activity {
         if(!"AUD".equals(intent.getStringExtra("currency"))){fail("MyBudget records AUD only, so this payment wasn't added.");return;}
         // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
         List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
-        List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed)accounts.add(a);
+        List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed&&!a.tracking())accounts.add(a); // tracking accounts are off budget: no categories
         if(accounts.isEmpty()||categories.isEmpty()){fail("Open MyBudget and add an account first, then mark the bill paid again.");return;}
         String billKey=text(intent,"billKey",100),payee=text(intent,"payee",80),note=text(intent,"note",200);
         long sent=intent.getLongExtra("amountCents",0);String date=text(intent,"date",10);
@@ -72,7 +72,7 @@ public class AddExpenseActivity extends Activity {
             label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+MainActivity.pretty(last.date)+". Save only if this is another payment.",13);
         // Payees used before are suggested (as in MyBudget's own form).
         label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);
-        label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);amountField.setTextSize(22);
+        label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",MainActivity.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}

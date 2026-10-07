@@ -8,15 +8,16 @@ import java.util.*;
 
 /**
  * Bank statement CSV import. The user matches columns once (date, payee, amount, or separate money in/out columns);
- * rows already in the account (same date, amount and payee) are skipped, and so are rows dated in the future or before
+ * rows already in the account (same date, amount and statement payee, or payee for rows not imported) are skipped, and so are rows dated in the future or before
  * the account opened. Outflows get the category last used with their payee, otherwise "To categorize"; inflows go to
- * Ready to Assign unless the payee's last transaction was a refund to a category. Imported rows are cleared.
+ * To budget unless the payee's last transaction was a refund to a category. Import rules (Budget.rule) come first: the
+ * first rule whose text is in the payee renames it and/or gives its category. Imported rows are cleared and wait for review.
  */
 public final class CsvImport {
     public static final String TO_CATEGORIZE="To categorize";
     // Australian day/month first; ISO; US month/day only when day/month can't read the column.
     public static final String[] DATE_FORMATS={"d/M/uuuu","uuuu-MM-dd","d-M-uuuu","d.M.uuuu","d MMM uuuu","d/M/uu","M/d/uuuu"};
-    public static final class Result { public int added,duplicates,future,beforeOpening,unreadable; public final List<Budget.Entry> entries=new ArrayList<>(); }
+    public static final class Result { public int added,duplicates,future,beforeOpening,unreadable,matchedRules;public final List<Budget.Entry> entries=new ArrayList<>(); }
 
     /** RFC 4180 rows: quoted fields may hold commas, quotes ("") and line breaks. A leading BOM is ignored. */
     public static List<List<String>> parse(String text){
@@ -54,7 +55,8 @@ public final class CsvImport {
     public static Result run(Budget budget,List<List<String>> rows,boolean header,int dateColumn,int payeeColumn,int amountColumn,int outflowColumn,String dateFormat,Budget.Account account){
         // Each row already in the account matches one imported row: two identical rows in one statement are two transactions.
         Result r=new Result();Map<String,Integer> existing=new HashMap<>();
-        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.payee),1,Integer::sum);
+        // An imported row is known by the statement's own payee text (bankPayee), so renaming or merging its payee later doesn't hide it; others by their payee.
+        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
         Budget.Category toCategorize=null;LocalDate today=LocalDate.now();
         for(int i=header?1:0;i<rows.size();i++){List<String> row=rows.get(i);
             LocalDate d;long cents;String payee;
@@ -64,13 +66,18 @@ public final class CsvImport {
             }catch(Exception e){r.unreadable++;continue;}
             if(cents==0){r.unreadable++;continue;}if(payee.isEmpty())payee="(no payee)";if(payee.length()>80)payee=payee.substring(0,80);
             if(d.isAfter(today)){r.future++;continue;}if(d.toString().compareTo(account.date)<0){r.beforeOpening++;continue;}
-            String k=key(d.toString(),cents,payee);if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;continue;}
+            // A rule's new name counts for duplicates too: the row may have been imported (and renamed) before.
+            Budget.Rule rule=budget.rule(payee);String named=rule==null||rule.rename.isEmpty()?payee:rule.rename;Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
+            String k=key(d.toString(),cents,payee),k2=key(d.toString(),cents,named);if(existing.getOrDefault(k,0)<=0)k=k2;if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;continue;}
+            if(rule!=null)r.matchedRules++;String bank=payee;payee=named;
             Budget.Entry last=budget.lastForPayee(payee);Budget.Category known=last==null||last.split()||last.transfer()?null:budget.category(last.category);if(known!=null&&known.payment())known=null;
             String category;
-            if(cents>0)category=known!=null&&last.amount>0?known.id:"";
+            if(account.tracking())category=""; // off budget: no categories
+            else if(ruled!=null)category=ruled.id;
+            else if(cents>0)category=known!=null&&last.amount>0?known.id:"";
             else if(known!=null)category=known.id;
             else{if(toCategorize==null)toCategorize=toCategorize(budget);category=toCategorize.id;}
-            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.memo=Budget.IMPORTED;budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
+            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.approved=false;e.memo=Budget.IMPORTED;e.bankPayee=bank;budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
         }
         return r;
     }

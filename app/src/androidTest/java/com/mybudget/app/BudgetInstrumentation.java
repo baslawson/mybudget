@@ -34,9 +34,17 @@ public class BudgetInstrumentation extends Instrumentation {
         Budget flagsBack=BudgetStore.decode(BudgetStore.encode(flags));if(flagsBack.categories.get(0).hidden||!flagsBack.categories.get(1).hidden||flagsBack.accounts.get(0).closed||!flagsBack.accounts.get(1).closed)throw new AssertionError("Hidden/closed not saved");
         JSONObject older=new JSONObject(BudgetStore.encode(flags));older.getJSONArray("categories").getJSONObject(1).remove("hidden");older.getJSONArray("accounts").getJSONObject(1).remove("closed");
         Budget olderBack=BudgetStore.decode(older.toString());if(olderBack.categories.get(1).hidden||olderBack.accounts.get(1).closed)throw new AssertionError("Older budget not read as visible/open");
+        // Weekly, by-date and debt targets and month notes round-trip (and in backups); budgets saved before them read with defaults.
+        newTargets(flags);
+        // Tracking accounts, loan terms, flags and their names, review marks, hidden payees and import rules round-trip; older budgets read with defaults.
+        batch2(BudgetStore.decode(BudgetStore.encode(flags)));
+        // Categories pinned to Home round-trip (and in backups); budgets saved before them read as not pinned.
+        batch3(BudgetStore.decode(BudgetStore.encode(flags)));
         // Version 4: scheduled transactions are saved and read back; a newer version is refused.
         Budget.Scheduled sched=new Budget.Scheduled("Landlord",flags.categories.get(0).id,flags.accounts.get(0).id,"2026-01-31",-50000,"Monthly");sched.memo="Lease";sched.billKey="planner-series-r";flags.scheduled.add(sched);
-        JSONObject v4=new JSONObject(BudgetStore.encode(flags));if(v4.getInt("version")!=4)throw new AssertionError("Not version 4");Budget.Scheduled back=BudgetStore.decode(v4.toString()).scheduled.get(0);
+        JSONObject v4=new JSONObject(BudgetStore.encode(flags));if(v4.getInt("version")!=5)throw new AssertionError("Not version 5");Budget.Scheduled back=BudgetStore.decode(v4.toString()).scheduled.get(0);
+        // Version 4 data (MyBudget 0.0.5) still reads, with defaults for later fields.
+        JSONObject was4=new JSONObject(v4.toString()).put("version",4);if(!BudgetStore.encode(BudgetStore.decode(was4.toString())).equals(BudgetStore.encode(flags)))throw new AssertionError("Version 4 not read");
         if(!back.id.equals(sched.id)||!back.next.equals("2026-01-31")||back.day!=31||!back.repeat.equals("Monthly")||back.amount!=-50000||!back.memo.equals("Lease")||!back.billKey.equals("planner-series-r"))throw new AssertionError("Scheduled lost data");
         // Splits round-trip; a split part with an unknown category, or a split marker without parts, is refused.
         Budget.Entry split=new Budget.Entry("Supermarket",Budget.SPLIT,flags.accounts.get(0).id,flags.accounts.get(0).date,-9000);split.splits.add(new Budget.Split(flags.categories.get(0).id,-7000));split.splits.add(new Budget.Split("",-2000));split.splits.get(0).memo="Food";flags.entries.add(split);
@@ -68,21 +76,61 @@ public class BudgetInstrumentation extends Instrumentation {
             bp.edit().putString("planner_bills_at",LocalDateTime.now().minusDays(2).withNano(0).toString()).commit();if(PlannerBills.stale(getTargetContext()))throw new AssertionError("Recent list stale");}
         finally{if(keptAt==null)bp.edit().remove("planner_bills_at").commit();else bp.edit().putString("planner_bills_at",keptAt).commit();}
         boolean badList=false;try{PlannerBills.clean("{not a list");}catch(JSONException expected){badList=true;}if(!badList)throw new AssertionError("Bad list accepted");
-        boolean newer=false;try{BudgetStore.decode(v4.put("version",5).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 5 accepted");
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, scheduled transactions and splits round-trip in version 4, bad splits and version 5 are refused, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, its lists are checked, a paid bill leaves the list and old lists are stale.\n");finish(Activity.RESULT_OK,result);
+        boolean newer=false;try{BudgetStore.decode(v4.put("version",6).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 6 accepted");
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip in version 4, bad splits and version 6 are refused, version 4 data and version 1 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
     // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
     private void backups(Budget b)throws Exception{
         YearMonth month=YearMonth.now();b.entries.get(0).externalId="pay-b";b.entries.get(0).billKey="planner-series-b";
         String file=BudgetStore.backup(b,LocalDateTime.of(2026,10,7,12,30,15,999));JSONObject root=new JSONObject(file);
-        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=1||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
+        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=2||root.getInt("version")!=5||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
         BudgetStore.Backup read=BudgetStore.readBackup("\n"+file);Budget r=read.budget;
         if(!read.created.equals("2026-10-07T12:30:15")||!BudgetStore.encode(r).equals(BudgetStore.encode(b)))throw new AssertionError("Backup lost data");
         eq(r.cash(month),b.cash(month));eq(r.ready(month),b.ready(month));if(r.external("pay-b")==null||r.lastForBill("planner-series-b")==null)throw new AssertionError("Planner link ids lost");
         refused(BudgetStore.encode(b),"isn't a MyBudget backup");refused("{broken","isn't a MyBudget backup");refused("[]","isn't a MyBudget backup");
-        refused(root.put("backupVersion",2).toString(),"newer MyBudget");
+        refused(root.put("backupVersion",3).toString(),"newer MyBudget");
+        // A version 1 backup (MyBudget 0.0.5: storage version 4) still restores.
+        JSONObject v1=new JSONObject(file).put("backupVersion",1).put("version",4);if(!BudgetStore.encode(BudgetStore.readBackup(v1.toString()).budget).equals(BudgetStore.encode(b)))throw new AssertionError("Version 1 backup not restored");
         root.put("backupVersion",1).getJSONArray("entries").getJSONObject(0).put("account","missing");refused(root.toString(),"damaged");
         root=new JSONObject(file);root.put("version",9);refused(root.toString(),"damaged");
+    }
+    private void newTargets(Budget b)throws Exception{
+        Budget.Category weekly=b.categories.get(0),dated=b.categories.get(1);String wt=weekly.targetType,dt=dated.targetType;
+        weekly.targetType="Weekly";weekly.weekday=3;weekly.weeklyRefill=false;dated.targetType="ByDate";dated.dueDate="2027-01-15";dated.repeatMonths=6;b.setMonthNote(YearMonth.of(2026,10),"Holiday month");
+        Budget back=BudgetStore.readBackup(BudgetStore.backup(b,LocalDateTime.now())).budget;Budget.Category w=back.category(weekly.id),d=back.category(dated.id);
+        if(!w.targetType.equals("Weekly")||w.weekday!=3||w.weeklyRefill||!d.targetType.equals("ByDate")||!d.dueDate.equals("2027-01-15")||d.repeatMonths!=6||!back.monthNote(YearMonth.of(2026,10)).equals("Holiday month"))throw new AssertionError("New targets or month note lost");
+        if(!BudgetStore.encode(back).equals(BudgetStore.encode(b)))throw new AssertionError("Round trip changed data");
+        JSONObject older=new JSONObject(BudgetStore.encode(b));older.remove("monthNotes");for(int i=0;i<older.getJSONArray("categories").length();i++){JSONObject c=older.getJSONArray("categories").getJSONObject(i);c.remove("weekday");c.remove("weeklyRefill");c.remove("dueDate");c.remove("repeatMonths");}
+        Budget old=BudgetStore.decode(older.toString());Budget.Category o=old.category(weekly.id);if(o.weekday!=1||!o.weeklyRefill||!old.category(dated.id).dueDate.isEmpty()||old.category(dated.id).repeatMonths!=0||!old.monthNotes.isEmpty())throw new AssertionError("Older budget not read with defaults");
+        JSONObject bad=new JSONObject(BudgetStore.encode(b));bad.getJSONObject("monthNotes").put("not-a-month","x");boolean refused=false;try{BudgetStore.decode(bad.toString());}catch(RuntimeException|JSONException expected){refused=true;}if(!refused)throw new AssertionError("Bad month accepted");
+        weekly.targetType=wt;dated.targetType=dt;weekly.weekday=1;weekly.weeklyRefill=true;dated.dueDate="";dated.repeatMonths=0;b.monthNotes.clear();
+    }
+    private void batch2(Budget b)throws Exception{
+        String day=b.accounts.get(0).date;Budget.Account shares=b.addTracking("Shares",day,500000,false),home=b.addTracking("Mortgage",day,40000000,true);home.rate=6250;home.payment=250000;home.frequency="Every 2 weeks";
+        Budget.Entry flagged=b.entries.get(0);flagged.flag=4;flagged.approved=false;flagged.bankPayee="EFTPOS SHOP 123";Budget.Entry update=b.valueUpdate(shares,510000,day);b.entries.add(0,update);
+        Budget.Entry extra=new Budget.Entry("Transfer to Mortgage",b.categories.get(0).id,b.accounts.get(0).id,day,-1000);extra.destination=home.id;b.validate(extra);b.entries.add(0,extra);
+        b.flagNames[4]="Tax";b.flagNames[1]="Check";b.hidePayee("Old shop",true);b.rules.add(new Budget.Rule("WOOLWORTHS","Woolworths",b.categories.get(0).id));b.rules.add(new Budget.Rule("uber","Uber",""));
+        YearMonth month=YearMonth.now();long cash=b.cash(month),ready=b.ready(month),worth=b.netWorth(month);
+        for(Budget back:new Budget[]{BudgetStore.decode(BudgetStore.encode(b)),BudgetStore.readBackup(BudgetStore.backup(b,LocalDateTime.now())).budget}){
+            Budget.Account s=back.account(shares.id),h=back.account(home.id);
+            if(s==null||!s.tracking()||s.liability||h==null||!h.tracking()||!h.liability||h.rate!=6250||h.payment!=250000||!h.frequency.equals("Every 2 weeks")||h.opening!=-40000000)throw new AssertionError("Tracking account or loan terms lost");
+            Budget.Entry f=back.entries.get(2);if(f.flag!=4||f.approved||!f.bankPayee.equals("EFTPOS SHOP 123")||!back.entries.get(0).bankPayee.isEmpty()||!back.entries.get(0).approved||!back.entries.get(0).category.equals(extra.category)||!back.entries.get(0).destination.equals(home.id))throw new AssertionError("Flag, review mark or crossing transfer lost");
+            if(!back.flagNames[4].equals("Tax")||!back.flagNames[1].equals("Check")||!back.flagNames[2].isEmpty()||!back.hiddenPayee("OLD SHOP")||back.rules.size()!=2||!back.rules.get(0).contains.equals("WOOLWORTHS")||!back.rules.get(0).category.equals(b.categories.get(0).id)||!back.rules.get(1).rename.equals("Uber"))throw new AssertionError("Flag names, hidden payees or rules lost");
+            eq(back.cash(month),cash);eq(back.ready(month),ready);eq(back.netWorth(month),worth);if(!BudgetStore.encode(back).equals(BudgetStore.encode(b)))throw new AssertionError("Round trip changed data");}
+        // Older budgets (before these fields): no flags, approved, assets without terms, no names, hidden payees or rules.
+        JSONObject older=new JSONObject(BudgetStore.encode(b));older.remove("flagNames");older.remove("hiddenPayees");older.remove("rules");
+        for(int i=0;i<older.getJSONArray("entries").length();i++){JSONObject e=older.getJSONArray("entries").getJSONObject(i);e.remove("flag");e.remove("approved");e.remove("bankPayee");}
+        for(int i=0;i<older.getJSONArray("accounts").length();i++){JSONObject a=older.getJSONArray("accounts").getJSONObject(i);a.remove("liability");a.remove("rate");a.remove("payment");a.remove("frequency");}
+        Budget old=BudgetStore.decode(older.toString());for(Budget.Entry e:old.entries)if(e.flag!=0||!e.approved||!e.bankPayee.isEmpty())throw new AssertionError("Older entries not read as unflagged and approved");
+        Budget.Account oh=old.account(home.id);if(oh.liability||oh.rate!=0||oh.payment!=0||!oh.frequency.equals("Monthly")||!old.hiddenPayees.isEmpty()||!old.rules.isEmpty()||!old.flagNames[4].isEmpty())throw new AssertionError("Older budget not read with defaults");
+        // A rule whose category was deleted keeps its rename; one left with nothing to do is dropped. A liability mark on a budget account is ignored.
+        JSONObject odd=new JSONObject(BudgetStore.encode(b));odd.getJSONArray("rules").getJSONObject(0).put("category","missing");odd.getJSONArray("rules").put(new JSONObject().put("contains","x").put("category","missing"));odd.getJSONArray("accounts").getJSONObject(0).put("liability",true);
+        Budget oddBack=BudgetStore.decode(odd.toString());if(oddBack.rules.size()!=2||!oddBack.rules.get(0).category.isEmpty()||oddBack.accounts.get(0).liability)throw new AssertionError("Odd rules or liability not cleaned");
+    }
+    private void batch3(Budget b)throws Exception{
+        b.pin(b.categories.get(1),true);String pinned=b.categories.get(1).id;
+        for(Budget back:new Budget[]{BudgetStore.decode(BudgetStore.encode(b)),BudgetStore.readBackup(BudgetStore.backup(b,LocalDateTime.now())).budget}){if(!back.category(pinned).pinned||back.categories.get(0).pinned) /* the pin itself round-trips; this category is hidden here, so pinned() leaves it out */throw new AssertionError("Pinned category lost");if(!BudgetStore.encode(back).equals(BudgetStore.encode(b)))throw new AssertionError("Round trip changed data");}
+        JSONObject older=new JSONObject(BudgetStore.encode(b));for(int i=0;i<older.getJSONArray("categories").length();i++)older.getJSONArray("categories").getJSONObject(i).remove("pinned");if(!BudgetStore.decode(older.toString()).pinned().isEmpty())throw new AssertionError("Older budget not read as unpinned");
     }
     private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
     // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.
