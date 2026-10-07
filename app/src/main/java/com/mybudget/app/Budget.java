@@ -45,7 +45,7 @@ public final class Budget {
         public boolean transfer(){return !destination.isEmpty();}
     }
     /**
-     * A future or repeating transaction (YNAB's scheduled transactions). It isn't money yet: when its date comes,
+     * A future or repeating transaction (a scheduled transaction). It isn't money yet: when its date comes,
      * the user enters (or skips) it, and only then does it become an Entry. Repeats keep their day of the month.
      */
     public static final class Scheduled {
@@ -121,7 +121,7 @@ public final class Budget {
     public long balance(Account a,boolean clearedOnly){long n=a.opening;for(Entry e:entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
     /** To budget: cash less what categories hold. Overspending on a card is card debt, so it doesn't count here. */
     public long ready(YearMonth m){long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;}
-    // Credit cards (YNAB's way). Spending on a card from a category with money moves that money to the card's
+    // Credit cards in an envelope system. Spending on a card from a category with money moves that money to the card's
     // payment category, ready to pay the bill; spending beyond what the category has is credit overspending: it shows
     // in the category this month and then becomes card debt, without touching To budget. A payment (a transfer
     // from a cash account to the card) uses the payment category's money.
@@ -172,7 +172,7 @@ public final class Budget {
     /** Net worth at the end of [m]: everything in the accounts. */
     public long netWorth(YearMonth m){long n=0;for(Account a:accounts)n+=balanceAt(a,m);return n;}
     /**
-     * Money age (YNAB's rule 4): money spent is matched to the oldest money received (opening balances and
+     * Money age (how long money waits before it's spent): money spent is matched to the oldest money received (opening balances and
      * inflows), first in first out; each outflow's age is its matched days weighted by amount. The result is
      * the average over the last 10 outflows up to [until], or -1 when there are none.
      */

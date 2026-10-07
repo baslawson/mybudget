@@ -57,7 +57,7 @@ public class MainActivity extends Activity {
             else if(t.endsWith("amounts")){if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){toast("Could not save that setting.");return true;}hideAmounts=!hideAmounts;render();}
             else{if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}return true;});menu.show();
     }
-    /** YNAB's Plan Reset: every category's money in this month goes back into To budget. The budget before is kept for Undo. */
+    /** Budget reset: every category's money in this month goes back into To budget, to start the plan afresh. The budget before is kept for Undo. */
     private void planReset(){
         if(!storageReadable)return;if(month.isAfter(YearMonth.now())){toast("Reset this month or an earlier one.");return;}
         long total=0;int n=0;for(Budget.Category c:budget.categories){long a=budget.available(c,month);if(a>0){total+=a;n++;}}
@@ -287,7 +287,7 @@ public class MainActivity extends Activity {
             new AlertDialog.Builder(this).setTitle("Delete "+c.name+"?").setMessage("Its "+count(count,"transaction","transactions")+" and the money assigned to it in every month move to "+others.get(n).name+". Bills from Planner then suggest "+others.get(n).name+" too.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Move and delete",(d2,w)->change(()->budget.deleteCategory(categoryById(id),categoryById(into)))).show();}).show();
     }
-    /** YNAB-style cover: pick where the money comes from (categories with money, or To budget). */
+    /** Cover overspending: pick the envelope the money comes from (categories with money, or To budget). */
     private void cover(String id){
         Budget.Category c=budget.category(id);if(c==null)return;long missing=-budget.available(c,month);if(missing<=0)return;
         List<Budget.Category> sources=new ArrayList<>();for(Budget.Category o:budget.categories)if(o!=c&&budget.available(o,month)>0)sources.add(o);sources.sort((a,b)->Long.compare(budget.available(b,month),budget.available(a,month)));
@@ -328,7 +328,7 @@ public class MainActivity extends Activity {
         EditText query=field(content,"Search payee, category or memo",false);query.setText(search);LinearLayout list=column();content.addView(list);fillEntries(list);
         query.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();fillEntries(list);}public void afterTextChanged(Editable e){}});
     }
-    // Money not given to a category goes into To budget (income and reconcile adjustments), as YNAB labels it.
+    // Money not given to a category goes into To budget (income and reconcile adjustments).
     private String categoryName(Budget.Entry e){if(e.split()){StringBuilder s=new StringBuilder("Split:");for(Budget.Split p:e.splits){Budget.Category c=budget.category(p.category);s.append(" ").append(c==null?"To budget":c.name).append(",");}return s.substring(0,s.length()-1);}return e.transfer()?"Transfer":e.category.isEmpty()?"To budget":budget.category(e.category).name;}
     private void fillEntries(LinearLayout list){
         list.removeAllViews();List<Budget.Entry> ordered=new ArrayList<>(budget.entries);ordered.sort((a,b)->b.date.compareTo(a.date));int n=0;
@@ -387,7 +387,7 @@ public class MainActivity extends Activity {
     private void assign(Budget.Category c){
         LinearLayout f=form();f.addView(label(money(budget.spendable(month))+" to budget",16,blue,true));long now=budget.assigned(c,month);f.addView(label("Assigned this month: "+money(now)+". A positive amount adds money; a negative one returns it.",13,muted,false));
         EditText amount=field(f,"Amount (AUD)",true);TextView result=label("",13,blue,true);f.addView(result);onText(amount,()->{try{result.setText("Assigned becomes "+money(now+Budget.parse(amount.getText().toString())));}catch(Exception e){result.setText("");}});
-        // Quick amounts (as in YNAB): each fills in the change to this month's Assigned.
+        // Quick amounts: each fills in the change to this month's Assigned.
         f.addView(label("Quick amounts",12,muted,true));YearMonth last=month.minusMonths(1);long lastAssigned=budget.assigned(c,last),spentLast=budget.spent(c,last),average=budget.averageSpent(c,month);
         List<String> names=new ArrayList<>();List<Long> changes=new ArrayList<>();
         long needed=budget.needed(c,month);if(c.target>0&&needed>0){names.add("Needed for target: "+money(needed));changes.add(needed);}
@@ -512,7 +512,7 @@ public class MainActivity extends Activity {
         Spinner from=spinner(f,"From account",names,old!=null?accounts.indexOf(budget.account(old.account)):fromIndex),to=spinner(f,"To account",names,old!=null?accounts.indexOf(budget.account(old.destination)):toIndex>=0?toIndex:1);EditText amount=field(f,"Amount (AUD)",true);if(preset>0)amount.setText(decimal(preset));f.addView(label("Date",12,muted,true));EditText day=dateField(f,old==null?LocalDate.now().toString():old.date);CheckBox cleared=new CheckBox(this);cleared.setText("Cleared in both accounts");f.addView(cleared);if(old!=null){amount.setText(decimal(-old.amount));cleared.setChecked(old.cleared);f.addView(button("Delete transfer",()->delete(old)));}
         dialog(old!=null?"Edit transfer":toIndex>=0?"Pay "+budget.account(toId).name:"Transfer money",f,()->{Budget.Account a=accounts.get(from.getSelectedItemPosition()),b=accounts.get(to.getSelectedItemPosition());Budget.Entry e=new Budget.Entry("Transfer to "+b.name,"",a.id,date(day),-Budget.cents(amount.getText().toString()));e.destination=b.id;e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
     }
-    // A difference can be settled with an adjustment into To budget (as YNAB does) after the user confirms.
+    // A difference can be settled with an adjustment into To budget after the user confirms.
     private void reconcile(Budget.Account a){
         LinearLayout f=form();f.addView(label("Cleared balance: "+money(budget.balance(a,true)),18,ink,true));f.addView(label("Compare with your bank's cleared balance, excluding pending transactions. Mark transactions cleared in Transactions first.",14,muted,false));EditText value=field(f,"Bank's cleared balance (AUD)",true);
         ScrollView scroll=new ScrollView(this);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(this).setTitle("Reconcile "+a.name).setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Reconcile",null).create();

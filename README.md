@@ -1,6 +1,6 @@
 # MyBudget for Android
 
-A native, offline envelope budgeting app with an original interface, informed by YNAB's official method and product documentation. Give the money you have a purpose: record income, assign it to categories, track expenses, and move money to cover overspending.
+A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
 ## Download 0.0.2
 
@@ -26,7 +26,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 - Light, Dark and Auto appearances persist across restarts. Auto follows the device theme, including changes while the app is open. Settings returns to the previous screen.
 - Latest UI refinements: compact category rows with Available emphasized; secondary Assigned/Activity values; target descriptions, progress and remaining funding; matching navigation icons; tighter spacing with comfortable touch targets.
 - Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
-- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link), **0.0.1** (expenses from Planner) and **0.0.2** (backup and import, YNAB-style planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
+- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link), **0.0.1** (expenses from Planner) and **0.0.2** (backup and import, envelope planning tools, upcoming and split transactions, credit cards, Planner's upcoming bills). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
 - Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
 - Existing budget data is retained during APK updates (0.0.2 converts it to storage version 4; older MyBudget versions can't read that). New in 0.0.2 (all described below): backup, restore and CSV export; automatic daily backup; CSV import; transaction photos; hide/delete/reorder categories; edit/close/delete accounts; reconcile adjustments; a date picker; payee suggestions; quick assign amounts and Cover overspending; snoozed targets, due days and category notes; Budget reset and Hide amounts; the Reports chart, net worth and money age; upcoming (scheduled and repeating) transactions; split transactions; credit cards; Planner's upcoming bills; and MyBudget's own names for the screens (Budget, Transactions, Reports, To budget). No bank sync is implemented.
 - Planner and MyBudget are linked apps. Planner can send paid bills for a confirmed expense and request removal when a payment is undone (from 0.0.1), and its upcoming bills to plan for (from MyBudget 0.0.2 with Planner 0.0.22). BudgetInstrumentation covers adding once and removing on undo, and passed on the Pixel 7 Pro emulator. The full round trip from Planner has not been tested automatically.
@@ -82,7 +82,7 @@ The first upgrade preserves old category balances, cash and transactions and ret
 
 ## Scope
 
-This version supports cash accounts and credit cards and saves locally on the device. It has no bank sync, loans or shared plans. Target types are a subset of YNAB's options. Uninstalling or clearing app storage deletes the budget, so keep a backup file (below).
+This version supports cash accounts and credit cards and saves locally on the device. It has no bank sync, loans or shared plans. Targets come in three kinds: refill to an amount each month, set aside a fresh amount each month, or save toward a balance (optionally by a due month). Uninstalling or clearing app storage deletes the budget, so keep a backup file (below).
 
 ## Backup, restore and export
 
@@ -109,13 +109,5 @@ Build Android tests with `gradlew.bat assembleDebugAndroidTest`. Install both de
 `gradlew.bat assembleRelease` creates an unsigned APK. Published APKs are aligned and signed separately with the private MyBudget release key; signing files are excluded from Git and release uploads. Keep a secure backup of the signing key and its password to preserve Android update compatibility, and increment `versionCode` for each future release.
 
 The release certificate SHA-256 fingerprint is `f895800a96ba9478851cf4620d6bcbfc4d1acfa2a1974167c5af69aa0dcd52cd`. Verify the APK download against the `SHA256SUMS.txt` asset included in each release. The certificate fingerprint is public; the signing key and password are private.
-
-## Design references
-
-- [YNAB setup and method](https://www.ynab.com/guide/the-ultimate-get-started-guide)
-- [Monthly accounting glossary](https://support.ynab.com/en_us/ynab-glossary-a-guide-BJd80SORq)
-- [Funding targets](https://support.ynab.com/how-to-use-targets-rk5kkI9ks)
-- [Mobile organization](https://www.ynab.com/whats-new/the-great-ynab-remodel)
-- [Overspending and future assignments](https://support.ynab.com/en_us/troubleshooting-your-plan-r19HPofJo)
 
 Build compatibility reference: [Android Gradle plugin release notes](https://developer.android.com/build/releases/gradle-plugin).
