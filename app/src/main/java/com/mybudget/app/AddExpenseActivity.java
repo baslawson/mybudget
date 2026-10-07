@@ -54,8 +54,8 @@ public class AddExpenseActivity extends Activity {
         Budget.Entry existing=budget.external(id);
         if(existing!=null){done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
         if(!"AUD".equals(intent.getStringExtra("currency"))){fail("MyBudget records AUD only, so this payment wasn't added.");return;}
-        // Hidden categories and closed accounts aren't offered (as in MyBudget's own forms).
-        List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden)categories.add(c);
+        // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
+        List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
         List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed)accounts.add(a);
         if(accounts.isEmpty()||categories.isEmpty()){fail("Open MyBudget and add an account first, then mark the bill paid again.");return;}
         String billKey=text(intent,"billKey",100),payee=text(intent,"payee",80),note=text(intent,"note",200);

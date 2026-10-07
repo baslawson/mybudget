@@ -12,17 +12,21 @@ public final class Budget {
         public long target;
         public boolean hidden; // left out of Plan and pickers; its money still counts
         public String snoozed="",note=""; // snoozed: the month (YYYY-MM) its target asks for nothing
+        public String cardAccount=""; // set on a credit card's payment category: the card's account id
+        public boolean payment(){return !cardAccount.isEmpty();}
         public int dueDay; // 1-31 for "by the 15th" on Refill/Monthly targets; 0 = end of month
         public final Map<String,Long> assigned=new TreeMap<>();
         public Category(String name) { this.name=name; }
     }
     public static final class Account {
         public String id=Budget.id(), name, date, reconciled="";
-        public long opening;
+        public long opening; // a credit card's is negative: what was owed when it was added
+        public String type="cash"; // "cash" (cash, checking, savings) or "credit"
+        public boolean credit(){return type.equals("credit");}
         public boolean closed; // only at a zero balance; keeps its transactions
         public Account(String name,String date,long opening) { this.name=name;this.date=date;this.opening=opening; }
     }
-    public static final String SPLIT="split";
+    public static final String SPLIT="split",PAY_BY_TRANSFER="Pay a credit card with a transfer to it, not with its payment category.";
     public static final class Split { public String category,memo=""; public long amount; public Split(String category,long amount){this.category=category;this.amount=amount;} }
     public static final class Entry {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
@@ -61,7 +65,7 @@ public final class Budget {
     public void validate(Scheduled s){
         Account a=account(s.account);if(a==null)throw new IllegalArgumentException("Choose an account.");LocalDate d=LocalDate.parse(s.next);if(s.next.compareTo(a.date)<0)throw new IllegalArgumentException("The date is before this account's opening date.");
         if(d.isAfter(LocalDate.now().plusYears(5)))throw new IllegalArgumentException("Schedule within the next five years.");
-        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");if(!s.category.isEmpty()&&category(s.category)==null)throw new IllegalArgumentException("Choose a category.");
+        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");if(!s.category.isEmpty()&&category(s.category)==null)throw new IllegalArgumentException("Choose a category.");if(!s.category.isEmpty()&&category(s.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);
         if(!Arrays.asList(Scheduled.REPEATS).contains(s.repeat))throw new IllegalArgumentException("Choose how often it repeats.");
     }
     /** Enters [s]'s current date as a transaction and moves it to its next date (or removes it). */
@@ -90,12 +94,53 @@ public final class Budget {
     public Category category(String id){for(Category c:categories)if(c.id.equals(id))return c;return null;}
     public Account account(String id){for(Account a:accounts)if(a.id.equals(id))return a;return null;}
     public long assigned(Category c,YearMonth m){return c.assigned.getOrDefault(m.toString(),0L);}
-    public long activity(Category c,YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn(c.id);return n;}
-    private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));return first;}
+    public long activity(Category c,YearMonth m){if(c.payment())return paymentActivity(c,m);long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn(c.id);return n;}
+    private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));
+        if(c.payment()){Account card=account(c.cardAccount);if(card!=null&&YearMonth.from(LocalDate.parse(card.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(card.date));}return first;}
     public long available(Category c,YearMonth month){long n=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1))n=Math.max(0,n)+assigned(c,m)+activity(c,m);return n;}
-    public long cash(YearMonth month){String end=month.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(a.date.compareTo(end)<=0)n+=a.opening;for(Entry e:entries)if(!e.transfer()&&e.date.compareTo(end)<=0)n+=e.amount;return n;}
+    /**
+     * Money in cash accounts at the end of [month] (what the plan assigns). Credit cards hold debt, not money: their
+     * spending isn't cash (it moves money between categories instead), but a payment from a cash account is, and so
+     * is a part sent to Ready to Assign on a card (e.g. a reward credit).
+     */
+    public long cash(YearMonth month){
+        String end=month.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(!a.credit()&&a.date.compareTo(end)<=0)n+=a.opening;
+        for(Entry e:entries){if(e.date.compareTo(end)>0)continue;Account a=account(e.account);if(a==null)continue;
+            if(e.transfer()){Account to=account(e.destination);if(to!=null&&a.credit()!=to.credit())n+=a.credit()?-e.amount:e.amount;}
+            else n+=a.credit()?e.amountIn(""):e.amount;}
+        return n;
+    }
     public long balance(Account a,boolean clearedOnly){long n=a.opening;for(Entry e:entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
-    public long ready(YearMonth m){long n=cash(m);for(Category c:categories)n-=available(c,m);return n;}
+    /** Ready to Assign: cash less what categories hold. Overspending on a card is card debt, so it doesn't count here. */
+    public long ready(YearMonth m){long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;}
+    // Credit cards (YNAB's way). Spending on a card from a category with money moves that money to the card's
+    // payment category, ready to pay the bill; spending beyond what the category has is credit overspending: it shows
+    // in the category this month and then becomes card debt, without touching Ready to Assign. A payment (a transfer
+    // from a cash account to the card) uses the payment category's money.
+    /** Net spending (refunds negative) in [c] on credit card [card] in [m]; card null = on every card. */
+    public long creditSpent(Category c,YearMonth m,Account card){long n=0;for(Entry e:entries){if(e.transfer()||!e.date.startsWith(m.toString()))continue;Account a=account(e.account);if(a!=null&&a.credit()&&(card==null||a==card))n-=e.amountIn(c.id);}return n;}
+    /** The part of [c]'s overspending in [m] that came from card spending (it becomes debt, not less Ready to Assign). */
+    public long creditOverspent(Category c,YearMonth m){if(c.payment())return 0;long a=available(c,m);if(a>=0)return 0;return Math.min(-a,creditSpending(c,m));}
+    /** Spending on cards that had more spending than refunds in [m] (each card counted on its own). */
+    private long creditSpending(Category c,YearMonth m){long n=0;for(Account a:accounts)if(a.credit())n+=Math.max(0,creditSpent(c,m,a));return n;}
+    /**
+     * Money moved from [c] to [card]'s payment category in [m]. A card with net refunds gives them back in full; a card
+     * with net spending gets its share of what the category could pay for (the rest is credit overspending).
+     */
+    public long movedToCard(Category c,YearMonth m,Account card){
+        long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);
+        return all==mine?funded:BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(mine)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();
+    }
+    private long paymentActivity(Category pc,YearMonth m){
+        Account card=account(pc.cardAccount);if(card==null)return 0;long n=0;for(Category c:categories)if(!c.payment())n+=movedToCard(c,m,card);
+        for(Entry e:entries)if(e.transfer()&&e.destination.equals(card.id)&&e.date.startsWith(m.toString())){Account from=account(e.account);if(from!=null&&!from.credit())n+=e.amount;}
+        return n;
+    }
+    public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
+    /** Adds a credit card owing [owed] (a positive amount) and its payment category. Old debt starts with nothing set aside. */
+    public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group="Credit card payments";p.cardAccount=a.id;categories.add(p);return a;}
+    /** An account's balance at the end of [m] (a card's is negative while it's owed). */
+    public long balanceAt(Account a,YearMonth m){String end=m.atEndOfMonth().toString();if(a.date.compareTo(end)>0)return 0;long n=a.opening;for(Entry e:entries){if(e.date.compareTo(end)>0)continue;if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
     public long futureAssigned(YearMonth m){long n=0;for(Category c:categories)for(Map.Entry<String,Long>a:c.assigned.entrySet())if(a.getKey().compareTo(m.toString())>0)n+=a.getValue();return n;}
     public long spendable(YearMonth m){return ready(m)-futureAssigned(m);}
     public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);}
@@ -114,10 +159,10 @@ public final class Budget {
     /** Plan reset: every category's positive Available in [m] goes back to Ready to Assign. Returns the total. */
     public long planReset(YearMonth m){
         if(m.isAfter(YearMonth.now()))throw new IllegalArgumentException("Reset this month or an earlier one.");
-        long total=0;for(Category c:categories){long a=available(c,m);if(a>0){assign(c,m,-a);total+=a;}}return total;
+        long total=0;for(Category c:categories){if(c.payment())continue;long a=available(c,m);if(a>0){assign(c,m,-a);total+=a;}}return total; // card payment money stays: it pays debt already spent
     }
     /** Net worth at the end of [m]: everything in the accounts. */
-    public long netWorth(YearMonth m){return cash(m);}
+    public long netWorth(YearMonth m){long n=0;for(Account a:accounts)n+=balanceAt(a,m);return n;}
     /**
      * Age of Money (YNAB's rule 4): money spent is matched to the oldest money received (opening balances and
      * inflows), first in first out; each outflow's age is its matched days weighted by amount. The result is
@@ -125,8 +170,10 @@ public final class Budget {
      */
     public int ageOfMoney(LocalDate until){
         List<long[]> events=new ArrayList<>(); // day, amount (+ in, - out)
-        for(Account a:accounts)if(a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
-        for(Entry e:entries)if(!e.transfer()&&e.amount!=0&&!LocalDate.parse(e.date).isAfter(until))events.add(new long[]{LocalDate.parse(e.date).toEpochDay(),e.amount});
+        // Cash accounts only: card spending isn't money spent until the card is paid, and the payment is the outflow.
+        for(Account a:accounts)if(!a.credit()&&a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
+        for(Entry e:entries){if(e.amount==0||LocalDate.parse(e.date).isAfter(until))continue;Account a=account(e.account);if(a==null)continue;long day=LocalDate.parse(e.date).toEpochDay();
+            if(e.transfer()){Account to=account(e.destination);if(to!=null&&a.credit()!=to.credit())events.add(new long[]{day,a.credit()?-e.amount:e.amount});}else if(!a.credit())events.add(new long[]{day,e.amount});}
         events.sort((x,y)->x[0]!=y[0]?Long.compare(x[0],y[0]):Long.compare(y[1],x[1])); // a day's money in before money out
         ArrayDeque<long[]> pool=new ArrayDeque<>();List<Double> ages=new ArrayList<>();
         for(long[] ev:events){
@@ -142,6 +189,8 @@ public final class Budget {
     public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.touches(c.id))n++;return n;}
     /** Deletes [c]; its transactions and monthly assignments move to [into] (needed when it was used). Cash doesn't change. */
     public void deleteCategory(Category c,Category into){
+        if(c.payment())throw new IllegalArgumentException("This is a credit card's payment category. Delete or close the card instead.");
+        if(into!=null&&into.payment())throw new IllegalArgumentException("Choose a spending category, not a card payment.");
         if(into==c||(into==null&&used(c)))throw new IllegalArgumentException("Choose another category to take its transactions and money.");
         if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled)if(s.category.equals(c.id))s.category=into.id;for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
         categories.remove(c);
@@ -151,9 +200,10 @@ public final class Budget {
     // Accounts: close at zero, delete only unused.
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
-    public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;a.name=name;}
+    public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
     public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a $0 balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
-    public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");accounts.remove(a);}
+    public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");Category p=paymentCategory(a);
+        if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);}
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow to Ready to Assign for the difference. */
     public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
     // Quick assign: what each choice adds to this month's Assigned.
@@ -183,9 +233,10 @@ public final class Budget {
         if(e.transfer()){Account to=account(e.destination);if(to==null||to==a||e.amount>=0)throw new IllegalArgumentException("Choose a different destination account.");if(e.date.compareTo(to.date)<0)throw new IllegalArgumentException("Date is before the destination account's opening date.");}
         else if(e.split()||e.category.equals(SPLIT)){
             if(!e.category.equals(SPLIT)||e.splits.size()<2)throw new IllegalArgumentException("A split needs at least two parts.");long sum=0;
-            for(Split p:e.splits){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");sum+=p.amount;}
+            for(Split p:e.splits){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");if(!p.category.isEmpty()&&category(p.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);sum+=p.amount;}
             if(sum!=e.amount)throw new IllegalArgumentException("The parts of the split must add up to the total.");
         }
         else if(!e.category.isEmpty()&&category(e.category)==null)throw new IllegalArgumentException("Choose a category.");
+        else if(!e.category.isEmpty()&&category(e.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);
     }
 }

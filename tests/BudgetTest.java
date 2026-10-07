@@ -33,8 +33,45 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseE(){
+        YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);
+        Budget.Category food=new Budget.Category("Food"),fun=new Budget.Category("Fun");b.categories.add(food);b.categories.add(fun);
+        Budget.Account visa=b.addCard("Visa","2025-01-01",50000);Budget.Category pay=b.paymentCategory(visa);
+        if(pay==null||!pay.payment()||!visa.credit()||!pay.group.equals("Credit card payments"))throw new AssertionError("Card and payment category");
+        equal(b.balance(visa,false),-50000,"Old debt owed");equal(b.cash(jan),100000,"Card debt isn't cash");
+        b.assign(food,jan,30000);equal(b.ready(jan),70000,"Old debt doesn't touch Ready to Assign");equal(b.available(pay,jan),0,"Nothing set aside for old debt");
+        // Funded card spending moves the money to the payment category.
+        b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-01-05",-10000));
+        equal(b.available(food,jan),20000,"Category spent");equal(b.available(pay,jan),10000,"Moved to the card's payment");equal(b.ready(jan),70000,"Ready unchanged");equal(b.cash(jan),100000,"Card spending isn't cash");
+        // Unfunded card spending: credit overspending, then card debt; Ready to Assign never changes.
+        b.entries.add(new Budget.Entry("Concert",fun.id,visa.id,"2025-01-06",-5000));
+        equal(b.available(fun,jan),-5000,"Shows overspent this month");equal(b.creditOverspent(fun,jan),5000,"On credit");equal(b.available(pay,jan),10000,"Nothing moved for it");equal(b.ready(jan),70000,"Ready unchanged by credit overspending");
+        equal(b.available(fun,feb),0,"Resets next month");equal(b.ready(feb),70000,"Became debt, not less Ready to Assign");
+        // Cash overspending still reduces next month's Ready to Assign (unchanged rule).
+        Budget.Category gifts=new Budget.Category("Gifts");b.categories.add(gifts);b.entries.add(new Budget.Entry("Gift",gifts.id,bank.id,"2025-01-07",-1000));equal(b.ready(jan),70000,"Cash overspending shows in the category");equal(b.ready(feb),69000,"Then reduces Ready to Assign");
+        // A payment from the bank uses the payment category's money.
+        Budget.Entry payment=new Budget.Entry("Transfer to Visa","",bank.id,"2025-02-10",-10000);payment.destination=visa.id;b.validate(payment);b.entries.add(payment);
+        equal(b.cash(feb),89000,"Payment leaves cash");equal(b.available(pay,feb),0,"Payment category used");equal(b.ready(feb),69000,"Ready unchanged by a covered payment");
+        // Paying off old debt: assign to the payment category from Ready to Assign, then pay.
+        b.assign(pay,feb,20000);equal(b.ready(feb),49000,"Assigned for old debt");Budget.Entry payOld=new Budget.Entry("Transfer to Visa","",bank.id,"2025-02-11",-20000);payOld.destination=visa.id;b.entries.add(payOld);equal(b.available(pay,feb),0,"Paid");equal(b.ready(feb),49000,"Still");
+        equal(b.balance(visa,false),-50000-10000-5000+10000+20000,"Card balance");
+        // A refund on the card moves money back from the payment category.
+        b.entries.add(new Budget.Entry("Refund",food.id,visa.id,"2025-02-12",2000));equal(b.available(food,feb),22000,"Refund back to the category");equal(b.available(pay,feb),-2000,"Out of the payment category");equal(b.ready(feb),49000,"Ready unchanged by a card refund");
+        // Net worth includes card debt; spending/income reports include card spending.
+        equal(b.netWorth(feb),b.balanceAt(bank,feb)+b.balanceAt(visa,feb),"Net worth is all accounts");equal(b.netWorth(feb),69000-35000+2000,"Bank 69000, card -33000");equal(b.spending(jan),16000,"Card spending is spending");
+        // Age of Money counts the payment, not the card spending.
+        equal(b.ageOfMoney(java.time.LocalDate.of(2025,1,31)),6,"Only the cash gift (6 days)");
+        // Rules.
+        rejects(()->b.validate(new Budget.Entry("x",pay.id,bank.id,"2025-02-13",-100)));rejects(()->b.deleteCategory(pay,null));rejects(()->b.deleteCategory(fun,pay));
+        b.planReset(feb);equal(b.available(pay,feb),-2000,"Plan reset leaves card payment money");
+        b.rename(visa,"Visa Gold");same(pay.name,"Visa Gold","Payment category follows the card's name");
+        Budget.Account amex=b.addCard("Amex","2025-01-01",0);Budget.Category amexPay=b.paymentCategory(amex);b.assign(amexPay,feb,100);rejects(()->b.deleteAccount(amex));b.assign(amexPay,feb,-100);amexPay.assigned.clear();b.deleteAccount(amex);if(b.paymentCategory(amex)!=null||b.categories.contains(amexPay))throw new AssertionError("Payment category goes with its card");
+        // Two cards: funded spending splits by card.
+        Budget.Account mc=b.addCard("Mastercard","2025-01-01",0);b.assign(food,feb,5000);b.entries.add(new Budget.Entry("Shop",food.id,mc.id,"2025-02-14",-3000));equal(b.movedToCard(food,feb,mc),3000,"Moved to the right card");equal(b.movedToCard(food,feb,visa),-2000,"Refund only on Visa");
     }
     static void phaseD(){
         YearMonth jan=YearMonth.of(2025,1);
