@@ -36,7 +36,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon.");
     }
     static void batch1(){
@@ -555,6 +555,37 @@ public class BudgetTest {
         Budget h=new Budget();for(int i=0;i<6;i++)h.categories.add(new Budget.Category("C"+i));for(int i=0;i<5;i++)h.pin(h.categories.get(i),true);h.categories.get(0).hidden=true;
         equal(h.pinned().size(),4,"Hidden left out");h.pin(h.categories.get(5),true);equal(h.pinned().size(),5,"Room for another");if(h.pinned().contains(h.categories.get(0)))throw new AssertionError("Hidden pinned shown");
     }
+    static void hunt22(){
+        YearMonth jan=YearMonth.of(2025,1);
+        // M1: a row imported before bankPayee was kept (note "Imported", no bankPayee) keeps its statement text when renamed, so it isn't imported again.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);Budget.Category groc=new Budget.Category("Groceries");b.categories.add(groc);
+        Budget.Entry legacy=new Budget.Entry("SHOP 9",groc.id,bank.id,"2025-01-03",-500);legacy.memo=Budget.IMPORTED;b.entries.add(legacy);Budget.Entry manual=new Budget.Entry("Cafe","",bank.id,"2025-01-03",-300);b.entries.add(manual);
+        same(Budget.statementPayee(legacy),"SHOP 9","Legacy import: its payee");same(Budget.statementPayee(manual),"","Manual: none");
+        b.renamePayee("shop 9","Corner shop");same(legacy.bankPayee,"SHOP 9","Kept before the rename");b.renamePayee("Cafe","Coffee");same(manual.bankPayee,"","Manual still none");
+        equal(CsvImport.run(b,CsvImport.parse("2025-01-03,SHOP 9,-5.00\n"),false,0,1,2,-1,"uuuu-MM-dd",bank).duplicates,1,"Renamed legacy row still spotted");
+        // M2: a statement payee seen before takes its row's new name and category.
+        Budget.Entry wool=new Budget.Entry("WOOLWORTHS 123",groc.id,bank.id,"2025-01-04",-2000);wool.bankPayee="WOOLWORTHS 123";b.entries.add(0,wool);b.renamePayee("WOOLWORTHS 123","Woolies");
+        CsvImport.Result r=CsvImport.run(b,CsvImport.parse("2025-01-10,woolworths 123,-12.00\n"),false,0,1,2,-1,"uuuu-MM-dd",bank);equal(r.added,1,"New row");same(r.entries.get(0).payee,"Woolies","Renamed payee");same(r.entries.get(0).category,groc.id,"Its category");same(r.entries.get(0).bankPayee,"woolworths 123","Own statement text");
+        b.rules.add(new Budget.Rule("WOOLWORTHS","Woolworths",""));same(CsvImport.run(b,CsvImport.parse("2025-01-11,WOOLWORTHS 123,-13.00\n"),false,0,1,2,-1,"uuuu-MM-dd",bank).entries.get(0).payee,"Woolworths","A rule's rename comes first");
+        // M10: statement amounts over $100 million are unreadable, like typed ones.
+        equal(CsvImport.amount("100,000,000.00"),10_000_000_000L,"$100 million");rejectsAny(()->CsvImport.amount("100000000.01"));rejectsAny(()->CsvImport.amount("(100000000.01)"));
+        equal(CsvImport.run(b,CsvImport.parse("2025-01-12,Big,-100000000.01\n"),false,0,1,2,-1,"uuuu-MM-dd",bank).unreadable,1,"Over the cap: unreadable");
+        // M4: a yearly repeat from 29 Feb comes back to the 29th in leap years.
+        Budget.Scheduled y=new Budget.Scheduled("Rego","",bank.id,"2024-02-29",-100,"Yearly");LocalDate d=LocalDate.of(2024,2,29);for(int i=0;i<4;i++)d=y.after(d);same(d.toString(),"2028-02-29","Back on the 29th");same(y.after(LocalDate.of(2024,2,29)).toString(),"2025-02-28","28th in other years");
+        same(new Budget.Scheduled("x","",bank.id,"2025-03-15",-100,"Yearly").after(LocalDate.of(2025,3,15)).toString(),"2026-03-15","Other dates as before");
+        // M7: a card payment category below zero by card credit isn't offered a reset; overspending still is.
+        Budget c=new Budget();Budget.Account cb=new Budget.Account("Bank","2025-01-01",10000);c.accounts.add(cb);Budget.Account card=c.addCard("Visa","2025-01-01",0);Budget.Category pay=c.paymentCategory(card),food=new Budget.Category("Food");c.categories.add(food);
+        Budget.Entry refund=new Budget.Entry("Refund",food.id,card.id,"2025-01-05",5000);c.validate(refund);c.entries.add(refund);equal(c.available(pay,jan),-5000,"Card credit");equal(c.resetAvailableChange(pay,jan),0,"Nothing offered for card credit");
+        Budget.Entry over=new Budget.Entry("Shop",food.id,cb.id,"2025-01-06",-2500);c.entries.add(over);equal(c.resetAvailableChange(food,jan),-c.available(food,jan),"Spending category as before");
+        // M8: split evenly adds up for negative totals too.
+        long[] parts=Budget.splitEvenly(-1000,3);equal(parts[0],-334,"Leftover cent first");equal(parts[1],-333,"Second");equal(parts[0]+parts[1]+parts[2],-1000,"Adds up");
+        long sum=0;for(long p:Budget.splitEvenly(-10,4))sum+=p;equal(sum,-10,"-10 over 4");
+        // M9: unhiding a pinned category when Home already has 5 unpins it; with room it stays pinned.
+        Budget h=new Budget();for(int i=0;i<6;i++)h.categories.add(new Budget.Category("C"+i));for(int i=0;i<5;i++)h.pin(h.categories.get(i),true);h.setHidden(h.categories.get(0),true);h.pin(h.categories.get(5),true);
+        if(!h.setHidden(h.categories.get(0),false)||h.categories.get(0).pinned||h.pinned().size()!=5)throw new AssertionError("Unhidden over the limit: unpinned");
+        h.setHidden(h.categories.get(1),true);if(h.setHidden(h.categories.get(1),false)||!h.categories.get(1).pinned)throw new AssertionError("With room: stays pinned");
+    }
+    static void rejectsAny(Runnable action){try{action.run();}catch(RuntimeException e){return;}throw new AssertionError("Expected rejection");}
     static void csv(){
         Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank, main","2025-01-01",0),cash=new Budget.Account("Cash","2025-01-01",0);b.accounts.add(bank);b.accounts.add(cash);
         Budget.Category odd=new Budget.Category("=SUM(A1)");odd.group="Bills";b.categories.add(odd);

@@ -9,7 +9,7 @@ import java.util.*;
 /**
  * Bank statement CSV import. The user matches columns once (date, payee, amount, or separate money in/out columns);
  * rows already in the account (same date, amount and statement payee, or payee for rows not imported) are skipped, and so are rows dated in the future or before
- * the account opened. Outflows get the category last used with their payee, otherwise "To categorize"; inflows go to
+ * the account opened. Outflows get the category last used with their statement payee text or payee, otherwise "To categorize"; inflows go to
  * To budget unless the payee's last transaction was a refund to a category. Import rules (Budget.rule) come first: the
  * first rule whose text is in the payee renames it and/or gives its category. Imported rows are cleared and wait for review.
  */
@@ -37,7 +37,8 @@ public final class CsvImport {
         if(t.endsWith("DR")){negative=true;t=t.substring(0,t.length()-2).trim();}else if(t.endsWith("CR"))t=t.substring(0,t.length()-2).trim();
         if(t.startsWith("(")&&t.endsWith(")")){negative=!negative;t=t.substring(1,t.length()-1);}
         t=t.replace("$","").replace(",","").replace(" ","").replace("AUD","");if(t.startsWith("+"))t=t.substring(1);
-        long v=new BigDecimal(t).movePointRight(2).longValueExact();return negative?-Math.abs(v):v;
+        long v=new BigDecimal(t).movePointRight(2).longValueExact();if(Math.abs(v)>10_000_000_000L)throw new IllegalArgumentException("Over $100 million."); // as typed amounts (Budget.evaluate)
+        return negative?-Math.abs(v):v;
     }
     public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),DateTimeFormatter.ofPattern(format,Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));}
     /** The first format that reads every non-empty value in [column] (after the header row when [header]), or null. */
@@ -70,7 +71,9 @@ public final class CsvImport {
             Budget.Rule rule=budget.rule(payee);String named=rule==null||rule.rename.isEmpty()?payee:rule.rename;Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             String k=key(d.toString(),cents,payee),k2=key(d.toString(),cents,named);if(existing.getOrDefault(k,0)<=0)k=k2;if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;continue;}
             if(rule!=null)r.matchedRules++;String bank=payee;payee=named;
-            Budget.Entry last=budget.lastForPayee(payee);Budget.Category known=last==null||last.split()||last.transfer()?null:budget.category(last.category);if(known!=null&&known.payment())known=null;
+            // A statement payee imported before takes that row's payee as it's named now (a rule's rename comes first), and its category.
+            Budget.Entry seen=budget.lastForBankPayee(bank);if(seen!=null&&(rule==null||rule.rename.isEmpty()))payee=seen.payee.trim();
+            Budget.Entry last=seen!=null&&!seen.split()?seen:budget.lastForPayee(payee);Budget.Category known=last==null||last.split()||last.transfer()?null:budget.category(last.category);if(known!=null&&known.payment())known=null;
             String category;
             if(account.tracking())category=""; // off budget: no categories
             else if(ruled!=null)category=ruled.id;

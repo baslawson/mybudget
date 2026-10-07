@@ -69,8 +69,8 @@ public final class Budget {
         public Scheduled(String payee,String category,String account,String next,long amount,String repeat){this.payee=payee;this.category=category;this.account=account;this.next=next;this.amount=amount;this.repeat=repeat;day=LocalDate.parse(next).getDayOfMonth();}
         /** The date after [d] in this repeat, or null for Never. */
         public LocalDate after(LocalDate d){
-            switch(repeat){case"Weekly":return d.plusWeeks(1);case"Every 2 weeks":return d.plusWeeks(2);case"Yearly":return d.plusYears(1);
-                case"Monthly":case"Every 3 months":{LocalDate m=d.plusMonths(repeat.equals("Monthly")?1:3);int want=day>0?day:d.getDayOfMonth();return m.withDayOfMonth(Math.min(want,m.lengthOfMonth()));}
+            switch(repeat){case"Weekly":return d.plusWeeks(1);case"Every 2 weeks":return d.plusWeeks(2);
+                case"Monthly":case"Every 3 months":case"Yearly":{LocalDate m=d.plusMonths(repeat.equals("Monthly")?1:repeat.equals("Yearly")?12:3);int want=day>0?day:d.getDayOfMonth();return m.withDayOfMonth(Math.min(want,m.lengthOfMonth()));} // 29 Feb comes back in leap years
                 default:return null;}
         }
     }
@@ -157,8 +157,8 @@ public final class Budget {
         }
         static BigDecimal check(BigDecimal v){if(v.abs().compareTo(BigDecimal.valueOf(1_000_000_000_000L))>0)throw new ArithmeticException();return v;} // keeps every step small
     }
-    /** Split evenly: [total] over [parts], leftover cents on the first parts. */
-    public static long[] splitEvenly(long total,int parts){long[] r=new long[parts];long base=total/parts,left=total-base*parts;for(int i=0;i<parts;i++)r[i]=base+(i<left?1:0);return r;}
+    /** Split evenly: [total] over [parts], leftover cents on the first parts (a negative total too: the parts always add up to it). */
+    public static long[] splitEvenly(long total,int parts){long[] r=new long[parts];long sign=total<0?-1:1,size=Math.abs(total),base=size/parts,left=size-base*parts;for(int i=0;i<parts;i++)r[i]=sign*(base+(i<left?1:0));return r;}
     /** Fill remaining: what's left of [total] after [others]. */
     public static long remaining(long total,long... others){long n=total;for(long o:others)n-=o;return n;}
     public static long cents(String input){long v=parse(input);if(v<=0)throw new IllegalArgumentException("Enter a positive amount.");return v;}
@@ -386,6 +386,8 @@ public final class Budget {
     /** Pinned categories (at most PINS), in plan order. A hidden one keeps its pin but doesn't show or count. */
     public List<Category> pinned(){List<Category> list=new ArrayList<>();for(Category c:categories)if(c.pinned&&!c.hidden&&list.size()<PINS)list.add(c);return list;}
     public void pin(Category c,boolean on){if(on&&!c.pinned&&pinned().size()>=PINS)throw new IllegalArgumentException("Pin up to "+PINS+" categories to Home. Unpin one first.");c.pinned=on;}
+    /** Hides or unhides [c]. Unhiding a pinned one when Home already has PINS unpins it; returns true then. */
+    public boolean setHidden(Category c,boolean hidden){boolean unpin=!hidden&&c.hidden&&c.pinned&&pinned().size()>=PINS;if(unpin)c.pinned=false;c.hidden=hidden;return unpin;}
     /** Scheduled transactions and Planner's bills due by [today] + [days], overdue ones too, soonest first. */
     public List<Scheduled> dueWithin(LocalDate today,int days){String until=today.plusDays(days).toString();List<Scheduled> list=new ArrayList<>();for(Scheduled s:planned())if(s.next.compareTo(until)<=0)list.add(s);list.sort(Comparator.comparing(s->s.next));return list;}
     // Categories: delete (moving history to another), reorder within a group.
@@ -420,7 +422,8 @@ public final class Budget {
     private static long third(long n){return BigDecimal.valueOf(n).divide(BigDecimal.valueOf(3),0,java.math.RoundingMode.HALF_UP).longValueExact();} // to the cent, half up
     /** Change that brings Available to $0 (adds what's overspent, or returns what's there). */
     /** 0 when assign wouldn't take it: in a future month only that month's Assigned can be returned. */
-    public long resetAvailableChange(Category c,YearMonth m){long change=-available(c,m);return m.isAfter(YearMonth.now())&&assigned(c,m)+change<0?0:change;}
+    /** A card payment category below zero by card credit is fine: only its overspending is offered (see toCover). */
+    public long resetAvailableChange(Category c,YearMonth m){long a=available(c,m),change=c.payment()&&a<0?toCover(c,m):-a;return m.isAfter(YearMonth.now())&&assigned(c,m)+change<0?0:change;}
     /** Change that puts Assigned at 0, or as near as the rules allow (money already spent can't be returned). */
     public long resetChange(Category c,YearMonth m){long a=assigned(c,m);return a<=0?-a:-Math.min(a,Math.max(0,available(c,m)));}
     // Payees: newest first, and the last transaction with one (for its category). Hidden payees aren't suggested.
@@ -438,7 +441,7 @@ public final class Budget {
     public int renamePayee(String from,String to){
         String t=to==null?"":to.trim();if(t.isEmpty())throw new IllegalArgumentException("Enter the payee's new name.");if(t.length()>PAYEE_MAX)throw new IllegalArgumentException("Keep a payee's name to "+PAYEE_MAX+" characters.");
         boolean existing=!key(from).equals(key(t))&&allPayees().stream().anyMatch(p->key(p).equals(key(t)));int n=0;
-        for(Entry e:entries)if(!e.transfer()&&key(e.payee).equals(key(from))){e.payee=t;n++;}for(Scheduled s:scheduled)if(key(s.payee).equals(key(from))){s.payee=t;n++;}for(Rule r:rules)if(key(r.rename).equals(key(from)))r.rename=t;
+        for(Entry e:entries)if(!e.transfer()&&key(e.payee).equals(key(from))){if(e.bankPayee.isEmpty())e.bankPayee=statementPayee(e);e.payee=t;n++;}for(Scheduled s:scheduled)if(key(s.payee).equals(key(from))){s.payee=t;n++;}for(Rule r:rules)if(key(r.rename).equals(key(from)))r.rename=t;
         if(hiddenPayees.remove(key(from))&&!existing)hiddenPayees.add(key(t));return n;
     }
     /** Merges [payees] into [keep] (spelled as given): each is renamed to it. Returns the transactions changed. */
@@ -507,8 +510,15 @@ public final class Budget {
     /** "2 years 3 months", "1 year", "5 months". */
     public static String duration(int months){int y=months/12,m=months%12;String years=y==0?"":y+(y==1?" year":" years"),rest=m==0?"":m+(m==1?" month":" months");return y==0&&m==0?"0 months":(years+" "+rest).trim();}
     public Entry lastForPayee(String payee){Entry best=null;for(Entry e:entries)if(!e.transfer()&&e.payee.equalsIgnoreCase(payee.trim())&&(best==null||e.date.compareTo(best.date)>0))best=e;return best;}
+    /** The newest transaction imported with the statement payee text [bank] (any capitals), or null: its payee may have been renamed since. */
+    public Entry lastForBankPayee(String bank){Entry best=null;for(Entry e:entries)if(!e.transfer()&&!e.bankPayee.isEmpty()&&e.bankPayee.equalsIgnoreCase(bank.trim())&&(best==null||e.date.compareTo(best.date)>0))best=e;return best;}
     // Notes: the ones used with [payee] first, then the rest; newest first, each once, at most 50. Automatic notes are left out.
     public static final String IMPORTED="Imported"; // the note on rows from a bank statement (CsvImport)
+    /**
+     * [e]'s statement payee text: its bankPayee, else for a row imported before bankPayee was kept (0.0.6; its note is
+     * still IMPORTED) its payee, which is what re-imports matched it on; "" for other transactions.
+     */
+    public static String statementPayee(Entry e){if(!e.bankPayee.isEmpty())return e.bankPayee;if(e.transfer()||!e.memo.trim().equals(IMPORTED))return "";String p=e.payee.trim();return p.length()>PAYEE_MAX?p.substring(0,PAYEE_MAX):p;}
     public List<String> memos(String payee){
         List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));String p=payee==null?"":payee.trim();LinkedHashMap<String,String> seen=new LinkedHashMap<>();
         for(int pass=0;pass<2;pass++)for(Entry e:ordered){String m=e.memo.trim();boolean theirs=!p.isEmpty()&&e.payee.trim().equalsIgnoreCase(p);if(m.isEmpty()||m.equals(IMPORTED)||theirs!=(pass==0))continue;seen.putIfAbsent(m.toLowerCase(Locale.ROOT),m);}

@@ -71,6 +71,11 @@ public class BudgetInstrumentation extends Instrumentation {
         if(!new JSONArray(PlannerBills.without(list,"planner-bill-9","planner-bill-9")).toString().contains("planner-bill-5")||new JSONArray(PlannerBills.without(list,"planner-bill-9","planner-bill-9")).length()!=2)throw new AssertionError("Drop by id");
         JSONArray noId=new JSONArray(PlannerBills.without(list,"","planner-series-s"));if(noId.length()!=2||noId.toString().contains("planner-bill-4"))throw new AssertionError("Drop the earliest of the bill");
         if(PlannerBills.without(list,"planner-bill-77","planner-series-s")!=null)throw new AssertionError("An unknown id drops nothing");
+        // A part payment of a bill with an amount takes that much off (once per payment); paying the rest drops it.
+        String owed="[{\"id\":\"planner-bill-6\",\"billKey\":\"planner-bill-6\",\"payee\":\"Power\",\"due\":\"2026-10-20\",\"amountCents\":10000}]";
+        String part=PlannerBills.without(owed,"planner-bill-6","planner-bill-6","pay-1",4000);if(new JSONArray(part).getJSONObject(0).getLong("amountCents")!=6000)throw new AssertionError("Part payment");
+        if(PlannerBills.without(part,"planner-bill-6","planner-bill-6","pay-1",4000)!=null)throw new AssertionError("Same payment taken off twice");
+        if(new JSONArray(PlannerBills.without(part,"planner-bill-6","planner-bill-6","pay-2",6000)).length()!=0||new JSONArray(PlannerBills.without(owed,"planner-bill-6","planner-bill-6","pay-3",12000)).length()!=0)throw new AssertionError("Paid in full: dropped");
         android.content.SharedPreferences bp=getTargetContext().getSharedPreferences("budget",0);String keptAt=bp.getString("planner_bills_at",null);
         try{bp.edit().putString("planner_bills_at",LocalDateTime.now().minusDays(8).withNano(0).toString()).commit();if(!PlannerBills.stale(getTargetContext()))throw new AssertionError("Old list not stale");
             bp.edit().putString("planner_bills_at",LocalDateTime.now().minusDays(2).withNano(0).toString()).commit();if(PlannerBills.stale(getTargetContext()))throw new AssertionError("Recent list stale");}
@@ -92,7 +97,12 @@ public class BudgetInstrumentation extends Instrumentation {
         // A version 1 backup (MyBudget 0.0.5: storage version 4) still restores.
         JSONObject v1=new JSONObject(file).put("backupVersion",1).put("version",4);if(!BudgetStore.encode(BudgetStore.readBackup(v1.toString()).budget).equals(BudgetStore.encode(b)))throw new AssertionError("Version 1 backup not restored");
         root.put("backupVersion",1).getJSONArray("entries").getJSONObject(0).put("account","missing");refused(root.toString(),"damaged");
-        root=new JSONObject(file);root.put("version",9);refused(root.toString(),"damaged");
+        root=new JSONObject(file);root.put("version",9);refused(root.toString(),"newer MyBudget"); // a newer budget inside a current backup
+        root=new JSONObject(file);root.getJSONArray("categories").getJSONObject(0).put("due","not-a-month");refused(root.toString(),"damaged");
+        root=new JSONObject(file);JSONObject parted=root.getJSONArray("entries").getJSONObject(0);parted.put("category",Budget.SPLIT).put("splits",new JSONArray().put(new JSONObject().put("category","").put("amount",parted.getLong("amount")-1)).put(new JSONObject().put("category","").put("amount",0)));refused(root.toString(),"damaged");
+        // A row imported before bankPayee was kept reads with its payee as the statement text; other rows keep none.
+        int row=0;while(b.entries.get(row).transfer())row++;root=new JSONObject(file);JSONObject imported=root.getJSONArray("entries").getJSONObject(row).put("memo",Budget.IMPORTED).put("bankPayee","");Budget legacy=BudgetStore.readBackup(root.toString()).budget;
+        for(int i=0;i<b.entries.size();i++)if(!legacy.entries.get(i).bankPayee.equals(i==row?imported.getString("payee").trim():b.entries.get(i).bankPayee))throw new AssertionError("Legacy import's statement text");
     }
     private void newTargets(Budget b)throws Exception{
         Budget.Category weekly=b.categories.get(0),dated=b.categories.get(1);String wt=weekly.targetType,dt=dated.targetType;

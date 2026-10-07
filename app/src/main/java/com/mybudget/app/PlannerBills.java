@@ -37,19 +37,29 @@ public class PlannerBills extends BroadcastReceiver {
     static final int STALE_DAYS=7;
     static boolean stale(Context context){String at=context.getSharedPreferences("budget",0).getString("planner_bills_at",null);try{return at!=null&&LocalDateTime.parse(at).isBefore(LocalDateTime.now().minusDays(STALE_DAYS));}catch(Exception e){return true;}}
     /**
-     * A bill was just paid (its expense added): drop it from the list now, rather than plan for it twice until Planner
-     * next sends. By its entry id from Planner; without one (an older Planner), the earliest entry for the same bill.
+     * A bill was just paid (its expense of [paidCents], payment [paymentId], added): drop it from the list now, rather than
+     * plan for it twice until Planner next sends. By its entry id from Planner; without one (an older Planner), the earliest
+     * entry for the same bill. A part payment of a bill with a known amount only takes that much off it.
      */
-    static void dropPaid(Context context,String upcomingId,String billKey){
+    static void dropPaid(Context context,String upcomingId,String billKey,String paymentId,long paidCents){
         android.content.SharedPreferences prefs=context.getSharedPreferences("budget",0);
-        try{String kept=without(prefs.getString("planner_bills","[]"),upcomingId,billKey);if(kept!=null)prefs.edit().putString("planner_bills",kept).apply();}catch(Exception ignored){}
+        try{String kept=without(prefs.getString("planner_bills","[]"),upcomingId,billKey,paymentId,paidCents);if(kept!=null)prefs.edit().putString("planner_bills",kept).apply();}catch(Exception ignored){}
     }
     /** [list] less the paid entry (see dropPaid), or null when nothing matches. */
-    static String without(String list,String upcomingId,String billKey)throws JSONException{
+    static String without(String list,String upcomingId,String billKey)throws JSONException{return without(list,upcomingId,billKey,"",0);}
+    /** [list] less the paid entry, or with [paidCents] taken off its amount when that's less (once per [paymentId]); null when nothing changes. */
+    static String without(String list,String upcomingId,String billKey,String paymentId,long paidCents)throws JSONException{
         JSONArray a=new JSONArray(list);int drop=-1;
         for(int i=0;i<a.length()&&drop<0;i++)if(upcomingId!=null&&!upcomingId.isEmpty()&&upcomingId.equals(a.getJSONObject(i).optString("id")))drop=i;
         if(drop<0&&(upcomingId==null||upcomingId.isEmpty())&&billKey!=null&&!billKey.isEmpty())for(int i=0;i<a.length();i++)if(billKey.equals(a.getJSONObject(i).optString("billKey"))&&(drop<0||a.getJSONObject(i).optString("due").compareTo(a.getJSONObject(drop).optString("due"))<0))drop=i;
-        if(drop<0)return null;a.remove(drop);return a.toString();
+        if(drop<0)return null;JSONObject b=a.getJSONObject(drop);long due=b.optLong("amountCents",0);
+        if(due>0&&paidCents>0&&paidCents<due){
+            // The "paid" ids keep the same payment (sent again) from being taken off twice.
+            JSONArray paid=b.optJSONArray("paid");if(paid==null)b.put("paid",paid=new JSONArray());String id=paymentId==null?"":paymentId;
+            if(!id.isEmpty())for(int i=0;i<paid.length();i++)if(id.equals(paid.optString(i)))return null;
+            if(!id.isEmpty())paid.put(id);b.put("amountCents",due-paidCents);return a.toString();
+        }
+        a.remove(drop);return a.toString();
     }
     /** The saved list as upcoming transactions (amount negative, 0 = no amount), each with its planned category. */
     static List<Budget.Scheduled> read(Context context,Budget budget){
