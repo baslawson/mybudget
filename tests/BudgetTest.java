@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency).");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes).");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -731,5 +731,101 @@ public class BudgetTest {
         same(Budget.suggestedCurrency(java.util.Locale.US),"USD","US");same(Budget.suggestedCurrency(java.util.Locale.forLanguageTag("en-NZ")),"NZD","New Zealand");
         same(Budget.suggestedCurrency(java.util.Locale.GERMANY),"EUR","Germany");same(Budget.suggestedCurrency(java.util.Locale.forLanguageTag("hi-IN")),"AUD","Not a common currency: AUD");
         same(Budget.suggestedCurrency(java.util.Locale.ENGLISH),"AUD","No country: AUD");
+    }
+    // Month maths are worked out from one pass over the transactions (Budget.Sums), kept between calls with cache(true). On a
+    // generated budget (SampleBudget: two cards, a cash advance, splits, refunds, card credits, tracking accounts), both ways
+    // must give exactly the plain sums below (Budget's code before Sums), also after changes made while cached.
+    static void cachedSums(){
+        Budget b=com.mybudget.app.SampleBudget.make(7,LocalDate.now(),12,12,40);
+        if(b.entries.size()<300||b.accounts.stream().filter(Budget.Account::credit).count()<2)throw new AssertionError("Generated budget too small");
+        sameSums(b,"uncached");b.cache(true);sameSums(b,"cached");sameSums(b,"cached again");
+        YearMonth now=YearMonth.now();java.util.List<Budget.Category> spend=new java.util.ArrayList<>();for(Budget.Category c:b.categories)if(!c.payment())spend.add(c);
+        Budget.Category food=spend.get(5),rent=spend.get(0),card=b.paymentCategory(b.accounts.get(3));
+        long room=Math.min(5000,b.spendable(now));if(room>0){b.assign(food,now,room);sameSums(b,"after assign");}
+        Budget.Category over=null,giver=null;YearMonth when=null; // covering card overspending moves money to the card's payment category
+        for(YearMonth m=now;over==null&&!m.isBefore(now.minusMonths(11));m=m.minusMonths(1))for(Budget.Category c:spend)if(over==null&&b.creditOverspent(c,m)>0&&b.creditOverspent(c,m)==-b.available(c,m))for(Budget.Category g:spend)if(over==null&&g!=c&&b.available(g,m)>0){over=c;giver=g;when=m;}
+        if(over==null)throw new AssertionError("No overspending only on a card in the generated budget");
+        b.move(giver,over,when,Math.min(b.available(giver,when),b.creditOverspent(over,when)));sameSums(b,"after covering card overspending");
+        b.assign(food,now.plusMonths(1),-b.assigned(food,now.plusMonths(1)));sameSums(b,"after returning a future month's money");
+        long spare=b.available(rent,now);if(spare>0){b.move(rent,card,now,Math.min(spare,3000));sameSums(b,"after moving to a card's payment category");}
+        Budget.Scheduled s=new Budget.Scheduled("Test",food.id,b.accounts.get(3).id,LocalDate.now().toString(),-4321,"Never");b.enter(s);sameSums(b,"after entering on a card");
+        b.deleteCategory(spend.get(6),food);sameSums(b,"after deleting a category into another");
+        b.entries.get(b.entries.size()/2).amount-=777;b.changed();sameSums(b,"after a direct change and changed()");
+        b.cache(false);sameSums(b,"uncached at the end");
+    }
+    static void sameSums(Budget b,String when){
+        Plain p=new Plain(b);YearMonth first=YearMonth.from(LocalDate.parse(b.accounts.get(0).date)).minusMonths(1),last=YearMonth.now().plusMonths(2);
+        for(YearMonth m=first;!m.isAfter(last);m=m.plusMonths(1)){String at=when+", "+m;
+            equal(b.cash(m),p.cash(m),"Cash "+at);equal(b.ready(m),p.ready(m),"To budget "+at);equal(b.spending(m),p.spending(m),"Spending "+at);equal(b.income(m),p.income(m),"Income "+at);
+            for(Budget.Account a:b.accounts)equal(b.balanceAt(a,m),p.balanceAt(a,m),"Balance at "+a.name+" "+at);
+            for(Budget.Category c:b.categories){String in=c.name+" "+at;
+                equal(b.activity(c,m),p.activity(c,m),"Activity "+in);equal(b.available(c,m),p.available(c,m),"Available "+in);equal(b.toCover(c,m),p.toCover(c,m),"To cover "+in);
+                equal(b.creditOverspent(c,m),p.creditOverspent(c,m),"Credit overspent "+in);equal(b.creditSpent(c,m,null),p.creditSpent(c,m,null),"Card spending "+in);
+                for(Budget.Account a:b.accounts)if(a.credit()){equal(b.creditSpent(c,m,a),p.creditSpent(c,m,a),"On "+a.name+" "+in);equal(b.movedToCard(c,m,a),p.movedToCard(c,m,a),"Moved to "+a.name+" "+in);}}
+            same(b.spentBy(m,m).toString(),p.spentBy(m,m).toString(),"Spent by category "+at);}
+        for(Budget.Account a:b.accounts){equal(b.balance(a,false),p.balance(a,false),"Balance "+a.name+" "+when);equal(b.balance(a,true),p.balance(a,true),"Cleared "+a.name+" "+when);}
+        same(b.spentBy(first,last).toString(),p.spentBy(first,last).toString(),"Spent by category, all months "+when);
+        Budget.Table t=b.incomeExpense(last.minusMonths(7),6);StringBuilder rows=new StringBuilder();for(Budget.Row r:t.income)rows.append(r.name).append(java.util.Arrays.toString(r.amounts));
+        same(rows.toString(),p.incomeRows(last.minusMonths(7),6),"Income rows "+when);
+        for(LocalDate d=LocalDate.now().minusMonths(13);!d.isAfter(LocalDate.now());d=d.plusDays(17))equal(b.ageOfMoney(d),p.ageOfMoney(d),"Money age "+d+" "+when);
+    }
+    /** Budget's month maths before Sums: every transaction for every category and month. Slow, but plainly right. */
+    static final class Plain {
+        final Budget b;Plain(Budget b){this.b=b;}
+        long activity(Budget.Category c,YearMonth m){if(c.payment())return paymentActivity(c,m);long n=0;for(Budget.Entry e:b.entries)if(e.date.startsWith(m.toString()))n+=b.budgetIn(e,c.id);return n;}
+        YearMonth first(Budget.Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Budget.Entry e:b.entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));
+            if(c.payment()){Budget.Account card=b.account(c.cardAccount);if(card!=null&&YearMonth.from(LocalDate.parse(card.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(card.date));}return first;}
+        long available(Budget.Category c,YearMonth month){long n=0,start=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1)){n=n<0&&c.payment()?Math.max(n,-cardCredit(c,m.minusMonths(1),start)):Math.max(0,n);start=n;n+=b.assigned(c,m)+activity(c,m);}return n;}
+        long cardCredit(Budget.Category pc,YearMonth m,long start){Budget.Account card=b.account(pc.cardAccount);if(card==null)return 0;long freed=0;for(Budget.Entry e:b.entries)if((e.account.equals(card.id)||e.destination.equals(card.id))&&e.date.startsWith(m.toString())&&b.budgetAccount(e)==card)freed+=b.budgetIn(e,"");return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,freed);}
+        long toCover(Budget.Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-b.assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
+        long cash(YearMonth month){
+            String end=month.atEndOfMonth().toString();long n=0;for(Budget.Account a:b.accounts)if(a.cash()&&a.date.compareTo(end)<=0)n+=a.opening;
+            for(Budget.Entry e:b.entries){if(e.date.compareTo(end)>0)continue;Budget.Account a=b.account(e.account);if(a==null)continue;
+                if(e.transfer()){Budget.Account to=b.account(e.destination);if(to!=null&&a.cash()!=to.cash())n+=a.cash()?e.amount:-e.amount;}else if(a.cash())n+=e.amount;}
+            return n;}
+        long balance(Budget.Account a,boolean clearedOnly){long n=a.opening;for(Budget.Entry e:b.entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
+        long ready(YearMonth m){long n=cash(m);for(Budget.Category c:b.categories)n-=available(c,m)+creditOverspent(c,m);return n;}
+        long creditSpent(Budget.Category c,YearMonth m,Budget.Account card){long n=0;for(Budget.Entry e:b.entries){if(!e.touches(c.id)||!e.date.startsWith(m.toString()))continue;Budget.Account a=b.budgetAccount(e);if(a!=null&&a.credit()&&(card==null||a==card))n-=b.budgetIn(e,c.id);}return n;}
+        long creditOverspent(Budget.Category c,YearMonth m){if(c.payment())return 0;long a=available(c,m);if(a>=0)return 0;return Math.min(-a,creditSpending(c,m));}
+        long creditSpending(Budget.Category c,YearMonth m){long n=0;for(Budget.Account a:b.accounts)if(a.credit())n+=Math.max(0,creditSpent(c,m,a));return n;}
+        long movedToCard(Budget.Category c,YearMonth m,Budget.Account card){
+            long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);if(all==mine)return funded;
+            long before=0;for(Budget.Account a:b.accounts){if(a==card)break;if(a.credit())before+=Math.max(0,creditSpent(c,m,a));}return share(funded,before+mine,all)-share(funded,before,all);}
+        static long share(long funded,long part,long all){return BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(part)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();}
+        long paymentActivity(Budget.Category pc,YearMonth m){
+            Budget.Account card=b.account(pc.cardAccount);if(card==null)return 0;long n=0;for(Budget.Category c:b.categories)if(!c.payment())n+=movedToCard(c,m,card);
+            for(Budget.Entry e:b.entries)if(e.transfer()&&e.destination.equals(card.id)&&e.date.startsWith(m.toString())){Budget.Account from=b.account(e.account);if(from!=null&&from.cash())n+=e.amount;}
+            for(Budget.Entry e:b.entries)if(e.transfer()&&e.account.equals(card.id)&&e.date.startsWith(m.toString())){Budget.Account to=b.account(e.destination);if(to!=null&&to.cash())n-=e.amount;}
+            for(Budget.Entry e:b.entries)if((e.account.equals(card.id)||e.destination.equals(card.id))&&e.date.startsWith(m.toString())&&b.budgetAccount(e)==card)n-=b.budgetIn(e,"");
+            return n;}
+        long balanceAt(Budget.Account a,YearMonth m){String end=m.atEndOfMonth().toString();if(a.date.compareTo(end)>0)return 0;long n=a.opening;for(Budget.Entry e:b.entries){if(e.date.compareTo(end)>0)continue;if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
+        long spending(YearMonth m){long n=0;for(Budget.Entry e:b.entries)if(e.date.startsWith(m.toString()))n-=b.budgetAmount(e)-b.budgetIn(e,"");return n;}
+        long income(YearMonth m){long n=0;for(Budget.Entry e:b.entries)if(e.date.startsWith(m.toString()))n+=b.budgetIn(e,"");return n;}
+        java.util.Map<String,Long> spentBy(YearMonth from,YearMonth to){
+            String start=from.atDay(1).toString(),end=to.atEndOfMonth().toString();java.util.Map<String,Long> map=new java.util.LinkedHashMap<>();
+            for(Budget.Entry e:b.entries){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;java.util.Set<String> ids=new java.util.LinkedHashSet<>();if(e.split())for(Budget.Split p:e.splits)ids.add(p.category);else ids.add(e.category);
+                for(String id:ids){Budget.Category c=id.isEmpty()?null:b.category(id);if(c==null||c.payment())continue;long n=-b.budgetIn(e,id);if(n!=0)map.merge(id,n,Long::sum);}}
+            return map;}
+        int ageOfMoney(LocalDate until){
+            java.util.List<long[]> events=new java.util.ArrayList<>(); // day, amount (+ in, - out)
+            for(Budget.Account a:b.accounts)if(a.cash()&&a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
+            for(Budget.Entry e:b.entries){if(LocalDate.parse(e.date).isAfter(until))continue;long n=b.budgetAmount(e);if(n!=0)events.add(new long[]{LocalDate.parse(e.date).toEpochDay(),n});}
+            events.sort((x,y)->x[0]!=y[0]?Long.compare(x[0],y[0]):Long.compare(y[1],x[1])); // a day's money in before money out
+            java.util.ArrayDeque<long[]> pool=new java.util.ArrayDeque<>();java.util.List<Double> ages=new java.util.ArrayList<>();
+            for(long[] ev:events){
+                if(ev[1]>0){pool.add(new long[]{ev[0],ev[1]});continue;}
+                long left=-ev[1],matched=0;double days=0;
+                while(left>0&&!pool.isEmpty()){long[] head=pool.peek();long use=Math.min(left,head[1]);days+=(double)use*(ev[0]-head[0]);matched+=use;left-=use;head[1]-=use;if(head[1]==0)pool.poll();}
+                if(matched>0)ages.add(days/matched);
+            }
+            if(ages.isEmpty())return -1;double sum=0;java.util.List<Double> last=ages.subList(Math.max(0,ages.size()-10),ages.size());for(double a:last)sum+=a;return(int)Math.round(sum/last.size());
+        }
+        /** incomeExpense's income rows, as it worked them out from every transaction. */
+        String incomeRows(YearMonth from,int months){String start=from.atDay(1).toString(),end=from.plusMonths(months-1).atEndOfMonth().toString();java.util.LinkedHashMap<String,long[]> rows=new java.util.LinkedHashMap<>();java.util.Map<String,String> names=new java.util.HashMap<>();
+            for(Budget.Entry e:b.entries){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;long n=b.budgetIn(e,"");if(n==0)continue;int i=(int)java.time.temporal.ChronoUnit.MONTHS.between(from,YearMonth.from(LocalDate.parse(e.date)));String k=e.payee.trim().toLowerCase(java.util.Locale.ROOT);
+                if(!rows.containsKey(k)){rows.put(k,new long[months]);names.put(k,e.payee.trim());}rows.get(k)[i]+=n;}
+            java.util.List<String> keys=new java.util.ArrayList<>();for(java.util.Map.Entry<String,long[]> r:rows.entrySet()){boolean any=false;for(long v:r.getValue())any|=v!=0;if(any)keys.add(r.getKey());}
+            keys.sort((x,y)->Long.compare(java.util.Arrays.stream(rows.get(y)).sum(),java.util.Arrays.stream(rows.get(x)).sum()));
+            StringBuilder s=new StringBuilder();for(String k:keys)s.append(names.get(k)).append(java.util.Arrays.toString(rows.get(k)));return s.toString();}
     }
 }

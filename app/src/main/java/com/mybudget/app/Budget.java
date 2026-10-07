@@ -128,7 +128,7 @@ public final class Budget {
     /** Enters [s]'s current date as a transaction and moves it to its next date (or removes it). */
     public Entry enter(Scheduled s){return enter(s,"",false);}
     /** As enter(s), with a photo and the Cleared tick (a new repeating transaction dated today or earlier). */
-    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);advance(s);return e;}
+    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);changed();advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
     /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
@@ -200,7 +200,7 @@ public final class Budget {
     public Category category(String id){for(Category c:categories)if(c.id.equals(id))return c;return null;}
     public Account account(String id){for(Account a:accounts)if(a.id.equals(id))return a;return null;}
     public long assigned(Category c,YearMonth m){return c.assigned.getOrDefault(m.toString(),0L);}
-    public long activity(Category c,YearMonth m){if(c.payment())return paymentActivity(c,m);long n=0;for(Entry e:entries)if(e.date.startsWith(m.toString()))n+=budgetIn(e,c.id);return n;}
+    public long activity(Category c,YearMonth m){return sums().activity(c,m);}
     // Tracking accounts (savings held elsewhere, investments, a house, a mortgage) are off budget: their transactions never
     // touch To budget, categories or spending; only Net worth counts them. Money crossing between a budget account and a
     // tracking account does count: going out of the budget it's spending from a category (an extra mortgage payment, an
@@ -217,18 +217,11 @@ public final class Budget {
         if(!e.transfer()){long n=e.amountIn(id);if(n==0)return 0;Account a=account(e.account);return a!=null&&a.tracking()?0:n;}
         Account a=budgetAccount(e);if(a==null)return 0;return a.id.equals(e.account)?e.amountIn(id):id.isEmpty()?-e.amount:0;
     }
-    private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));
-        if(c.payment()){Account card=account(c.cardAccount);if(card!=null&&YearMonth.from(LocalDate.parse(card.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(card.date));}return first;}
     // Overspending (a negative balance) resets each month: it's taken from To budget. A card payment category's negative
-    // balance that is card credit (a refund after the card was paid, a reward sent to To budget) carries on instead.
-    public long available(Category c,YearMonth month){long n=0,start=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1)){n=n<0&&c.payment()?Math.max(n,-cardCredit(c,m.minusMonths(1),start)):Math.max(0,n);start=n;n+=assigned(c,m)+activity(c,m);}return n;}
-    /**
-     * How far payment category [pc] may stay below zero after [m] (which it started at [start]): the card's credit, what
-     * already carried, and its To budget parts in [m]. Below that, more was paid than was set aside: overspending.
-     */
-    private long cardCredit(Category pc,YearMonth m,long start){Account card=account(pc.cardAccount);if(card==null)return 0;long freed=0;for(Entry e:entries)if((e.account.equals(card.id)||e.destination.equals(card.id))&&e.date.startsWith(m.toString())&&budgetAccount(e)==card)freed+=budgetIn(e,"");return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,freed);}
+    // balance that is card credit (a refund after the card was paid, a reward sent to To budget) carries on instead (Sums.available).
+    public long available(Category c,YearMonth month){return sums().available(c,month);}
     /** Overspending to cover in [m]. A payment category below zero by card credit has nothing to cover: it carries on. */
-    public long toCover(Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
+    public long toCover(Category c,YearMonth m){return sums().toCover(c,m);}
     /** What Pay card fills in: what's set aside this month (below zero is nothing to pay), or what's owed, if less. */
     public long toPay(Account card){Category p=paymentCategory(card);long owed=-balance(card,false),ready=p==null?0:Math.max(0,available(p,YearMonth.now()));return Math.max(0,Math.min(owed,ready));}
     /**
@@ -236,13 +229,7 @@ public final class Budget {
      * spending isn't cash (it moves money between categories instead), but a payment from a cash account is. A part
      * sent into To budget on a card (a reward credit, an adjustment) isn't cash either: see paymentActivity.
      */
-    public long cash(YearMonth month){
-        String end=month.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(a.cash()&&a.date.compareTo(end)<=0)n+=a.opening;
-        for(Entry e:entries){if(e.date.compareTo(end)>0)continue;Account a=account(e.account);if(a==null)continue;
-            if(e.transfer()){Account to=account(e.destination);if(to!=null&&a.cash()!=to.cash())n+=a.cash()?e.amount:-e.amount;} // in or out of cash (to a card or a tracking account)
-            else if(a.cash())n+=e.amount;}
-        return n;
-    }
+    public long cash(YearMonth month){return sums().cash(month);}
     /** Each of [a]'s transactions (by id) -> the account's balance after it, cleared or not, transfers included; same-day ones in the order added. */
     public Map<String,Long> runningBalances(Account a){
         List<Entry> list=new ArrayList<>();for(int i=entries.size()-1;i>=0;i--){Entry e=entries.get(i);if(e.account.equals(a.id)||e.destination.equals(a.id))list.add(e);} // entries are kept newest first
@@ -250,50 +237,32 @@ public final class Budget {
     }
     /** [a]'s balance at the end of [day] (YYYY-MM-DD), cleared or not. */
     public long balanceOn(Account a,String day){long n=a.opening;for(Entry e:entries){if(e.date.compareTo(day)>0)continue;if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
-    public long balance(Account a,boolean clearedOnly){long n=a.opening;for(Entry e:entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
+    public long balance(Account a,boolean clearedOnly){return sums().balance(a,clearedOnly);}
     /** To budget: cash less what categories hold. Overspending on a card is card debt, so it doesn't count here. */
-    public long ready(YearMonth m){long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;}
+    public long ready(YearMonth m){return sums().ready(m);}
     // Credit cards in an envelope system. Spending on a card from a category with money moves that money to the card's
     // payment category, ready to pay the bill; spending beyond what the category has is credit overspending: it shows
     // in the category this month and then becomes card debt, without touching To budget. A payment (a transfer
     // from a cash account to the card) uses the payment category's money.
     /** Net spending (refunds negative) in [c] on credit card [card] in [m]; card null = on every card. */
-    public long creditSpent(Category c,YearMonth m,Account card){long n=0;for(Entry e:entries){if(!e.touches(c.id)||!e.date.startsWith(m.toString()))continue;Account a=budgetAccount(e);if(a!=null&&a.credit()&&(card==null||a==card))n-=budgetIn(e,c.id);}return n;}
+    public long creditSpent(Category c,YearMonth m,Account card){return sums().creditSpent(c,m,card);}
     /** The part of [c]'s overspending in [m] that came from card spending (it becomes debt, not less To budget). */
-    public long creditOverspent(Category c,YearMonth m){if(c.payment())return 0;long a=available(c,m);if(a>=0)return 0;return Math.min(-a,creditSpending(c,m));}
-    /** Spending on cards that had more spending than refunds in [m] (each card counted on its own). */
-    private long creditSpending(Category c,YearMonth m){long n=0;for(Account a:accounts)if(a.credit())n+=Math.max(0,creditSpent(c,m,a));return n;}
+    public long creditOverspent(Category c,YearMonth m){return sums().creditOverspent(c,m);}
     /**
      * Money moved from [c] to [card]'s payment category in [m]. A card with net refunds gives them back in full; a card
      * with net spending gets its share of what the category could pay for (the rest is credit overspending).
      */
-    public long movedToCard(Category c,YearMonth m,Account card){
-        long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);if(all==mine)return funded;
-        // Rounded by running total (cards in account order), so the cards' shares add up to the funded amount exactly.
-        long before=0;for(Account a:accounts){if(a==card)break;if(a.credit())before+=Math.max(0,creditSpent(c,m,a));}
-        return share(funded,before+mine,all)-share(funded,before,all);
-    }
+    public long movedToCard(Category c,YearMonth m,Account card){return sums().movedToCard(c,m,card);}
     private static long share(long funded,long part,long all){return BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(part)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();}
-    // A card's To budget parts (a reward credit, a refund with no category, a reconcile adjustment) change what's owed
-    // without moving cash, so they move money between To budget and the payment category: an inflow frees set-aside
-    // money (less is owed), an outflow sets more aside from To budget (more is owed).
-    private long paymentActivity(Category pc,YearMonth m){
-        Account card=account(pc.cardAccount);if(card==null)return 0;long n=0;for(Category c:categories)if(!c.payment())n+=movedToCard(c,m,card);
-        for(Entry e:entries)if(e.transfer()&&e.destination.equals(card.id)&&e.date.startsWith(m.toString())){Account from=account(e.account);if(from!=null&&from.cash())n+=e.amount;}
-        // A cash advance (card to a cash account) is borrowed money: it's set aside here to repay, so To budget doesn't grow while the card owes more.
-        for(Entry e:entries)if(e.transfer()&&e.account.equals(card.id)&&e.date.startsWith(m.toString())){Account to=account(e.destination);if(to!=null&&to.cash())n-=e.amount;}
-        for(Entry e:entries)if((e.account.equals(card.id)||e.destination.equals(card.id))&&e.date.startsWith(m.toString())&&budgetAccount(e)==card)n-=budgetIn(e,""); // money in from a tracking account counts like a refund to To budget
-        return n;
-    }
     public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
     /** Adds a credit card owing [owed] (a positive amount) and its payment category. Old debt starts with nothing set aside. */
-    public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group="Credit card payments";p.cardAccount=a.id;categories.add(p);return a;}
+    public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group="Credit card payments";p.cardAccount=a.id;categories.add(p);changed();return a;}
     /** An account's balance at the end of [m] (a card's is negative while it's owed). */
-    public long balanceAt(Account a,YearMonth m){String end=m.atEndOfMonth().toString();if(a.date.compareTo(end)>0)return 0;long n=a.opening;for(Entry e:entries){if(e.date.compareTo(end)>0)continue;if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
+    public long balanceAt(Account a,YearMonth m){return sums().balanceAt(a,m);}
     public long futureAssigned(YearMonth m){long n=0;for(Category c:categories)for(Map.Entry<String,Long>a:c.assigned.entrySet())if(a.getKey().compareTo(m.toString())>0)n+=a.getValue();return n;}
     public long spendable(YearMonth m){return ready(m)-futureAssigned(m);}
-    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);}
-    public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);}
+    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
+    public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);assignedChanged(from);assignedChanged(to);}
     public long needed(Category c,YearMonth m){
         if(c.target<=0||c.snoozed.equals(m.toString()))return 0;
         if(c.targetType.equals("Monthly")||c.targetType.equals("Debt"))return Math.max(0,c.target-assigned(c,m)); // a debt payment: a fixed amount each month
@@ -306,8 +275,8 @@ public final class Budget {
         long base=c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1))))+assigned(c,m):available(c,m);
         return Math.max(0,c.target-base);
     }
-    public long spending(YearMonth m){long n=0;for(Entry e:entries)if(e.date.startsWith(m.toString()))n-=budgetAmount(e)-budgetIn(e,"");return n;}
-    public long income(YearMonth m){long n=0;for(Entry e:entries)if(e.date.startsWith(m.toString()))n+=budgetIn(e,"");return n;}
+    public long spending(YearMonth m){return sums().spending(m);}
+    public long income(YearMonth m){return sums().income(m);}
     /** Fund targets' order in [m]: earliest due day or upcoming bill first (neither = end of month), otherwise as in the plan. */
     public List<Category> fundOrder(YearMonth m){List<Category> list=new ArrayList<>(categories);list.sort(Comparator.comparingInt(c->firstDue(c,m)));return list;}
     /** What Budget reset returns in [m]: each category's positive Available. Card payment money stays: it pays debt already spent. */
@@ -327,10 +296,11 @@ public final class Budget {
      * and a card payment (a transfer within the budget) isn't, so the figure follows spending. What a card owed when it was
      * added isn't money received or spent here.
      */
-    public int ageOfMoney(LocalDate until){
+    public int ageOfMoney(LocalDate until){Sums s=sums();return s.ages.computeIfAbsent(until,d->moneyAge(d,s));}
+    private int moneyAge(LocalDate until,Sums s){
         List<long[]> events=new ArrayList<>(); // day, amount (+ in, - out)
         for(Account a:accounts)if(a.cash()&&a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
-        for(Entry e:entries){if(LocalDate.parse(e.date).isAfter(until))continue;long n=budgetAmount(e);if(n!=0)events.add(new long[]{LocalDate.parse(e.date).toEpochDay(),n});}
+        long end=until.toEpochDay();for(int i=0;i<entries.size();i++){long day=s.day(i);if(day>end)continue;long n=s.budgetAmount(entries.get(i));if(n!=0)events.add(new long[]{day,n});}
         events.sort((x,y)->x[0]!=y[0]?Long.compare(x[0],y[0]):Long.compare(y[1],x[1])); // a day's money in before money out
         ArrayDeque<long[]> pool=new ArrayDeque<>();List<Double> ages=new ArrayList<>();
         for(long[] ev:events){
@@ -341,15 +311,140 @@ public final class Budget {
         }
         if(ages.isEmpty())return -1;double sum=0;List<Double> last=ages.subList(Math.max(0,ages.size()-10),ages.size());for(double a:last)sum+=a;return(int)Math.round(sum/last.size());
     }
+    // Month maths read every transaction for every category and month, and a card's payment category reads every other
+    // category's: years of transactions took minutes. Sums works the same sums out from one pass over the transactions
+    // (each month's in-and-out per category, card and account) and remembers what it has worked out. By default each call
+    // starts afresh, so a change made straight to the lists or fields always counts. cache(true) keeps one between calls
+    // (MainActivity from screen to screen, every change going through its commit(); the widget; Planner's form): then changed() must follow a change made straight to the fields,
+    // as Budget's own changes (assign, move, enter, deleting...) do themselves. BudgetTest compares the results with the plain sums.
+    private boolean caching;private Sums memo;
+    /** [on]: month maths are kept between calls until changed(); off: worked out afresh for each call. Either way, starts afresh. */
+    public void cache(boolean on){caching=on;memo=null;}
+    public boolean cached(){return caching;}
+    /** The budget changed: month maths kept by cache(true) are worked out again. */
+    public void changed(){memo=null;}
+    /** Only [c]'s Assigned changed (assign, move): its Available, the card payment categories' and To budget are worked out again. */
+    private void assignedChanged(Category c){if(memo!=null){memo.runs.remove(c);memo.runs.keySet().removeIf(Category::payment);memo.ready.clear();}}
+    private Sums sums(){if(!caching)return new Sums();if(memo==null)memo=new Sums();return memo;}
+    /** A month as one number (year * 12 + month - 1), from a YearMonth or from a date ("YYYY-MM-DD", as LocalDate writes it). */
+    static int month(YearMonth m){return m.getYear()*12+m.getMonthValue()-1;}
+    static int month(String date){if(date.length()>=7&&date.charAt(4)=='-'&&date.charAt(0)!='+'&&date.charAt(0)!='-')return((date.charAt(0)-'0')*1000+(date.charAt(1)-'0')*100+(date.charAt(2)-'0')*10+(date.charAt(3)-'0'))*12+(date.charAt(5)-'0')*10+(date.charAt(6)-'0')-1;
+        int dash=date.indexOf('-',1);return Integer.parseInt(date.substring(0,dash))*12+Integer.parseInt(date.substring(dash+1,dash+3))-1;}
+    private static YearMonth yearMonth(int month){return YearMonth.of(Math.floorDiv(month,12),Math.floorMod(month,12)+1);}
+    private final class Sums {
+        final Map<String,Account> accountById=new HashMap<>();final Map<String,Category> categoryById=new HashMap<>(); // the first with each id, as account() and category()
+        int lo,hi=-1;int[][] inMonth; // the months with transactions, and each one's transactions (index in entries, in list order)
+        final Map<String,long[]> in=new HashMap<>(),paidIn=new HashMap<>(),advanced=new HashMap<>(),moved=new HashMap<>(); // per month, by category or account id (see build)
+        final Map<String,long[]> balances=new HashMap<>(); // account id -> {all, cleared}
+        final Map<String,Integer> touched=new HashMap<>(); // category id -> the first month a transaction touches it
+        final Map<Account,Map<String,long[]>> onCard=new IdentityHashMap<>();final Map<Account,long[]> freed=new IdentityHashMap<>(); // by budget account
+        long[] cashIn,spent;
+        final Map<LocalDate,Integer> ages=new HashMap<>();long[] days; // money age by day; each transaction's date as a day number (read once)
+        long day(int i){if(days==null){days=new long[entries.size()];for(int j=0;j<days.length;j++){String d=entries.get(j).date;int m=month(d); // as LocalDate.parse(d).toEpochDay()
+            days[j]=d.length()==10&&d.charAt(4)=='-'&&d.charAt(7)=='-'&&d.charAt(0)!='+'?LocalDate.of(Math.floorDiv(m,12),Math.floorMod(m,12)+1,(d.charAt(8)-'0')*10+d.charAt(9)-'0').toEpochDay():LocalDate.parse(d).toEpochDay();}}return days[i];}
+        final Map<Category,Run> runs=new IdentityHashMap<>();final Map<Integer,Long> ready=new HashMap<>();final Map<String,Map<String,Long>> spentBy=new HashMap<>();
+        Sums(){for(Account a:accounts)accountById.putIfAbsent(a.id,a);for(Category c:categories)categoryById.putIfAbsent(c.id,c);
+            int n=entries.size();int[] at=new int[n];lo=Integer.MAX_VALUE;hi=Integer.MIN_VALUE;
+            for(int i=0;i<n;i++){at[i]=month(entries.get(i).date);lo=Math.min(lo,at[i]);hi=Math.max(hi,at[i]);}
+            if(n==0){lo=0;hi=-1;}int size=hi-lo+1;int[] count=new int[Math.max(0,size)];for(int i=0;i<n;i++)count[at[i]-lo]++;
+            inMonth=new int[Math.max(0,size)][];for(int k=0;k<size;k++)inMonth[k]=new int[count[k]];int[] filled=new int[Math.max(0,size)];
+            cashIn=new long[Math.max(0,size)];spent=new long[Math.max(0,size)];
+            for(int i=0;i<n;i++){Entry e=entries.get(i);int k=at[i]-lo;inMonth[k][filled[k]++]=i;add(e,k);}
+        }
+        private long[] row(Map<String,long[]> map,String key){long[] r=map.get(key);if(r==null)map.put(key,r=new long[hi-lo+1]);return r;}
+        // One transaction's part in each sum, exactly as the plain sums count it: budgetIn per category it touches (and To budget),
+        // card spending per card and category, payments into and cash advances out of cards, cash, spending and account balances.
+        private void add(Entry e,int k){
+            boolean transfer=e.transfer();Account a=accountById.get(e.account),to=transfer?accountById.get(e.destination):null;
+            Account budget=!transfer?(a!=null&&!a.tracking()?a:null):a==null||to==null||a.tracking()==to.tracking()?null:a.tracking()?to:a; // as budgetAccount(e)
+            // As budgetIn(e,id): the parts count in their categories unless it's off budget; money in from a tracking account goes to To budget.
+            boolean counts=transfer?budget!=null&&budget.id.equals(e.account):a==null||!a.tracking(),fromTracking=transfer&&budget!=null&&!counts;
+            if(e.split()){Set<String> ids=new LinkedHashSet<>();for(Split p:e.splits)ids.add(p.category);for(String id:ids)part(id,counts?e.amountIn(id):fromTracking&&id.isEmpty()?-e.amount:0,budget,k);
+                if(!ids.contains(""))part(null,fromTracking?-e.amount:0,budget,k);}
+            else{part(e.category,counts?e.amount:fromTracking&&e.category.isEmpty()?-e.amount:0,budget,k);if(!e.category.isEmpty())part(null,fromTracking?-e.amount:0,budget,k);}
+            long toBudget=counts?e.amountIn(""):fromTracking?-e.amount:0;
+            if(budget!=null)freed.computeIfAbsent(budget,x->new long[hi-lo+1])[k]+=toBudget;spent[k]-=(budget==null?0:counts?e.amount:-e.amount)-toBudget;
+            if(transfer){if(a!=null&&a.cash())row(paidIn,e.destination)[k]+=e.amount;if(to!=null&&to.cash())row(advanced,e.account)[k]+=e.amount;
+                if(a!=null&&to!=null&&a.cash()!=to.cash())cashIn[k]+=a.cash()?e.amount:-e.amount;} // in or out of cash (to a card or a tracking account)
+            else if(a!=null&&a.cash())cashIn[k]+=e.amount;
+            row(moved,e.account)[k]+=e.amount;row(moved,e.destination)[k]-=e.amount;
+            long[] b=balances.computeIfAbsent(e.account,x->new long[2]),d=balances.computeIfAbsent(e.destination,x->new long[2]);
+            b[0]+=e.amount;d[0]-=e.amount;if(e.cleared){b[1]+=e.amount;d[1]-=e.amount;}
+        }
+        /** Category [id]'s part [n] of a transaction it touches (null: To budget's, when the transaction doesn't touch ""). */
+        private void part(String id,long n,Account budget,int k){
+            if(id==null){if(n!=0)row(in,"")[k]+=n;return;}
+            Integer first=touched.get(id);if(first==null||k+lo<first)touched.put(id,k+lo);if(n!=0)row(in,id)[k]+=n;
+            if(budget!=null&&budget.credit())onCard.computeIfAbsent(budget,x->new HashMap<>()).computeIfAbsent(id,x->new long[hi-lo+1])[k]-=n;
+        }
+        long at(long[] r,int month){int i=month-lo;return r==null||i<0||i>=r.length?0:r[i];}
+        long upTo(long[] r,int month){long n=0;if(r!=null)for(int i=0;i<r.length&&i<=month-lo;i++)n+=r[i];return n;}
+        Account budgetAccount(Entry e){Account a=accountById.get(e.account);if(!e.transfer())return a!=null&&!a.tracking()?a:null;Account to=accountById.get(e.destination);
+            if(a==null||to==null||a.tracking()==to.tracking())return null;return a.tracking()?to:a;}
+        long budgetIn(Entry e,String id){
+            if(!e.transfer()){long n=e.amountIn(id);if(n==0)return 0;Account a=accountById.get(e.account);return a!=null&&a.tracking()?0:n;}
+            Account a=budgetAccount(e);if(a==null)return 0;return a.id.equals(e.account)?e.amountIn(id):id.isEmpty()?-e.amount:0;}
+        long budgetAmount(Entry e){Account a=budgetAccount(e);return a==null?0:a.id.equals(e.account)?e.amount:-e.amount;}
+        long activity(Category c,YearMonth m){return c.payment()?paymentActivity(c,m):at(in.get(c.id),month(m));}
+        long income(YearMonth m){return at(in.get(""),month(m));}
+        long spending(YearMonth m){return at(spent,month(m));}
+        long cash(YearMonth m){String end=m.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(a.cash()&&a.date.compareTo(end)<=0)n+=a.opening;return n+upTo(cashIn,month(m));}
+        long balanceAt(Account a,YearMonth m){if(a.date.compareTo(m.atEndOfMonth().toString())>0)return 0;return a.opening+upTo(moved.get(a.id),month(m));}
+        long balance(Account a,boolean clearedOnly){long[] b=balances.get(a.id);return a.opening+(b==null?0:b[clearedOnly?1:0]);}
+        /** A category's Available month by month, from the first month with money or a transaction (see available). */
+        final class Run { final Category c;final int first;long n,start;int done;long[] end=new long[0];
+            Run(Category c){this.c=c;int f=Integer.MAX_VALUE;for(String key:c.assigned.keySet())f=Math.min(f,month(YearMonth.parse(key)));Integer t=touched.get(c.id);if(t!=null)f=Math.min(f,t);
+                if(c.payment()){Account card=accountById.get(c.cardAccount);if(card!=null)f=Math.min(f,month(YearMonth.from(LocalDate.parse(card.date))));}first=f;}
+            long until(int to){
+                for(;first+done<=to;done++){YearMonth m=yearMonth(first+done);n=n<0&&c.payment()?Math.max(n,-cardCredit(c,m.minusMonths(1),start)):Math.max(0,n);start=n;n+=assigned(c,m)+activity(c,m);
+                    if(done==end.length)end=Arrays.copyOf(end,Math.max(12,end.length*2));end[done]=n;}
+                return end[to-first];}
+        }
+        // From the first month with assigned money or a transaction (a card's from its opening), month by month to [month]:
+        // what's left carries forward, overspending resets (a payment category's card credit carries on); with nothing before
+        // [month], just [month]'s Assigned and Activity.
+        long available(Category c,YearMonth month){int to=month(month);Run r=runs.get(c);if(r==null)runs.put(c,r=new Run(c));
+            return r.first>to?assigned(c,month)+activity(c,month):r.until(to);}
+        /**
+         * How far payment category [pc] may stay below zero after [m] (which it started at [start]): the card's credit, what
+         * already carried, and its To budget parts in [m]. Below that, more was paid than was set aside: overspending.
+         */
+        long cardCredit(Category pc,YearMonth m,long start){Account card=accountById.get(pc.cardAccount);if(card==null)return 0;
+            return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,at(freed.get(card),month(m)));}
+        long toCover(Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
+        long ready(YearMonth m){return ready.computeIfAbsent(month(m),k->{long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;});}
+        long creditSpent(Category c,YearMonth m,Account card){long n=0;int k=month(m);for(Map.Entry<Account,Map<String,long[]>> x:onCard.entrySet())if(card==null||x.getKey()==card)n+=at(x.getValue().get(c.id),k);return n;}
+        long creditOverspent(Category c,YearMonth m){if(c.payment())return 0;long a=available(c,m);if(a>=0)return 0;return Math.min(-a,creditSpending(c,m));}
+        /** Spending on cards that had more spending than refunds in [m] (each card counted on its own). */
+        long creditSpending(Category c,YearMonth m){long n=0;for(Account a:accounts)if(a.credit())n+=Math.max(0,creditSpent(c,m,a));return n;}
+        long movedToCard(Category c,YearMonth m,Account card){
+            long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);if(all==mine)return funded;
+            // Rounded by running total (cards in account order), so the cards' shares add up to the funded amount exactly.
+            long before=0;for(Account a:accounts){if(a==card)break;if(a.credit())before+=Math.max(0,creditSpent(c,m,a));}
+            return share(funded,before+mine,all)-share(funded,before,all);
+        }
+        // A card's To budget parts (a reward credit, a refund with no category, a reconcile adjustment) change what's owed
+        // without moving cash, so they move money between To budget and the payment category: an inflow frees set-aside
+        // money (less is owed), an outflow sets more aside from To budget (more is owed). Payments from a cash account use the
+        // money set aside; a cash advance (card to a cash account) is borrowed money, set aside here to repay, so To budget
+        // doesn't grow while the card owes more; money in from a tracking account counts like a refund to To budget.
+        long paymentActivity(Category pc,YearMonth m){
+            Account card=accountById.get(pc.cardAccount);if(card==null)return 0;long n=0;for(Category c:categories)if(!c.payment())n+=movedToCard(c,m,card);
+            int k=month(m);return n+at(paidIn.get(card.id),k)-at(advanced.get(card.id),k)-at(freed.get(card),k);
+        }
+        /** The transactions dated in [from] to [to], in list order. */
+        List<Entry> between(YearMonth from,YearMonth to){List<Integer> list=new ArrayList<>();for(int k=Math.max(lo,month(from));k<=Math.min(hi,month(to));k++)for(int i:inMonth[k-lo])list.add(i);
+            Collections.sort(list);List<Entry> r=new ArrayList<>();for(int i:list)r.add(entries.get(i));return r;}
+        Map<String,Long> spentBy(YearMonth from,YearMonth to){return spentBy.computeIfAbsent(from+" "+to,x->{
+            String start=from.atDay(1).toString(),end=to.atEndOfMonth().toString();Map<String,Long> map=new LinkedHashMap<>();
+            for(Entry e:between(from,to)){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;Set<String> ids=new LinkedHashSet<>();if(e.split())for(Split p:e.splits)ids.add(p.category);else ids.add(e.category);
+                for(String id:ids){Category c=id.isEmpty()?null:categoryById.get(id);if(c==null||c.payment())continue;long n=-budgetIn(e,id);if(n!=0)map.merge(id,n,Long::sum);}}
+            return map;});}
+    }
     // Reports count budget accounts only (tracking accounts are in Net worth only); a transfer within the budget isn't spending
     // or income, and a card payment category's activity isn't spending.
     /** Net spending (refunds take off) per spending category in the months [from] to [to]: category id -> cents. Card payment categories are left out. */
-    public Map<String,Long> spentBy(YearMonth from,YearMonth to){
-        String start=from.atDay(1).toString(),end=to.atEndOfMonth().toString();Map<String,Long> map=new LinkedHashMap<>();
-        for(Entry e:entries){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;Set<String> ids=new LinkedHashSet<>();if(e.split())for(Split p:e.splits)ids.add(p.category);else ids.add(e.category);
-            for(String id:ids){Category c=id.isEmpty()?null:category(id);if(c==null||c.payment())continue;long n=-budgetIn(e,id);if(n!=0)map.merge(id,n,Long::sum);}}
-        return map;
-    }
+    public Map<String,Long> spentBy(YearMonth from,YearMonth to){return new LinkedHashMap<>(sums().spentBy(from,to));}
     /** A part of the spending breakdown: a category, a group, or Other (what's beyond the biggest SLICES). tenths: its share in tenths of a percent. */
     public static final class Slice { public final String name;public final boolean other;public final List<String> ids=new ArrayList<>();public long amount;public int tenths; Slice(String name,boolean other){this.name=name;this.other=other;} }
     public static final int SLICES=7;
@@ -404,7 +499,7 @@ public final class Budget {
     /** The income and expense table for the [months] months from [from]. Income is money into To budget (net, by payee, biggest first); expenses are net of refunds, in plan order. */
     public Table incomeExpense(YearMonth from,int months){
         Table t=new Table(from,months);String start=from.atDay(1).toString(),end=from.plusMonths(months-1).atEndOfMonth().toString();LinkedHashMap<String,Row> payees=new LinkedHashMap<>();
-        for(Entry e:entries){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;long n=budgetIn(e,"");if(n==0)continue;int i=(int)ChronoUnit.MONTHS.between(from,YearMonth.from(LocalDate.parse(e.date)));Row r=payees.get(key(e.payee));if(r==null)payees.put(key(e.payee),r=new Row(e.payee.trim(),false,months));r.amounts[i]+=n;} // newest first: a payee's newest spelling
+        for(Entry e:sums().between(from,from.plusMonths(months-1))){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;long n=budgetIn(e,"");if(n==0)continue;int i=(int)ChronoUnit.MONTHS.between(from,YearMonth.from(LocalDate.parse(e.date)));Row r=payees.get(key(e.payee));if(r==null)payees.put(key(e.payee),r=new Row(e.payee.trim(),false,months));r.amounts[i]+=n;} // newest first: a payee's newest spelling
         for(Row r:payees.values())if(!r.empty())t.income.add(r);t.income.sort((a,b)->Long.compare(b.total(),a.total()));
         List<Map<String,Long>> spent=new ArrayList<>();for(YearMonth m:t.months)spent.add(spentBy(m,m));
         LinkedHashMap<String,List<Category>> groups=new LinkedHashMap<>();for(Category c:categories)if(!c.payment())groups.computeIfAbsent(c.group.trim().toLowerCase(Locale.ROOT),k->new ArrayList<>()).add(c);
@@ -438,7 +533,7 @@ public final class Budget {
     public static final String[][] STARTER={{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}};
     public static List<String> starterGroups(){List<String> g=new ArrayList<>();for(String[] s:STARTER)if(!g.contains(s[1]))g.add(s[1]);return g;}
     /** Starter categories in [groups] that aren't here yet (by name, any capitals) are added; returns how many. */
-    public int addStarter(Collection<String> groups){int n=0;for(String[] s:STARTER){if(!groups.contains(s[1]))continue;boolean have=false;for(Category c:categories)have|=c.name.trim().equalsIgnoreCase(s[0]);if(have)continue;Category c=new Category(s[0]);c.group=s[1];categories.add(c);n++;}return n;}
+    public int addStarter(Collection<String> groups){int n=0;for(String[] s:STARTER){if(!groups.contains(s[1]))continue;boolean have=false;for(Category c:categories)have|=c.name.trim().equalsIgnoreCase(s[0]);if(have)continue;Category c=new Category(s[0]);c.group=s[1];categories.add(c);n++;}changed();return n;}
     /**
      * Starter categories in groups not in [keep] go, but only as they came: never used (no money, transactions or upcoming ones),
      * with no target, note, pin or hidden mark, and nothing (a Planner bill, an import rule) pointing at them. Returns how many.
@@ -470,17 +565,17 @@ public final class Budget {
         if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled){if(s.category.equals(c.id))s.category=into.id;for(Split p:s.splits)if(p.category.equals(c.id))p.category=into.id;}for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
         for(Map.Entry<String,String> m:billCategories.entrySet())if(m.getValue().equals(c.id))m.setValue(into==null?"":into.id);billCategories.values().removeIf(String::isEmpty);
         for(Rule r:rules)if(r.category.equals(c.id))r.category=into==null?"":into.id;rules.removeIf(r->r.rename.isEmpty()&&r.category.isEmpty()); // an import rule left with nothing to do goes
-        categories.remove(c);
+        categories.remove(c);changed();
     }
     /** Swaps [c] with the next category of its group up (-1) or down (+1); false at the end of the group. */
-    public boolean reorder(Category c,int direction){int i=categories.indexOf(c);for(int j=i+direction;j>=0&&j<categories.size();j+=direction)if(categories.get(j).group.equals(c.group)){Collections.swap(categories,i,j);return true;}return false;}
+    public boolean reorder(Category c,int direction){int i=categories.indexOf(c);for(int j=i+direction;j>=0&&j<categories.size();j+=direction)if(categories.get(j).group.equals(c.group)){Collections.swap(categories,i,j);changed();return true;}return false;}
     // Accounts: close at zero, delete only unused.
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
     public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
     public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a zero balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
     public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");Category p=paymentCategory(a);
-        if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);}
+        if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);changed();}
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference (on a card, see paymentActivity). */
     public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
     // Quick assign: what each choice adds to this month's Assigned.
@@ -555,7 +650,7 @@ public final class Budget {
         else{Category c=category(e.category);Account own=account(e.account);if(c!=null||e.transfer()||own==null||!own.tracking())s.append(' ').append(c!=null?c.name:e.transfer()?"Transfer":"To budget");}return s.toString();} // a tracking account's own entry has no category
     // Tracking accounts and loans.
     /** Adds a tracking account: an asset worth [value], or a debt owing [value] (a positive amount; saved as a negative balance). */
-    public Account addTracking(String name,String date,long value,boolean liability){if(value<0)throw new IllegalArgumentException("Enter the amount as a positive number.");Account a=new Account(name,date,liability?-value:value);a.type="tracking";a.liability=liability;accounts.add(a);return a;}
+    public Account addTracking(String name,String date,long value,boolean liability){if(value<0)throw new IllegalArgumentException("Enter the amount as a positive number.");Account a=new Account(name,date,liability?-value:value);a.type="tracking";a.liability=liability;accounts.add(a);changed();return a;}
     /** A value update: a cleared transaction (no category) that brings [a]'s balance on [today] (its date) to [value] (owed, for a debt), or null when it's already there. */
     public Entry valueUpdate(Account a,long value,String today){if(!a.tracking())throw new IllegalArgumentException("Only a tracking account takes value updates.");long difference=(a.liability?-value:value)-balanceOn(a,today);if(difference==0)return null;Entry e=new Entry("Balance update","",a.id,today,difference);e.cleared=true;return e;} // from the balance on that date: later entries still count after it
     public static final String[] FREQUENCIES={"Weekly","Every 2 weeks","Monthly"};

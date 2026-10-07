@@ -12,7 +12,7 @@ final class AccountsScreen extends Ui {
     AccountsScreen(MainActivity main){super(main);}
     void accounts(){
         for(Budget.Account a:main.budget.accounts){if(a.closed||a.tracking())continue;LinearLayout c=card();
-            c.addView(label(a.name+(a.credit()?" · credit card":""),20,main.ink,true));
+            c.addView(heading(a.name+(a.credit()?" · credit card":""),20,main.ink));
             if(a.credit()){long owed=-main.budget.balance(a,false);Budget.Category p=main.budget.paymentCategory(a);
                 long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
                 c.addView(label(owed>0?"Owed "+money(owed):owed<0?"In credit "+money(-owed):"Paid off",28,main.ink,true));
@@ -24,9 +24,9 @@ final class AccountsScreen extends Ui {
             c.addView(button("Reconcile",()->reconcile(a)));c.addView(button("Edit account",()->editAccount(a.id)));}
         // Tracking accounts: off budget, in Net worth only.
         boolean anyTracking=false;for(Budget.Account a:main.budget.accounts){if(a.closed||!a.tracking())continue;
-            if(!anyTracking){main.content.addView(label("Tracking accounts",18,main.blue,true));
+            if(!anyTracking){main.content.addView(heading("Tracking accounts",18,main.blue));
                 main.content.addView(label("Off budget: they count in Net worth only. Update their balance now and then.",13,main.muted,false));}anyTracking=true;
-            LinearLayout c=card();c.addView(label(a.name+(a.liability?" · loan or debt":" · asset"),20,main.ink,true));
+            LinearLayout c=card();c.addView(heading(a.name+(a.liability?" · loan or debt":" · asset"),20,main.ink));
             long balance=main.budget.balance(a,false);
             c.addView(label(a.liability?(balance<0?"Owed "+money(-balance):"Paid off"):money(balance),28,main.ink,true));
             if(a.liability&&(a.rate>0||a.payment>0))c.addView(label(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),13,main.muted,false));
@@ -37,7 +37,7 @@ final class AccountsScreen extends Ui {
         main.content.addView(button("+ Add account",this::addAccount));
         if(main.openAccounts().size()>1)main.content.addView(button("Transfer between accounts",main.forms::transfer));
         boolean anyClosed=false;
-        for(Budget.Account a:main.budget.accounts)if(a.closed){if(!anyClosed)main.content.addView(label("Closed accounts",18,main.blue,true));
+        for(Budget.Account a:main.budget.accounts)if(a.closed){if(!anyClosed)main.content.addView(heading("Closed accounts",18,main.blue));
             anyClosed=true;LinearLayout c=card();c.addView(label(a.name,17,main.muted,true));
             c.addView(label("Closed. Its transactions stay in your history.",13,main.muted,false));
             c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
@@ -134,7 +134,7 @@ final class AccountsScreen extends Ui {
         f.addView(label("Owed "+money(owed)+" at "+rate.stripTrailingZeros().toPlainString()+"% a year, paying "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT)+(a.frequency.equals("Monthly")?"":" (about "+money(monthly)+" a month)")+".",14,main.ink,false));
         Budget.Payoff base=Budget.payoff(owed,rate,monthly,0);f.addView(label(payoffText(base),17,base.finished?main.green:main.red,true));
         f.addView(label("Pay extra each payment",12,main.muted,true));EditText extra=field(f,"Extra ("+code()+")",true);
-        TextView result=label("",15,main.blue,true);f.addView(result);
+        TextView result=label("",15,main.blue,true);result.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);f.addView(result);
         f.addView(label("Interest is worked out monthly on what's owed, rounded to the cent; a weekly or fortnightly payment counts as its monthly average. Your lender's figures may differ a little.",12,main.muted,false));
         onText(extra,()->{long x;try{String t=extra.getText().toString().trim();
                 x=t.isEmpty()?0:Budget.parse(t);}catch(Exception e){result.setText("");return;}if(x<=0){result.setText("");return;}

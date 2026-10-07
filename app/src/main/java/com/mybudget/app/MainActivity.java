@@ -203,6 +203,7 @@ public class MainActivity extends Activity {
     static String tabTitle(String tab){switch(tab){case"Plan":return "Budget";case"Spending":return "Transactions";case"Reflect":return "Reports";default:return tab;}}
     void render(){
         budget.fromPlanner.clear();budget.fromPlanner.addAll(PlannerBills.read(this,budget)); // Planner may have sent a new list meanwhile
+        if(!budget.cached())budget.cache(true); // month maths are kept from screen to screen until a change (commit), which works them out afresh
         root=ui.column();root.setBackgroundColor(canvas);root.setPadding(ui.dp(16),ui.dp(12),ui.dp(16),ui.dp(8));setContentView(root);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(ui.dp(16),i.getSystemWindowInsetTop()+ui.dp(8),ui.dp(16),i.getSystemWindowInsetBottom()+ui.dp(4));return i;});
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
@@ -217,26 +218,29 @@ public class MainActivity extends Activity {
         wordmark.setText(brandName);brand.addView(wordmark);
         TextView tagline=ui.label("Your money. Your plan.",11,muted,false);tagline.setPadding(0,ui.dp(2),0,0);brand.addView(tagline);
         header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        Button overflow=ui.button("\u22ee",()->{});overflow.setContentDescription("More options");overflow.setTextSize(26);overflow.setMinWidth(0);
+        Button overflow=ui.button("\u22ee",()->{});overflow.setContentDescription("More options");overflow.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);overflow.setMinWidth(0);
         overflow.setMinimumWidth(0);overflow.setPadding(0,0,0,0);overflow.setBackground(ui.bg(Color.TRANSPARENT));
-        overflow.setOnClickListener(v->options(v));header.addView(overflow,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));root.addView(header);
-        root.addView(ui.label(tabTitle(tab),28,ink,true));
+        overflow.setOnClickListener(v->options(v));header.addView(overflow,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));LinearLayout top=ui.column();top.addView(header);
+        top.addView(ui.heading(tabTitle(tab),28,ink));
         LinearLayout months=new LinearLayout(this);months.setGravity(Gravity.CENTER_VERTICAL);
-        Button previous=ui.button("\u2039",()->{month=month.minusMonths(1);render();});previous.setTextSize(26);
+        Button previous=ui.button("\u2039",()->{month=month.minusMonths(1);render();});previous.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);
         previous.setContentDescription("Previous month");previous.setBackground(ui.bg(Color.TRANSPARENT));
         months.addView(previous,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));
         TextView title=ui.label(month.format(DateTimeFormatter.ofPattern("MMMM yyyy")),16,ink,true);title.setGravity(Gravity.CENTER);
         months.addView(title,new LinearLayout.LayoutParams(0,-2,1));Button next=ui.button("\u203a",()->{month=month.plusMonths(1);render();});
-        next.setTextSize(26);next.setContentDescription("Next month");next.setBackground(ui.bg(Color.TRANSPARENT));
-        months.addView(next,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));if(!tab.equals("Settings"))root.addView(months);
-        ScrollView scroll=new ScrollView(this);content=ui.column();scroll.addView(content);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        next.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);next.setContentDescription("Next month");next.setBackground(ui.bg(Color.TRANSPARENT));
+        months.addView(next,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));if(!tab.equals("Settings"))top.addView(months);
+        ScrollView scroll=new ScrollView(this);content=ui.column();scroll.addView(content);
+        if(getResources().getConfiguration().fontScale>=1.3f)content.addView(top);else root.addView(top); // large text: the header scrolls away with the screen, leaving room for it
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         switch(tab){case"Settings":settingsScreen.settings();break;case"Home":homeScreen.home();break;case"Plan":budgetScreen.plan();break;case"Spending":transactionsScreen.spending();break;case"Accounts":accountsScreen.accounts();break;default:reportsScreen.reflect();}
         addUndoBar(); // a delete's Undo, above the tabs (gone on another tab)
         if(tab.equals("Settings")){root.addView(ui.button("Back",this::closeSettings));return;}
         LinearLayout nav=new LinearLayout(this);nav.setPadding(0,ui.dp(6),0,0);String[] names={"Home","Plan","Spending","Accounts","Reflect"};
         int[] icons={R.drawable.nav_home,R.drawable.nav_plan,R.drawable.nav_spending,R.drawable.nav_accounts,R.drawable.nav_reflect};
         for(int i=0;i<names.length;i++){String name=names[i];boolean selected=tab.equals(name);
-            Button b=ui.button(tabTitle(name),()->{tab=name;accountFilter="";render();});b.setTextSize(10);
+            Button b=ui.button(tabTitle(name),()->{tab=name;accountFilter="";render();});b.setTextSize(10);b.setMaxLines(1);
+            b.setAutoSizeTextTypeUniformWithConfiguration(ui.dp(7),Math.max(ui.dp(8),Math.round(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP,10,getResources().getDisplayMetrics()))),1,android.util.TypedValue.COMPLEX_UNIT_PX); // large text shrinks to fit the tab
             b.setPadding(ui.dp(2),ui.dp(7),ui.dp(2),ui.dp(5));b.setBackground(ui.bg(selected?primary:Color.TRANSPARENT));
             b.setTextColor(selected?Color.WHITE:muted);b.setSelected(selected);b.setContentDescription(tabTitle(name)+(selected?", selected":""));
             if(selected)b.setTypeface(null,Typeface.BOLD);Drawable icon=getDrawable(icons[i]).mutate();icon.setTint(selected?Color.WHITE:muted);
@@ -258,11 +262,18 @@ public class MainActivity extends Activity {
         // is saved over the new data; the change is made again on what is there now.
         if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();
             throw new IllegalArgumentException("MyBudget changed meanwhile (an expense from Planner came in). Make your change again.");}
-        Budget before;try{before=BudgetStore.decode(BudgetStore.encode(budget));
-            before.fromPlanner.addAll(budget.fromPlanner);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}
-        try{action.run();String raw=BudgetStore.encode(budget);
+        // What a failed change puts back: the saved data, which the budget matches between changes (read again only then: reading
+        // years of transactions takes a while), or a copy while nothing is saved yet (the starter categories).
+        String saved=loaded;Budget copy=null;
+        if(saved==null)try{copy=BudgetStore.decode(BudgetStore.encode(budget));copy.fromPlanner.addAll(budget.fromPlanner);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}
+        // Month maths stay cached during [action]: Budget's own changes (assign, move, enter, deleting...) clear them; an action that
+        // changes fields or lists straight and then reads month maths must call budget.changed() in between. Fresh again after.
+        budget.cache(true);
+        try{action.run();budget.changed();String raw=BudgetStore.encode(budget);
             if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");loaded=raw;BudgetWidget.refresh(this);}
-        catch(Exception e){budget=before;throw new IllegalArgumentException(e.getMessage()==null?"Check your entry.":e.getMessage());}
+        catch(Exception e){Budget back=copy;
+            if(back==null)try{back=BudgetStore.decode(saved);back.fromPlanner.addAll(budget.fromPlanner);}catch(Exception x){storageReadable=false;throw new IllegalStateException("Your budget couldn't be saved or put back. Close MyBudget and open it again.");}
+            budget=back;throw new IllegalArgumentException(e.getMessage()==null?"Check your entry.":e.getMessage());}
         undoBefore=null; // another change: a delete's Undo is gone
     }
     /** Home's backup reminder: an account, and no backup for 14 days (or never), unless snoozed for the week (DataSafety). */
@@ -273,7 +284,7 @@ public class MainActivity extends Activity {
     String undoBefore,undoAfter,undoText,undoTab;private long undoUntil;private int undoShown;private View undoBar;
     /** A delete, as change(), then the Undo bar ([done]: "Transaction deleted"). */
     boolean deleteWithUndo(String done,Runnable action){String[] before={null};
-        try{commit(()->{try{before[0]=BudgetStore.encode(budget);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}action.run();});}
+        try{commit(()->{try{before[0]=loaded!=null?loaded:BudgetStore.encode(budget);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}action.run();});} // the budget matches the saved data until the change
         catch(Exception e){ui.toast(e.getMessage());return false;}
         undoBefore=before[0];undoAfter=loaded;undoText=done;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+8000;render();
         root.announceForAccessibility(done+". Undo is available for a few seconds.");return true;}

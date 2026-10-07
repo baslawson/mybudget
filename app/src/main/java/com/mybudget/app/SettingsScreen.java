@@ -14,17 +14,17 @@ final class SettingsScreen extends Ui {
     SettingsScreen(MainActivity main){super(main);}
     boolean showBackup; // open scrolled to Backup (Home's backup reminder)
     void settings(){
-        main.content.addView(label("Appearance",18,main.blue,true));LinearLayout appearance=card();
-        appearance.addView(label("Theme",20,main.ink,true));
+        main.content.addView(heading("Appearance",18,main.blue));LinearLayout appearance=card();
+        appearance.addView(heading("Theme",20,main.ink));
         appearance.addView(label("Choose Light, Dark, or follow your device automatically.",14,main.muted,false));
         appearance.addView(button("Theme: "+main.themeMode,this::chooseTheme));
         // The budget's one currency (Budget.currency): how money is shown, and which of Planner's bills come in.
-        LinearLayout money=card();money.addView(label("Currency",20,main.ink,true));
+        LinearLayout money=card();money.addView(heading("Currency",20,main.ink));
         money.addView(label("Amounts are shown in this currency, in your phone's number style. Planner's bills are added only when they're in it.",14,main.muted,false));
         money.addView(button("Currency: "+code(),this::chooseCurrency));
-        TextView backupTitle=label("Backup",18,main.blue,true);main.content.addView(backupTitle);LinearLayout backup=card();
+        TextView backupTitle=heading("Backup",18,main.blue);main.content.addView(backupTitle);LinearLayout backup=card();
         if(showBackup){showBackup=false;main.content.post(()->((ScrollView)main.content.getParent()).smoothScrollTo(0,backupTitle.getTop()));} // from Home's backup reminder
-        backup.addView(label("Back up and restore",20,main.ink,true));
+        backup.addView(heading("Back up and restore",20,main.ink));
         backup.addView(label("Your budget is saved only on this device. Save a backup file somewhere safe, such as Drive or a computer, to restore it after a reinstall or on a new phone.",14,main.muted,false));
         String lastBackup=AutoBackup.lastBackup(main);backup.addView(label(lastBackup==null?"No backup yet":"Last backup: "+pretty(lastBackup),14,lastBackup==null?main.amber:main.ink,true));
         backup.addView(button("Back up budget",()->main.pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json")
@@ -36,7 +36,7 @@ final class SettingsScreen extends Ui {
         int photos=main.photoCount();
         if(photos>0)backup.addView(label(count(photos,"photo stays","photos stay")+" on this phone: backups hold the budget, not photos.",13,main.muted,false));
         // Automatic backup to a folder picked once (Drive's folder works too, through the system picker).
-        LinearLayout auto=card();auto.addView(label("Automatic backup",20,main.ink,true));String tree=main.prefs().getString("auto_backup_tree",null);
+        LinearLayout auto=card();auto.addView(heading("Automatic backup",20,main.ink));String tree=main.prefs().getString("auto_backup_tree",null);
         if(tree==null){auto.addView(label("Once a day, MyBudget can save a backup to a folder you choose, keeping the last 7.",14,main.muted,false));
             auto.addView(button("Choose a folder and turn on",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
                 try{main.startActivityForResult(i,MainActivity.AUTO);}catch(android.content.ActivityNotFoundException e){toast("No app on this device can choose a folder.");}}));}
@@ -49,20 +49,20 @@ final class SettingsScreen extends Ui {
             auto.addView(button("Turn off",()->{try{main.getContentResolver().releasePersistableUriPermission(Uri.parse(tree),Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception ignored){}
                 main.prefs().edit().remove("auto_backup_tree").remove("auto_backup_last").remove("auto_backup_error").apply();
                 AutoBackup.schedule(main);main.render();toast("Automatic backup is off. Backups already saved stay in the folder.");}));}
-        main.content.addView(label("Import",18,main.blue,true));LinearLayout imports=card();
-        imports.addView(label("Import a bank statement",20,main.ink,true));
+        main.content.addView(heading("Import",18,main.blue));LinearLayout imports=card();
+        imports.addView(heading("Import a bank statement",20,main.ink));
         imports.addView(label("Pick a CSV from your bank and match its columns once. Rows already in the account are skipped; new payees go to "+CsvImport.TO_CATEGORIZE+" until you choose their category.",14,main.muted,false));
         imports.addView(button("Import transactions (CSV)",()->main.pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),MainActivity.IMPORT)));
-        LinearLayout export=card();export.addView(label("Export transactions",20,main.ink,true));
+        LinearLayout export=card();export.addView(heading("Export transactions",20,main.ink));
         export.addView(label("A CSV file of every transaction for a spreadsheet. It can't be restored; use a backup for that.",14,main.muted,false));
         export.addView(button("Export transactions (CSV)",()->main.pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("text/csv")
             .putExtra(Intent.EXTRA_TITLE,"MyBudget-transactions-"+LocalDate.now()+".csv"),MainActivity.EXPORT)));
-        main.content.addView(label("Transactions",18,main.blue,true));LinearLayout flags=card();flags.addView(label("Flags",20,main.ink,true));
+        main.content.addView(heading("Transactions",18,main.blue));LinearLayout flags=card();flags.addView(heading("Flags",20,main.ink));
         StringBuilder named=new StringBuilder();
         for(int i=1;i<Budget.FLAGS.length;i++)if(!main.budget.flagNames[i].isEmpty())named.append(named.length()>0?", ":"").append(main.budget.flagLabel(i));
         flags.addView(label("Mark transactions with a coloured flag and filter by it. Give a colour a name once, such as green for Tax."+(named.length()>0?" Named: "+named+".":""),14,main.muted,false));
         flags.addView(button("Name your flags",this::nameFlags));
-        LinearLayout payees=card();payees.addView(label("Payees",20,main.ink,true));
+        LinearLayout payees=card();payees.addView(heading("Payees",20,main.ink));
         payees.addView(label("Rename or merge payees, hide old ones from suggestions, and set import rules that rename statement payees and choose their category.",14,main.muted,false));
         payees.addView(button("Payees and import rules",this::payees));
     }
@@ -70,7 +70,7 @@ final class SettingsScreen extends Ui {
         LinearLayout f=form();
         f.addView(label("An optional name for each colour, shown wherever the flag is. Leave it empty for just the colour.",13,main.muted,false));
         EditText[] names=new EditText[Budget.FLAGS.length];
-        for(int i=1;i<names.length;i++){TextView colour=label("● "+Budget.FLAGS[i],13,FLAG_COLORS[i],true);f.addView(colour);
+        for(int i=1;i<names.length;i++){TextView colour=label("● "+Budget.FLAGS[i],13,FLAG_COLORS[i],true);colour.setContentDescription(Budget.FLAGS[i]+" flag");f.addView(colour);
             names[i]=field(f,Budget.FLAGS[i]+" means… (optional)",false);names[i].setText(main.budget.flagNames[i]);
             names[i].setFilters(new InputFilter[]{new InputFilter.LengthFilter(30)});}
         dialog("Flag names",f,()->{for(int i=1;i<names.length;i++)main.budget.flagNames[i]=names[i].getText().toString().trim();});

@@ -29,6 +29,16 @@ class Ui {
     LinearLayout column(){LinearLayout v=new LinearLayout(main);v.setOrientation(LinearLayout.VERTICAL);return v;}
     TextView label(String text,int size,int color,boolean bold){TextView v=new TextView(main);v.setText(text);v.setTextSize(size);
         v.setTextColor(color);v.setPadding(0,dp(4),0,dp(4));if(bold)v.setTypeface(null,Typeface.BOLD);return v;}
+    /** A section or card title: a label TalkBack lists as a heading (Android 9+). */
+    TextView heading(String text,int size,int color){TextView v=label(text,size,color,true);heading(v);return v;}
+    static void heading(View v){if(android.os.Build.VERSION.SDK_INT>=28)v.setAccessibilityHeading(true);}
+    /** [label] names [field] for TalkBack ("Amount (AUD), edit box"), when the field's hint isn't its name. */
+    static void names(TextView label,View field){if(field.getId()==View.NO_ID)field.setId(View.generateViewId());label.setLabelFor(field.getId());}
+    // TalkBack says how an amount box takes sums, after its name.
+    static void sumsHint(EditText e){sumsHint(e,null);}
+    /** [name]: what TalkBack calls the box when its hint is only an example ("0.00"); null: its hint. */
+    static void sumsHint(EditText e,String name){e.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){
+        super.onInitializeAccessibilityNodeInfo(v,info);CharSequence hint=name!=null?name:((EditText)v).getHint();info.setHintText((hint==null?"":hint+". ")+"Takes a sum too, such as 45 + 12.50.");}});}
     GradientDrawable bg(int color){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(16));return d;}
     LinearLayout card(){LinearLayout v=column();v.setPadding(dp(14),dp(10),dp(14),dp(10));v.setBackground(bg(main.surface));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));main.content.addView(v,p);return v;}
@@ -40,6 +50,7 @@ class Ui {
     void progress(LinearLayout parent,long funded,long goal,int color){ProgressBar bar=new ProgressBar(main,null,android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);bar.setProgress((int)Math.max(0,Math.min(100,funded*100/Math.max(1,goal))));
         bar.setProgressTintList(ColorStateList.valueOf(color));bar.setProgressBackgroundTintList(ColorStateList.valueOf(main.buttonSurface));
+        bar.setContentDescription("Target progress: "+money(Math.max(0,funded))+" of "+money(goal)+", "+bar.getProgress()+"%");
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(6));p.setMargins(0,dp(5),0,dp(5));parent.addView(bar,p);}
     static String ordinal(int d){return d+(d%100>=11&&d%100<=13?"th":d%10==1?"st":d%10==2?"nd":d%10==3?"rd":"th");}
     static String dayName(int weekday){return DayOfWeek.of(weekday).getDisplayName(java.time.format.TextStyle.FULL,Locale.forLanguageTag("en-AU"));}
@@ -47,10 +58,10 @@ class Ui {
     // Amount boxes take quick maths ("45+12.50", see Budget.evaluate): the phone keypad has digits, . + - * / and brackets.
     static final int AMOUNT_INPUT=InputType.TYPE_CLASS_PHONE;
     EditText field(LinearLayout f,String hint,boolean numeric){EditText e=new EditText(main);e.setHint(hint);e.setSingleLine(true);
-        e.setTextColor(main.ink);if(numeric)e.setInputType(AMOUNT_INPUT);f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
+        e.setTextColor(main.ink);if(numeric){e.setInputType(AMOUNT_INPUT);sumsHint(e);}f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
     AutoCompleteTextView suggestField(LinearLayout f,String hint,java.util.function.Supplier<List<String>> options){AutoCompleteTextView e=Suggest.box(main,f,hint,options);
         e.setTextColor(main.ink);return e;}
-    Spinner spinner(LinearLayout f,String title,String[] names,int selection){f.addView(label(title,12,main.muted,true));Spinner s=new Spinner(main);
+    Spinner spinner(LinearLayout f,String title,String[] names,int selection){TextView t=label(title,12,main.muted,true);f.addView(t);Spinner s=new Spinner(main);names(t,s);
         s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));
         if(names.length>0)s.setSelection(Math.max(0,selection));f.addView(s);return s;}
     String required(EditText e){String s=e.getText().toString().trim();
@@ -74,6 +85,8 @@ class Ui {
     }
     void onText(EditText e,Runnable changed){e.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){changed.run();}public void afterTextChanged(Editable x){}});}
     void toast(String s){Toast.makeText(main,s,Toast.LENGTH_LONG).show();}
+    /** Large text: a dialog's three buttons stack and the last is cut off, so a third action goes into the form as a button. */
+    boolean large(){return main.getResources().getConfiguration().fontScale>=1.3f;}
     void dialog(String title,LinearLayout f,Runnable action){
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
             .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();

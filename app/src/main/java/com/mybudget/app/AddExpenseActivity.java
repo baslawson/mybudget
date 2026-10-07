@@ -18,7 +18,7 @@ import java.util.*;
  */
 public class AddExpenseActivity extends Activity {
     public static final String ACTION_ADD="com.mybudget.app.action.ADD_EXPENSE",ACTION_UNDONE="com.mybudget.app.action.PAYMENT_UNDONE";
-    private Budget budget;
+    private Budget budget;private String read; // the saved data [budget] matches (reading years of transactions again takes a while)
     AlertDialog dialog; // package-private for BudgetInstrumentation
     @Override public void onCreate(Bundle state){
         String themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");
@@ -27,7 +27,7 @@ public class AddExpenseActivity extends Activity {
         super.onCreate(state);
         setResult(RESULT_CANCELED);
         String raw=getSharedPreferences("budget",0).getString("data",null);
-        try{budget=raw==null?new Budget():BudgetStore.decode(raw);}catch(Exception e){fail("MyBudget couldn't read its saved budget. Open MyBudget to check it.");return;}
+        try{budget=raw==null?new Budget():BudgetStore.decode(raw);budget.cache(true);read=raw;}catch(Exception e){fail("MyBudget couldn't read its saved budget. Open MyBudget to check it.");return;}
         Intent intent=getIntent();String id=text(intent,"paymentId",100);
         if(id.isEmpty()){fail("MyBudget couldn't read this payment.");return;}
         if(ACTION_UNDONE.equals(intent.getAction()))undone(id);else if(ACTION_ADD.equals(intent.getAction()))add(intent,id);else finish();
@@ -37,9 +37,10 @@ public class AddExpenseActivity extends Activity {
     private void fail(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();finish();}
     private void done(String summary){setResult(RESULT_OK,new Intent().putExtra("summary",summary));finish();}
     private String sender(){ComponentName from=getCallingActivity();if(from==null)return "another app";try{return getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(from.getPackageName(),0)).toString();}catch(Exception e){return "another app";}}
-    private boolean save(){try{String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())return false;BudgetWidget.refresh(this);return true;}catch(Exception e){return false;}} // the widget shows the new money
+    private boolean save(){budget.changed();try{String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())return false;read=raw;BudgetWidget.refresh(this);return true;}catch(Exception e){return false;}} // the widget shows the new money
     // The budget as saved now: MyBudget may have saved changes while this dialog was open, and saving the copy read at the start would drop them.
-    private void reload(){String raw=getSharedPreferences("budget",0).getString("data",null);try{budget=raw==null?new Budget():BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("MyBudget couldn't read its saved budget. Open MyBudget to check it.");}}
+    private void reload(){String raw=getSharedPreferences("budget",0).getString("data",null);if(raw!=null&&raw.equals(read))return; // unchanged since read
+        try{budget=raw==null?new Budget():BudgetStore.decode(raw);read=raw;}catch(Exception e){throw new IllegalStateException("MyBudget couldn't read its saved budget. Open MyBudget to check it.");}}
     private TextView label(LinearLayout f,String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setPadding(0,dp(6),0,dp(2));f.addView(v);return v;}
     private EditText field(LinearLayout f,String hint,String value,int type){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);e.setInputType(type);f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
     // A date shown as "7 Oct 2026" that opens the date picker (up to today); the ISO date is kept in its tag.
@@ -70,16 +71,16 @@ public class AddExpenseActivity extends Activity {
         if(last!=null&&YearMonth.from(LocalDate.parse(last.date)).equals(YearMonth.from(LocalDate.parse(date))))
             label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+Ui.pretty(last.date)+". Save only if this is another payment.",13);
         // Payees used before are suggested (as in MyBudget's own form).
-        label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);
-        label(f,"Amount ("+budget.currency+")",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
+        TextView payeeLabel=label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);Ui.names(payeeLabel,payeeField);
+        TextView amountLabel=label(f,"Amount ("+budget.currency+")",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22);Ui.names(amountLabel,amountField);Ui.sumsHint(amountField,"Amount"); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
-        label(f,"Category",12);Spinner category=new Spinner(this);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
+        TextView categoryLabel=label(f,"Category",12);Spinner category=new Spinner(this);Ui.names(categoryLabel,category);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
         // Picking a known payee chooses its category from last time, unless a category is already chosen.
         payeeField.setOnItemClickListener((p,v,position,rowId)->{Budget.Entry before=budget.lastForPayee(payeeField.getText().toString());if(before==null||before.split()||category.getSelectedItemPosition()!=0)return;int i=categories.indexOf(budget.category(before.category));if(i>=0)category.setSelection(i+1);});
         if(suggested!=null)label(f,last!=null?"Suggested from last time for this bill.":"The category you planned this bill from.",12);
-        label(f,"Account",12);Spinner account=new Spinner(this);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
+        TextView accountLabel=label(f,"Account",12);Spinner account=new Spinner(this);Ui.names(accountLabel,account);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
         if(!note.isEmpty())label(f,"Note: "+note,12);
         ScrollView scroll=new ScrollView(this);scroll.addView(f);
         dialog=new AlertDialog.Builder(this).setTitle("Add expense").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();

@@ -37,7 +37,7 @@ final class TransactionForms extends Ui {
         TextView guidance=label("",12,main.muted,false);f.addView(guidance);
         // Payees used before are suggested; picking one on a new transaction fills in the category it had last time.
         AutoCompleteTextView payee=suggestField(f,"Payee",()->main.budget.payees());
-        f.addView(label("Amount ("+code()+")",12,main.muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);
+        TextView amountLabel=label("Amount ("+code()+")",12,main.muted,true);f.addView(amountLabel);EditText amount=field(f,"0.00",true);amount.setTextSize(24);names(amountLabel,amount);sumsHint(amount,"Amount");
         f.addView(label("Date",12,main.muted,true));
         EditText day=dateField(f,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);
         Spinner account=spinner(f,"Account",accounts.stream().map(a->a.name).toArray(String[]::new),keepAccount==null?0:accounts.indexOf(main.budget.account(keepAccount)));
@@ -147,7 +147,7 @@ final class TransactionForms extends Ui {
             s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));
             int i=category==null?0:category.isEmpty()?categories.size():Math.max(0,categories.indexOf(main.budget.category(category)));
             s.setSelection(i);row.addView(s,new LinearLayout.LayoutParams(0,-2,1));
-            EditText a=new EditText(main);a.setHint("0.00");a.setTextColor(main.ink);a.setSingleLine(true);a.setInputType(AMOUNT_INPUT);
+            EditText a=new EditText(main);a.setHint("0.00");a.setTextColor(main.ink);a.setSingleLine(true);a.setInputType(AMOUNT_INPUT);sumsHint(a,"Amount of this part");s.setContentDescription("Category of this part");
             if(cents!=null&&cents>0)a.setText(decimal(cents));onText(a,total2);a.setOnFocusChangeListener((v,has)->{if(has)current[0]=a;});
             row.addView(a,new LinearLayout.LayoutParams(dp(110),-2));
             Button x=button("✕",()->{});x.setContentDescription("Remove this part");x.setBackground(bg(Color.TRANSPARENT));
@@ -172,10 +172,11 @@ final class TransactionForms extends Ui {
             into.setText(decimal(left));});
         helpers.addView(even,new LinearLayout.LayoutParams(0,-2,1));LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(0,-2,1);
         fp.setMargins(dp(8),0,0,0);helpers.addView(fill,fp);f.addView(helpers);
-        f.addView(sum);total2.run();
+        f.addView(sum);total2.run();AlertDialog[] shown={null};
+        if(large()&&!parts.isEmpty())f.addView(button("Remove split",()->{parts.clear();done.run();shown[0].dismiss();}));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Split").setView(scroll)
             .setNegativeButton("Cancel",null).setPositiveButton("Done",null)
-            .setNeutralButton(parts.isEmpty()?null:"Remove split",(x,w)->{parts.clear();done.run();}).create();
+            .setNeutralButton(parts.isEmpty()||large()?null:"Remove split",(x,w)->{parts.clear();done.run();}).create();shown[0]=d;
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
             List<Budget.Split> result=new ArrayList<>();
             for(int i=0;i<cats.size();i++){long cents;

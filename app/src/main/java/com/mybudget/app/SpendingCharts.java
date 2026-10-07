@@ -49,5 +49,18 @@ final class SpendingCharts {
             return true;
         }
         @Override public boolean performClick(){return super.performClick();}
-    }
+        // TalkBack: the description (set by Reports) reads every month's amounts; scrolling forward or back (or the arrow keys)
+        // picks the next or previous month, as a tap does, and says its amounts ([spoken]).
+        private String[] spoken;
+        void spoken(String[] spoken){this.spoken=spoken;}
+        @Override public void onInitializeAccessibilityNodeInfo(android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(info);
+            if(selected>0)info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD);
+            if(selected<months.length-1)info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD);}
+        @Override public boolean performAccessibilityAction(int action,android.os.Bundle args){
+            if(action==android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)return pick(selected+1);
+            if(action==android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)return pick(selected-1);return super.performAccessibilityAction(action,args);}
+        @Override public boolean onKeyDown(int code,android.view.KeyEvent e){
+            if(code==android.view.KeyEvent.KEYCODE_DPAD_RIGHT&&pick(selected+1)||code==android.view.KeyEvent.KEYCODE_DPAD_LEFT&&pick(selected-1))return true;return super.onKeyDown(code,e);}
+        private boolean pick(int i){if(i<0||i>=months.length)return false;selected=i;onSelect.accept(i);invalidate();if(spoken!=null)announceForAccessibility(spoken[i]);return true;}
+        }
 }

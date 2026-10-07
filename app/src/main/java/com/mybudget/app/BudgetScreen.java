@@ -57,12 +57,14 @@ final class BudgetScreen extends Ui {
         long available=main.budget.available(c,main.month),need=main.budget.needed(c,main.month),cover=main.budget.toCover(c,main.month);
         int status=cover>0?main.red:need>0||available<0?main.amber:main.green;
         LinearLayout heading=new LinearLayout(main);heading.setGravity(Gravity.CENTER_VERTICAL);TextView name=label(c.name,16,main.ink,true);
-        name.setPadding(0,0,dp(8),0);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));LinearLayout balance=column();
+        name.setPadding(0,0,dp(8),0);boolean large=main.getResources().getConfiguration().fontScale>=1.3f; // large text: the name on its own line, Available under it
+        if(large)heading.setOrientation(LinearLayout.VERTICAL);heading.addView(name,large?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));LinearLayout balance=column();
         TextView caption=label("Available",10,main.muted,false);caption.setGravity(Gravity.END);caption.setPadding(0,0,0,0);balance.addView(caption);
         TextView value=label(money(available),20,status,true);value.setGravity(Gravity.END);value.setPadding(0,0,0,0);
         value.setAutoSizeTextTypeUniformWithConfiguration(12,20,1,android.util.TypedValue.COMPLEX_UNIT_SP);
-        balance.addView(value,new LinearLayout.LayoutParams(-1,dp(27)));
-        heading.addView(balance,new LinearLayout.LayoutParams(dp(128),-2));row.addView(heading);
+        float scale=Math.max(1f,Math.min(1.6f,main.getResources().getConfiguration().fontScale)); // large text: room for the whole amount
+        balance.addView(value,new LinearLayout.LayoutParams(-1,Math.round(dp(27)*scale)));
+        heading.addView(balance,new LinearLayout.LayoutParams(large?-1:Math.round(dp(128)*scale),-2));row.addView(heading);
         LinearLayout details=new LinearLayout(main);
         TextView assigned=label("Assigned  "+money(main.budget.assigned(c,main.month)),11,main.muted,false),activity=label("Activity  "+money(main.budget.activity(c,main.month)),11,main.muted,false);
         details.addView(assigned,new LinearLayout.LayoutParams(0,-2,1));activity.setGravity(Gravity.END);
@@ -100,7 +102,7 @@ final class BudgetScreen extends Ui {
         if(overspent()>0)main.content.addView(label(count(overspent(),"category","categories")+" overspent - tap to cover",14,main.red,true));
         main.content.addView(button("Fund targets",this::autoAssign));LinkedHashSet<String> groups=new LinkedHashSet<>();
         for(Budget.Category c:main.budget.categories)if(!c.hidden)groups.add(c.group);
-        for(String group:groups){main.content.addView(label(group,18,main.blue,true));
+        for(String group:groups){main.content.addView(heading(group,18,main.blue));
             for(Budget.Category c:main.budget.categories)if(!c.hidden&&c.group.equals(group))categoryCard(c);}
         main.content.addView(button("+ Add category",()->editCategory(null)));main.content.addView(button("Move money",this::move));
         List<Budget.Category> hidden=new ArrayList<>();long held=0;for(Budget.Category c:main.budget.categories)if(c.hidden){hidden.add(c);
@@ -113,7 +115,7 @@ final class BudgetScreen extends Ui {
         String note=main.budget.monthNote(main.month);LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(note.isEmpty()?new View(main):label(note,13,main.ink,false),new LinearLayout.LayoutParams(0,-2,1));
         Button edit=button(note.isEmpty()?"+ Note for "+main.month.format(DateTimeFormatter.ofPattern("MMMM")):"Edit",this::editMonthNote);
-        edit.setTextSize(12);edit.setMinHeight(dp(40));edit.setMinimumHeight(dp(40));edit.setBackground(bg(Color.TRANSPARENT));
+        edit.setTextSize(12);edit.setBackground(bg(Color.TRANSPARENT));
         edit.setContentDescription(note.isEmpty()?"Add a note for this month":"Edit this month's note");
         row.addView(edit,new LinearLayout.LayoutParams(-2,-2));main.content.addView(row);
     }
@@ -198,7 +200,7 @@ final class BudgetScreen extends Ui {
         long reset=main.budget.resetChange(c,main.month);
         if(reset!=0){names.add(reset==-now?"Reset assigned to zero":"Reset assigned: return what's left, "+money(-reset));changes.add(reset);}
         for(int i=0;i<names.size();i++){long change=changes.get(i);Button b=button(names.get(i),()->amount.setText(decimal(change)));
-            b.setTextSize(12);b.setMinHeight(dp(40));b.setMinimumHeight(dp(40));f.addView(b);}
+            b.setTextSize(12);f.addView(b);}
         dialog("Assign to "+c.name,f,()->main.budget.assign(main.categoryById(c.id),main.month,Budget.parse(amount.getText().toString())));
     }
     private String[] availableNames(){return main.budget.categories.stream().map(c->c.name+" ("+money(main.budget.available(c,main.month))+")").toArray(String[]::new);}

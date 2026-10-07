@@ -10,12 +10,12 @@ final class HomeScreen extends Ui {
     HomeScreen(MainActivity main){super(main);}
     void home(){
         main.budgetScreen.readyCard();main.content.addView(button("+ Add transaction",()->main.forms.transaction(null)));
-        if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(label("Start with the money you have",21,main.ink,true));
+        if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(heading("Start with the money you have",21,main.ink));
             c.addView(label("Add your bank, savings or cash account and its current balance. Then assign that money in your plan.",15,main.muted,false));
             if(main.budget.brandNew())c.addView(button("Set up my budget",this::setup)); // never for a budget in use
             c.addView(button("Add your first account",main.accountsScreen::addAccount));}
         // Needs attention: each alert opens where it's dealt with.
-        main.content.addView(label("Needs attention",20,main.ink,true));int alerts=0;
+        main.content.addView(heading("Needs attention",20,main.ink));int alerts=0;
         for(Budget.Category c:main.budget.categories){long cover=main.budget.toCover(c,main.month);if(cover<=0)continue;alerts++;String id=c.id;
             LinearLayout a=alert(c.name+" is overspent by "+money(cover),main.red,"Cover it with money from another category or To budget.",()->main.budgetScreen.categoryDetails(main.budget.category(id)));
             a.addView(button("Cover",()->main.budgetScreen.cover(id)));}
@@ -41,11 +41,11 @@ final class HomeScreen extends Ui {
             a.addView(button("Remind me in a week",()->{main.prefs().edit().putString("backup_reminder_until",DataSafety.snoozeUntil(LocalDate.now())).apply();main.render();}));}
         if(alerts==0)main.content.addView(label("All set: nothing needs your attention.",15,main.green,true));
         long need=0;for(Budget.Category c:main.budget.categories)if(!c.hidden)need+=main.budget.fundNeed(c,main.month);
-        LinearLayout progress=card();progress.addView(label("Your funding progress",19,main.ink,true));
+        LinearLayout progress=card();progress.addView(heading("Your funding progress",19,main.ink));
         progress.addView(label(money(need)+" still needed this month",16,need>0?main.amber:main.green,true));
         progress.addView(label("Targets tell you what to fund. They do not create money.",14,main.muted,false));
         // Priority categories: the ones pinned from their menu in Budget.
-        main.content.addView(label("Priority categories",20,main.ink,true));List<Budget.Category> pinned=main.budget.pinned();
+        main.content.addView(heading("Priority categories",20,main.ink));List<Budget.Category> pinned=main.budget.pinned();
         for(Budget.Category c:pinned)main.budgetScreen.categoryCard(c);
         if(pinned.isEmpty())main.content.addView(label("Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.",14,main.muted,false));
     }
@@ -89,11 +89,12 @@ final class HomeScreen extends Ui {
     }
     /** A setup step: [next] saves [save] (through commit) and goes on to [then]; Skip goes on without saving; Cancel stops. */
     private void step(String title,LinearLayout f,String next,Runnable save,Runnable then){
+        AlertDialog[] shown={null};if(large())f.addView(button("Skip this step",()->{shown[0].dismiss();then.run();}));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
-            .setNegativeButton("Cancel",null).setNeutralButton("Skip",null).setPositiveButton(next,null).create();
+            .setNegativeButton("Cancel",null).setNeutralButton(large()?null:"Skip",null).setPositiveButton(next,null).create();shown[0]=d;
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
         d.setOnShowListener(v->{d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(save);main.render();}catch(Exception e){toast(e.getMessage());return;}d.dismiss();then.run();});
-            d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(w->{d.dismiss();then.run();});});d.show();
+            if(!large())d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(w->{d.dismiss();then.run();});});d.show();
     }
     /** A Home alert: a card with a coloured title and a line of detail; tapping it opens where it's dealt with. */
     private LinearLayout alert(String title,int color,String detail,Runnable open){LinearLayout c=card();c.addView(label(title,16,color,true));

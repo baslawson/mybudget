@@ -15,7 +15,7 @@ final class TransactionsScreen extends Ui {
     private void upcomingList(){
         if(main.budget.scheduled.isEmpty())return;List<Budget.Scheduled> list=new ArrayList<>(main.budget.scheduled);
         list.sort(Comparator.comparing(s->s.next));
-        main.content.addView(label("Upcoming",18,main.blue,true));
+        main.content.addView(heading("Upcoming",18,main.blue));
         for(Budget.Scheduled s:list){if(!main.accountFilter.isEmpty()&&!s.account.equals(main.accountFilter))continue;
             boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=main.budget.category(s.category);
             Budget.Account a=main.budget.account(s.account);
@@ -30,7 +30,7 @@ final class TransactionsScreen extends Ui {
         if(!main.accountFilter.isEmpty())return;
         if(PlannerBills.stale(main)&&!main.prefs().getString("planner_bills","[]").equals("[]")){main.content.addView(label("Planner's upcoming bills are from "+when(main.prefs().getString("planner_bills_at",""))+", so they aren't planned for. Open Planner to send them again.",12,main.muted,false));return;}
         if(main.budget.fromPlanner.isEmpty())return;
-        main.content.addView(label("Coming up in Planner",18,main.blue,true));
+        main.content.addView(heading("Coming up in Planner",18,main.blue));
         String at=main.prefs().getString("planner_bills_at",null);
         main.content.addView(label("Sent by Planner"+(at==null?"":" on "+when(at))+". They're added here when you mark them paid in Planner.",12,main.muted,false));
         for(Budget.Scheduled s:main.budget.fromPlanner){Budget.Category c=main.budget.category(s.category);LinearLayout row=card();
@@ -94,14 +94,15 @@ final class TransactionsScreen extends Ui {
         for(int i=0;i<choices.length;i++)flags[i+1]=choices[i];
         LinearLayout f=form();
         Spinner account=spinner(f,"Account",accNames,accs.indexOf(main.budget.account(main.accountFilter))+1),category=spinner(f,"Category",catNames,cats.indexOf(main.budget.category(main.categoryFilter))+1),flag=spinner(f,"Flag",flags,main.flagFilter+1),cleared=spinner(f,"Cleared",new String[]{"Cleared or not","Cleared","Uncleared"},main.clearedFilter<0?0:main.clearedFilter==1?1:2);
-        f.addView(label("Dates (without them, the month on screen)",12,main.muted,true));CheckBox useFrom=new CheckBox(main);useFrom.setText("From");
+        f.addView(label("Dates (without them, the month on screen)",12,main.muted,true));CheckBox useFrom=new CheckBox(main);useFrom.setText("From");useFrom.setMinHeight(dp(48));
         useFrom.setChecked(!main.fromFilter.isEmpty());f.addView(useFrom);
         EditText from=dateField(f,main.fromFilter.isEmpty()?main.month.atDay(1).toString():main.fromFilter);
-        CheckBox useTo=new CheckBox(main);useTo.setText("To");useTo.setChecked(!main.toFilter.isEmpty());f.addView(useTo);
+        CheckBox useTo=new CheckBox(main);useTo.setText("To");useTo.setMinHeight(dp(48));useTo.setChecked(!main.toFilter.isEmpty());f.addView(useTo);
         EditText to=dateField(f,main.toFilter.isEmpty()?LocalDate.now().toString():main.toFilter);
+        AlertDialog[] shown={null};if(large())f.addView(button("Clear all filters",()->{shown[0].dismiss();main.clearFilters();main.render();}));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Filter transactions")
-            .setView(scroll).setNegativeButton("Cancel",null).setNeutralButton("Clear all",(x,w)->{main.clearFilters();main.render();})
-            .setPositiveButton("Apply",null).create();
+            .setView(scroll).setNegativeButton("Cancel",null).setNeutralButton(large()?null:"Clear all",(x,w)->{main.clearFilters();main.render();})
+            .setPositiveButton("Apply",null).create();shown[0]=d;
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
             String fromDay=useFrom.isChecked()?(String)from.getTag():"",toDay=useTo.isChecked()?(String)to.getTag():"";
             if(!fromDay.isEmpty()&&!toDay.isEmpty()&&fromDay.compareTo(toDay)>0){toast("The From date is after the To date.");return;}
