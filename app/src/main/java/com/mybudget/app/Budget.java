@@ -22,13 +22,21 @@ public final class Budget {
         public boolean closed; // only at a zero balance; keeps its transactions
         public Account(String name,String date,long opening) { this.name=name;this.date=date;this.opening=opening; }
     }
+    public static final String SPLIT="split";
+    public static final class Split { public String category,memo=""; public long amount; public Split(String category,long amount){this.category=category;this.amount=amount;} }
     public static final class Entry {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
         // Set when another app (Planner) sent this expense: its payment id, and its bill (the same for every month's bill).
         public String externalId="",billKey="";
         public long amount;
         public boolean cleared;
+        // A split (category SPLIT) spreads [amount] over parts, each with a category ("" = Ready to Assign).
+        public final List<Split> splits=new ArrayList<>();
         public Entry(String payee,String category,String account,String date,long amount) {this.payee=payee;this.category=category;this.account=account;this.date=date;this.amount=amount;}
+        public boolean split(){return !splits.isEmpty();}
+        /** The part of this transaction that goes to category [id] ("" = Ready to Assign). */
+        public long amountIn(String id){if(split()){long n=0;for(Split s:splits)if(s.category.equals(id))n+=s.amount;return n;}return category.equals(id)?amount:0;}
+        public boolean touches(String id){if(split()){for(Split s:splits)if(s.category.equals(id))return true;return false;}return category.equals(id);}
         public boolean transfer(){return !destination.isEmpty();}
     }
     /**
@@ -82,8 +90,8 @@ public final class Budget {
     public Category category(String id){for(Category c:categories)if(c.id.equals(id))return c;return null;}
     public Account account(String id){for(Account a:accounts)if(a.id.equals(id))return a;return null;}
     public long assigned(Category c,YearMonth m){return c.assigned.getOrDefault(m.toString(),0L);}
-    public long activity(Category c,YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.category.equals(c.id)&&e.date.startsWith(m.toString()))n+=e.amount;return n;}
-    private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.category.equals(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));return first;}
+    public long activity(Category c,YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn(c.id);return n;}
+    private YearMonth first(Category c,YearMonth until){YearMonth first=until;for(String key:c.assigned.keySet())if(YearMonth.parse(key).isBefore(first))first=YearMonth.parse(key);for(Entry e:entries)if(e.touches(c.id)&&YearMonth.from(LocalDate.parse(e.date)).isBefore(first))first=YearMonth.from(LocalDate.parse(e.date));return first;}
     public long available(Category c,YearMonth month){long n=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1))n=Math.max(0,n)+assigned(c,m)+activity(c,m);return n;}
     public long cash(YearMonth month){String end=month.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(a.date.compareTo(end)<=0)n+=a.opening;for(Entry e:entries)if(!e.transfer()&&e.date.compareTo(end)<=0)n+=e.amount;return n;}
     public long balance(Account a,boolean clearedOnly){long n=a.opening;for(Entry e:entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
@@ -99,8 +107,8 @@ public final class Budget {
         long base=c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1))))+assigned(c,m):available(c,m);
         return Math.max(0,c.target-base);
     }
-    public long spending(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&!e.category.isEmpty()&&e.date.startsWith(m.toString()))n-=e.amount;return n;}
-    public long income(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.category.isEmpty()&&e.date.startsWith(m.toString()))n+=e.amount;return n;}
+    public long spending(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n-=e.amount-e.amountIn("");return n;}
+    public long income(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn("");return n;}
     /** Fund targets' order in [m]: earliest due day or upcoming bill first (neither = end of month), otherwise as in the plan. */
     public List<Category> fundOrder(YearMonth m){List<Category> list=new ArrayList<>(categories);list.sort(Comparator.comparingInt(c->firstDue(c,m)));return list;}
     /** Plan reset: every category's positive Available in [m] goes back to Ready to Assign. Returns the total. */
@@ -130,12 +138,12 @@ public final class Budget {
         if(ages.isEmpty())return -1;double sum=0;List<Double> last=ages.subList(Math.max(0,ages.size()-10),ages.size());for(double a:last)sum+=a;return(int)Math.round(sum/last.size());
     }
     // Categories: delete (moving history to another), reorder within a group.
-    public boolean used(Category c){for(Entry e:entries)if(e.category.equals(c.id))return true;for(Scheduled s:scheduled)if(s.category.equals(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
-    public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.category.equals(c.id))n++;return n;}
+    public boolean used(Category c){for(Entry e:entries)if(e.touches(c.id))return true;for(Scheduled s:scheduled)if(s.category.equals(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
+    public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.touches(c.id))n++;return n;}
     /** Deletes [c]; its transactions and monthly assignments move to [into] (needed when it was used). Cash doesn't change. */
     public void deleteCategory(Category c,Category into){
         if(into==c||(into==null&&used(c)))throw new IllegalArgumentException("Choose another category to take its transactions and money.");
-        if(into!=null){for(Entry e:entries)if(e.category.equals(c.id))e.category=into.id;for(Scheduled s:scheduled)if(s.category.equals(c.id))s.category=into.id;for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
+        if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled)if(s.category.equals(c.id))s.category=into.id;for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
         categories.remove(c);
     }
     /** Swaps [c] with the next category of its group up (-1) or down (+1); false at the end of the group. */
@@ -159,8 +167,11 @@ public final class Budget {
     /** Every transaction as CSV for spreadsheets, newest date first. Export only: a backup is what restores. */
     public String csv(){
         StringBuilder out=new StringBuilder("Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n");List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));
-        for(Entry e:ordered){Category c=category(e.category);Account a=account(e.account),to=account(e.destination);
-            out.append(String.join(",",e.date,cell(e.payee),cell(e.transfer()?"":c==null?"Ready to Assign":c.name),cell(e.transfer()||c==null?"":c.group),cell(a==null?"":a.name),cell(to==null?"":to.name),BigDecimal.valueOf(e.amount,2).toPlainString(),cell(e.memo),e.cleared?"Yes":"No")).append("\r\n");}
+        for(Entry e:ordered){Account a=account(e.account),to=account(e.destination);
+            // A split is one row per part (its note, or the transaction's), so spreadsheet totals by category add up.
+            List<Split> parts=e.split()?e.splits:Collections.singletonList(new Split(e.category,e.amount));
+            for(Split p:parts){Category c=category(p.category);String note=e.split()&&!p.memo.isEmpty()?p.memo:e.memo;
+                out.append(String.join(",",e.date,cell(e.payee),cell(e.transfer()?"":c==null?"Ready to Assign":c.name),cell(e.transfer()||c==null?"":c.group),cell(a==null?"":a.name),cell(to==null?"":to.name),BigDecimal.valueOf(p.amount,2).toPlainString(),cell(note),e.cleared?"Yes":"No")).append("\r\n");}}
         return out.toString();
     }
     // A spreadsheet runs text starting with = + - @ as a formula: a leading ' keeps it text. Quoted when needed.
@@ -170,6 +181,11 @@ public final class Budget {
         if(date.isAfter(LocalDate.now()))throw new IllegalArgumentException("Use today or a past date.");if(e.date.compareTo(a.date)<0)throw new IllegalArgumentException("Transaction date is before this account's opening date.");
         if(e.payee.trim().isEmpty()||e.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");
         if(e.transfer()){Account to=account(e.destination);if(to==null||to==a||e.amount>=0)throw new IllegalArgumentException("Choose a different destination account.");if(e.date.compareTo(to.date)<0)throw new IllegalArgumentException("Date is before the destination account's opening date.");}
+        else if(e.split()||e.category.equals(SPLIT)){
+            if(!e.category.equals(SPLIT)||e.splits.size()<2)throw new IllegalArgumentException("A split needs at least two parts.");long sum=0;
+            for(Split p:e.splits){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");sum+=p.amount;}
+            if(sum!=e.amount)throw new IllegalArgumentException("The parts of the split must add up to the total.");
+        }
         else if(!e.category.isEmpty()&&category(e.category)==null)throw new IllegalArgumentException("Choose a category.");
     }
 }

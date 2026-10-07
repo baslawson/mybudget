@@ -33,8 +33,26 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();
+        csv();batchOne();phaseB();phaseC();phaseD();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseD(){
+        YearMonth jan=YearMonth.of(2025,1);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);Budget.Category food=new Budget.Category("Food"),home=new Budget.Category("Household");b.categories.add(food);b.categories.add(home);
+        b.assign(food,jan,30000);b.assign(home,jan,10000);
+        Budget.Entry shop=new Budget.Entry("Supermarket",Budget.SPLIT,bank.id,"2025-01-05",-9000);shop.splits.add(new Budget.Split(food.id,-7000));shop.splits.add(new Budget.Split(home.id,-2000));b.validate(shop);b.entries.add(shop);
+        equal(b.activity(food,jan),-7000,"Food part");equal(b.activity(home,jan),-2000,"Household part");equal(b.spending(jan),9000,"Split is spending");equal(b.income(jan),0,"Not income");equal(b.cash(jan),91000,"Cash once");equal(b.balance(bank,false),91000,"Account once");
+        // A part to Ready to Assign counts as income (e.g. cash back).
+        Budget.Entry back=new Budget.Entry("Shop with cash back",Budget.SPLIT,bank.id,"2025-01-06",-1000);back.splits.add(new Budget.Split(food.id,-3000));back.splits.add(new Budget.Split("",2000));b.validate(back);b.entries.add(back);
+        equal(b.income(jan),2000,"Ready to Assign part is income");equal(b.spending(jan),12000,"Category part is spending");
+        // Validation.
+        Budget.Entry bad=new Budget.Entry("x",Budget.SPLIT,bank.id,"2025-01-07",-1000);bad.splits.add(new Budget.Split(food.id,-600));bad.splits.add(new Budget.Split(home.id,-300));rejects(()->b.validate(bad));
+        bad.splits.get(1).amount=-400;b.validate(bad);bad.splits.remove(1);bad.splits.get(0).amount=-1000;rejects(()->b.validate(bad));
+        Budget.Entry zero=new Budget.Entry("x",Budget.SPLIT,bank.id,"2025-01-07",-1000);zero.splits.add(new Budget.Split(food.id,-1000));zero.splits.add(new Budget.Split(home.id,0));rejects(()->b.validate(zero));
+        // CSV: one row per part, each with its own category and amount.
+        String csv=b.csv();if(!csv.contains("2025-01-05,Supermarket,Food,Everyday,Bank,,-70.00,,No")||!csv.contains("2025-01-05,Supermarket,Household,Everyday,Bank,,-20.00,,No")||!csv.contains("2025-01-06,Shop with cash back,Ready to Assign,,Bank,,20.00,,No"))throw new AssertionError("Split CSV rows:\n"+csv);
+        // Deleting a category moves split parts too.
+        if(!b.used(home)||b.entriesIn(home)!=1)throw new AssertionError("Split part counts as use");b.deleteCategory(home,food);equal(b.activity(food,jan),-7000-2000-3000,"Parts moved");same(shop.splits.get(1).category,food.id,"Part's category moved");
     }
     static void phaseC(){
         java.time.LocalDate d=java.time.LocalDate.of(2025,1,31);

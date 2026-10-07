@@ -246,7 +246,7 @@ public class MainActivity extends Activity {
         query.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){search=s.toString();fillEntries(list);}public void afterTextChanged(Editable e){}});
     }
     // Money not given to a category goes to Ready to Assign (income and reconcile adjustments), as YNAB labels it.
-    private String categoryName(Budget.Entry e){return e.transfer()?"Transfer":e.category.isEmpty()?"Ready to Assign":budget.category(e.category).name;}
+    private String categoryName(Budget.Entry e){if(e.split()){StringBuilder s=new StringBuilder("Split:");for(Budget.Split p:e.splits){Budget.Category c=budget.category(p.category);s.append(" ").append(c==null?"Ready to Assign":c.name).append(",");}return s.substring(0,s.length()-1);}return e.transfer()?"Transfer":e.category.isEmpty()?"Ready to Assign":budget.category(e.category).name;}
     private void fillEntries(LinearLayout list){
         list.removeAllViews();List<Budget.Entry> ordered=new ArrayList<>(budget.entries);ordered.sort((a,b)->b.date.compareTo(a.date));int n=0;
         for(Budget.Entry e:ordered){String text=e.payee+" "+categoryName(e)+" "+e.memo+" "+budget.account(e.account).name;if(!e.date.startsWith(month.toString())||!text.toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT))||(!accountFilter.isEmpty()&&!e.account.equals(accountFilter)&&!e.destination.equals(accountFilter)))continue;n++;LinearLayout row=column();row.setPadding(dp(14),dp(10),dp(14),dp(10));row.setBackground(bg(surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(5));list.addView(row,p);row.addView(label(e.payee,17,ink,true));row.addView(label(categoryName(e)+" / "+budget.account(e.account).name+" / "+pretty(e.date),12,muted,false));row.addView(label(money(e.amount)+(e.cleared?"  Cleared":"  Uncleared"),17,e.amount>0?green:ink,true));if(!e.memo.isEmpty())row.addView(label(e.memo,12,muted,false));row.setOnClickListener(v->transaction(e));}
@@ -340,6 +340,13 @@ public class MainActivity extends Activity {
         // Payees used before are suggested; picking one on a new transaction fills in the category it had last time.
         AutoCompleteTextView payee=new AutoCompleteTextView(this);payee.setSingleLine(true);payee.setTextColor(ink);payee.setThreshold(1);payee.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_dropdown_item_1line,budget.payees()));f.addView(payee,new LinearLayout.LayoutParams(-1,-2));
         f.addView(label("Amount (AUD)",12,muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);f.addView(label("Date",12,muted,true));EditText day=dateField(f,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);Spinner account=spinner(f,"Account",accounts.stream().map(a->a.name).toArray(String[]::new),keepAccount==null?0:accounts.indexOf(budget.account(keepAccount)));LinearLayout categoryFields=column();f.addView(categoryFields);Spinner category=spinner(categoryFields,"Category",categories.stream().map(c->c.name).toArray(String[]::new),keepCategory.isEmpty()?0:categories.indexOf(budget.category(keepCategory)));
+        // Split: the parts (positive amounts while editing) replace the category; the amount becomes their total.
+        List<Budget.Split> parts=new ArrayList<>();if(old!=null)for(Budget.Split p:old.splits){Budget.Split c=new Budget.Split(p.category,Math.abs(p.amount));c.memo=p.memo;parts.add(c);}
+        TextView splitSummary=label("",13,ink,false);categoryFields.addView(splitSummary);Button splitButton=button("Split into categories",()->{});categoryFields.addView(splitButton);
+        Runnable showSplit=()->{boolean on=!parts.isEmpty();category.setVisibility(on?View.GONE:View.VISIBLE);splitSummary.setVisibility(on?View.VISIBLE:View.GONE);splitButton.setText(on?"Edit split":"Split into categories");amount.setEnabled(!on);
+            if(on){long sum=0;StringBuilder s=new StringBuilder("Split: ");for(int i=0;i<parts.size();i++){Budget.Split p=parts.get(i);Budget.Category c=budget.category(p.category);sum+=p.amount;s.append(i>0?", ":"").append(c==null?"Ready to Assign":c.name).append(" ").append(money(p.amount));}splitSummary.setText(s);amount.setText(decimal(sum));}};
+        splitButton.setOnClickListener(v->{long total;try{total=Budget.cents(amount.getText().toString());}catch(Exception e){total=0;}editSplit(parts,categories,categories.isEmpty()?null:categories.get(Math.max(0,category.getSelectedItemPosition())),total,showSplit);});
+        showSplit.run();
         boolean[] categoryChosen={old!=null||sched!=null};category.setOnTouchListener((v,ev)->{categoryChosen[0]=true;return false;});
         payee.setOnItemClickListener((p,v,position,id)->{Budget.Entry last=budget.lastForPayee(payee.getText().toString());if(old!=null||categoryChosen[0]||last==null)return;
             if(last.category.isEmpty()){kind.setSelection(1);return;}int i=categories.indexOf(budget.category(last.category));if(i<0)return;category.setSelection(i);if(kind.getSelectedItemPosition()==1)kind.setSelection(last.amount<0?0:2);});
@@ -350,14 +357,37 @@ public class MainActivity extends Activity {
         Spinner repeatField=repeat;
         Runnable adapt=()->{int selected=kind.getSelectedItemPosition();boolean income=selected==1;categoryFields.setVisibility(income?View.GONE:View.VISIBLE);payee.setHint(income?"Income source":selected==2?"Refund from":"Payee");guidance.setText(income?"Adds money to Ready to Assign.":selected==2?"Returns money to the original spending category.":"Reduces the available money in your category.");};adapt.run();kind.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){adapt.run();}public void onNothingSelected(AdapterView<?> p){}});
         dialog(sched!=null?"Edit upcoming transaction":old==null?"Add transaction":"Edit transaction",f,()->{int k=kind.getSelectedItemPosition();if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
-            String p=required(payee),cat=k==1?"":categories.get(category.getSelectedItemPosition()).id,acc=accounts.get(account.getSelectedItemPosition()).id,memoText=memo.getText().toString().trim();long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
+            boolean isSplit=k!=1&&!parts.isEmpty();
+            String p=required(payee),cat=k==1?"":isSplit?Budget.SPLIT:categories.get(category.getSelectedItemPosition()).id,acc=accounts.get(account.getSelectedItemPosition()).id,memoText=memo.getText().toString().trim();long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];LocalDate when=LocalDate.parse((String)day.getTag());
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
+                if(isSplit)throw new IllegalArgumentException("A split can't be upcoming yet. Save it on its day, or use one category.");
                 Budget.Scheduled s=new Budget.Scheduled(p,cat,acc,when.toString(),cents,rep);s.memo=memoText;if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;}
                 if(sched==null&&!when.isAfter(LocalDate.now())){budget.validate(s);budget.enter(s);if(!rep.equals("Never"))budget.scheduled.add(s);return;} // today or earlier: entered now, the repeat continues
                 budget.validate(s);budget.scheduled.removeIf(t->t.id.equals(s.id));budget.scheduled.add(s);return;
             }
-            Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
+            Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;e.splits.add(s);}e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
+    }
+    /** Edits [parts] (category + positive amount per row); at least two parts. Remove split empties them. */
+    private void editSplit(List<Budget.Split> parts,List<Budget.Category> categories,Budget.Category first,long total,Runnable done){
+        if(categories.isEmpty()){toast("Add a category first.");return;}
+        String[] names=new String[categories.size()+1];for(int i=0;i<categories.size();i++)names[i]=categories.get(i).name;names[categories.size()]="Ready to Assign";
+        LinearLayout f=form(),rows=column();f.addView(label("Each part comes out of its own category.",13,muted,false));f.addView(rows);TextView sum=label("",14,blue,true);
+        List<Spinner> cats=new ArrayList<>();List<EditText> amounts=new ArrayList<>();
+        Runnable total2=()->{long n=0;for(EditText a:amounts){try{n+=Budget.parse(a.getText().toString().isEmpty()?"0":a.getText().toString());}catch(Exception e){}}sum.setText("Total "+money(n));};
+        java.util.function.BiConsumer<String,Long> addRow=(category,cents)->{LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);Spinner s=new Spinner(this);s.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names));
+            int i=category==null?0:category.isEmpty()?categories.size():Math.max(0,categories.indexOf(budget.category(category)));s.setSelection(i);row.addView(s,new LinearLayout.LayoutParams(0,-2,1));
+            EditText a=new EditText(this);a.setHint("0.00");a.setTextColor(ink);a.setSingleLine(true);a.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);if(cents!=null&&cents>0)a.setText(decimal(cents));onText(a,total2);row.addView(a,new LinearLayout.LayoutParams(dp(110),-2));
+            Button x=button("✕",()->{});x.setContentDescription("Remove this part");x.setBackground(bg(Color.TRANSPARENT));x.setOnClickListener(v->{rows.removeView(row);cats.remove(s);amounts.remove(a);total2.run();});row.addView(x,new LinearLayout.LayoutParams(dp(48),dp(48)));
+            rows.addView(row);cats.add(s);amounts.add(a);};
+        if(parts.isEmpty()){addRow.accept(first==null?null:first.id,total);addRow.accept(null,null);}else for(Budget.Split p:parts)addRow.accept(p.category,p.amount);
+        f.addView(button("+ Add a part",()->{addRow.accept(null,null);total2.run();}));f.addView(sum);total2.run();
+        ScrollView scroll=new ScrollView(this);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(this).setTitle("Split").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Done",null).setNeutralButton(parts.isEmpty()?null:"Remove split",(x,w)->{parts.clear();done.run();}).create();
+        d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
+            List<Budget.Split> result=new ArrayList<>();
+            for(int i=0;i<cats.size();i++){long cents;try{cents=Budget.cents(amounts.get(i).getText().toString());}catch(Exception e){toast("Give every part an amount above $0.");return;}int c=cats.get(i).getSelectedItemPosition();result.add(new Budget.Split(c==categories.size()?"":categories.get(c).id,cents));}
+            if(result.size()<2){toast("A split needs at least two parts. Use Remove split for one category.");return;}
+            parts.clear();parts.addAll(result);done.run();d.dismiss();}));d.show();
     }
     private Budget.Scheduled scheduledById(String id){for(Budget.Scheduled s:budget.scheduled)if(s.id.equals(id))return s;throw new IllegalArgumentException("That upcoming transaction no longer exists.");}
     private void deleteScheduled(String id){new AlertDialog.Builder(this).setTitle("Delete upcoming transaction?").setMessage("It and its repeats are removed. Transactions already entered stay.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{if(change(()->budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}).show();}
