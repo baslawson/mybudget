@@ -46,8 +46,8 @@ public class AddExpenseActivity extends Activity {
     private EditText field(LinearLayout f,String hint,String value,int type){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);e.setInputType(type);f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
     // A date shown as "7 Oct 2026" that opens the date picker (up to today); the ISO date is kept in its tag.
     private EditText dateField(LinearLayout f,String iso){
-        EditText e=new EditText(this);e.setTag(iso);e.setText(MainActivity.pretty(iso));e.setFocusable(false);e.setCursorVisible(false);
-        e.setOnClickListener(v->{LocalDate d=LocalDate.parse((String)e.getTag());DatePickerDialog picker=new DatePickerDialog(this,(p,y,m,day)->{String chosen=LocalDate.of(y,m+1,day).toString();e.setTag(chosen);e.setText(MainActivity.pretty(chosen));},d.getYear(),d.getMonthValue()-1,d.getDayOfMonth());picker.getDatePicker().setMaxDate(System.currentTimeMillis());picker.show();});
+        EditText e=new EditText(this);e.setTag(iso);e.setText(Ui.pretty(iso));e.setFocusable(false);e.setCursorVisible(false);
+        e.setOnClickListener(v->{LocalDate d=LocalDate.parse((String)e.getTag());DatePickerDialog picker=new DatePickerDialog(this,(p,y,m,day)->{String chosen=LocalDate.of(y,m+1,day).toString();e.setTag(chosen);e.setText(Ui.pretty(chosen));},d.getYear(),d.getMonthValue()-1,d.getDayOfMonth());picker.getDatePicker().setMaxDate(System.currentTimeMillis());picker.show();});
         f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;
     }
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
@@ -69,10 +69,10 @@ public class AddExpenseActivity extends Activity {
         LinearLayout f=new LinearLayout(this);f.setOrientation(LinearLayout.VERTICAL);f.setPadding(dp(24),dp(4),dp(24),dp(4));
         label(f,"From "+sender(),12);
         if(last!=null&&YearMonth.from(LocalDate.parse(last.date)).equals(YearMonth.from(LocalDate.parse(date))))
-            label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+MainActivity.pretty(last.date)+". Save only if this is another payment.",13);
+            label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+Ui.pretty(last.date)+". Save only if this is another payment.",13);
         // Payees used before are suggested (as in MyBudget's own form).
         label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);
-        label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",MainActivity.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
+        label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
