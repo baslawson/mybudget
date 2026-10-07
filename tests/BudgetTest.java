@@ -34,8 +34,49 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void fixes(){
+        YearMonth jan=YearMonth.of(2025,1);
+        // A To budget inflow on a card (a reward) frees set-aside money: To budget plus categories stays the cash, and what's set aside matches what's owed.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",10000);b.accounts.add(bank);Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        Budget.Account visa=b.addCard("Visa","2025-01-01",0);Budget.Category pay=b.paymentCategory(visa);
+        b.assign(food,jan,10000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-01-05",-10000));equal(b.available(pay,jan),10000,"Funded spending set aside");
+        Budget.Entry reward=new Budget.Entry("Cashback","",visa.id,"2025-01-06",1000);b.validate(reward);b.entries.add(reward);
+        equal(b.ready(jan),1000,"Reward to To budget");equal(b.available(pay,jan),9000,"Set aside = owed");equal(-b.balance(visa,false),9000,"Card owes less");
+        equal(b.ready(jan)+b.available(food,jan)+b.available(pay,jan),b.balance(bank,false),"To budget + categories = cash (before paying)");
+        Budget.Entry payment=new Budget.Entry("Transfer to Visa","",bank.id,"2025-01-07",-Math.min(-b.balance(visa,false),b.available(pay,jan)));payment.destination=visa.id;b.validate(payment);b.entries.add(payment);
+        equal(b.balance(visa,false),0,"Paid off");equal(b.balance(bank,false),1000,"Cash left");equal(b.available(pay,jan),0,"Payment category used up");
+        equal(b.ready(jan)+b.available(food,jan)+b.available(pay,jan),b.balance(bank,false),"To budget + categories = cash (after paying)");
+        // Mirror: a negative reconcile adjustment on a card sets more aside from To budget, once.
+        b=new Budget();bank=new Budget.Account("Bank","2025-01-01",20000);b.accounts.add(bank);food=new Budget.Category("Food");b.categories.add(food);visa=b.addCard("Visa","2025-01-01",0);pay=b.paymentCategory(visa);
+        b.assign(food,jan,10000);Budget.Entry shop=new Budget.Entry("Shop",food.id,visa.id,"2025-01-05",-10000);shop.cleared=true;b.entries.add(shop);
+        Budget.Entry adj=b.adjustment(visa,b.balance(visa,true)-1000,"2025-01-06");equal(adj.amount,-1000,"Card adjustment");b.validate(adj);b.entries.add(adj);
+        equal(b.ready(jan),9000,"Taken from To budget");equal(b.available(pay,jan),11000,"Set aside = owed");equal(b.ready(jan)+b.available(food,jan)+b.available(pay,jan),b.balance(bank,false),"To budget + categories = cash (adjusted)");
+        payment=new Budget.Entry("Transfer to Visa","",bank.id,"2025-01-07",-11000);payment.destination=visa.id;b.entries.add(payment);
+        equal(b.available(pay,jan),0,"Not overspent after paying");equal(b.ready(jan),9000,"Taken only once");equal(b.ready(jan)+b.available(food,jan)+b.available(pay,jan),b.balance(bank,false),"To budget + categories = cash (adjusted, paid)");
+        // Budget reset: the dialog's count and total are what the reset returns (card payment money left out).
+        b=new Budget();bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);food=new Budget.Category("Food");Budget.Category rent=new Budget.Category("Rent");b.categories.add(food);b.categories.add(rent);visa=b.addCard("Visa","2025-01-01",0);pay=b.paymentCategory(visa);
+        b.assign(food,jan,30000);b.assign(rent,jan,5000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-01-05",-10000));equal(b.available(pay,jan),10000,"Payment category has money");
+        java.util.Map<Budget.Category,Long> back=b.resetAmounts(jan);long total=0;for(long v:back.values())total+=v;equal(back.size(),2,"Reset counts Food and Rent only");if(back.containsKey(pay))throw new AssertionError("Payment category not counted");
+        equal(b.planReset(jan),total,"Reset returns what the dialog says");equal(total,25000,"Reset total");
+        // Funded spending over three cards: the shares add up to the funded amount, to the cent.
+        b=new Budget();bank=new Budget.Account("Bank","2025-01-01",100);b.accounts.add(bank);food=new Budget.Category("Food");b.categories.add(food);b.assign(food,jan,100);
+        Budget.Account[] cards={b.addCard("A","2025-01-01",0),b.addCard("B","2025-01-01",0),b.addCard("C","2025-01-01",0)};long moved=0,ready=b.ready(jan);
+        for(Budget.Account c:cards)b.entries.add(new Budget.Entry("Shop",food.id,c.id,"2025-01-05",-100));for(Budget.Account c:cards)moved+=b.movedToCard(food,jan,c);
+        equal(moved,100,"Shares add up to the funded $1.00");equal(b.ready(jan),ready,"No cent leaks into To budget");
+        // Overdue upcoming bills (here one of Planner's from last month) count in this month's need and come first.
+        YearMonth now=YearMonth.now();b=new Budget();Budget.Category power=new Budget.Category("Power");b.categories.add(power);power.dueDay=20;
+        Budget.Scheduled late=new Budget.Scheduled("Electricity",power.id,"",now.minusMonths(1).atDay(15).toString(),-5000,"Never");b.fromPlanner.add(late);
+        equal(b.upcoming(power,now),5000,"Overdue bill needed this month");equal(b.fundNeed(power,now),5000,"Fund targets covers it");equal(b.firstDue(power,now),0,"Overdue comes first");
+        equal(b.upcoming(power,now.minusMonths(1)),5000,"Still in its own month");equal(b.upcoming(power,now.plusMonths(1)),0,"Not in later months");
+        Budget.Scheduled rentDue=new Budget.Scheduled("Rent",power.id,"",now.minusMonths(1).atDay(1).toString(),-1000,"Monthly");b.scheduled.add(rentDue);equal(b.datesIn(rentDue,now).size(),2,"Last month's unpaid date and this month's");
+        // CSV import: identical rows in one statement are separate transactions; each row already there matches one.
+        Budget c=new Budget();bank=new Budget.Account("Bank","2026-01-01",0);c.accounts.add(bank);food=new Budget.Category("Food");c.categories.add(food);c.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2026-09-01",-500));
+        java.util.List<java.util.List<String>> twice=CsvImport.parse("1/9/2026,Shop,-5.00\n1/9/2026,Shop,-5.00\n2/9/2026,Cafe,-3.00\n2/9/2026,Cafe,-3.00\n");
+        CsvImport.Result r=CsvImport.run(c,twice,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.added,3,"Second Shop and both Cafes added");equal(r.duplicates,1,"One Shop already there");
+        r=CsvImport.run(c,twice,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.added,0,"Importing again adds nothing");equal(r.duplicates,4,"All four known");
     }
     static void phaseG(){
         YearMonth oct=YearMonth.of(2026,10);

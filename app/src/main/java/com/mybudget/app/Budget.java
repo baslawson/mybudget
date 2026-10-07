@@ -80,14 +80,14 @@ public final class Budget {
     public Entry enter(Scheduled s){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;e.billKey=s.billKey;validate(e);entries.add(0,e);advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
-    /** Every date [s] falls on in [m] (from its next date on). */
-    public List<LocalDate> datesIn(Scheduled s,YearMonth m){List<LocalDate> list=new ArrayList<>();LocalDate d=LocalDate.parse(s.next),end=m.atEndOfMonth();for(int i=0;i<400&&d!=null&&!d.isAfter(end);i++){if(!d.isBefore(m.atDay(1)))list.add(d);d=s.after(d);}return list;}
+    /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
+    public List<LocalDate> datesIn(Scheduled s,YearMonth m){List<LocalDate> list=new ArrayList<>();LocalDate d=LocalDate.parse(s.next),end=m.atEndOfMonth();boolean now=m.equals(YearMonth.now());for(int i=0;i<400&&d!=null&&!d.isAfter(end);i++){if(now||!d.isBefore(m.atDay(1)))list.add(d);d=s.after(d);}return list;}
     /** Upcoming outflows from [c] in [m]: what scheduled bills will take. */
     public long upcoming(Category c,YearMonth m){long n=0;for(Scheduled s:planned())if(s.category.equals(c.id)&&s.amount<0)n+=-s.amount*datesIn(s,m).size();return n;}
     /** What Fund targets assigns: the target's need, or enough for this month's upcoming bills, whichever is more. */
     public long fundNeed(Category c,YearMonth m){return Math.max(needed(c,m),Math.max(0,upcoming(c,m)-available(c,m)));}
-    /** The first day in [m] money is needed by: the due day or the first upcoming bill (32 = none). */
-    public int firstDue(Category c,YearMonth m){int first=c.dueDay==0?32:c.dueDay;for(Scheduled s:planned())if(s.category.equals(c.id)&&s.amount<0)for(LocalDate d:datesIn(s,m))first=Math.min(first,d.getDayOfMonth());return first;}
+    /** The first day in [m] money is needed by: the due day or the first upcoming bill (32 = none, 0 = overdue). */
+    public int firstDue(Category c,YearMonth m){int first=c.dueDay==0?32:c.dueDay;for(Scheduled s:planned())if(s.category.equals(c.id)&&s.amount<0)for(LocalDate d:datesIn(s,m))first=Math.min(first,d.isBefore(m.atDay(1))?0:d.getDayOfMonth());return first;}
     public final List<Category> categories=new ArrayList<>();
     public final List<Account> accounts=new ArrayList<>();
     public final List<Entry> entries=new ArrayList<>();
@@ -108,14 +108,14 @@ public final class Budget {
     public long available(Category c,YearMonth month){long n=0;for(YearMonth m=first(c,month);!m.isAfter(month);m=m.plusMonths(1))n=Math.max(0,n)+assigned(c,m)+activity(c,m);return n;}
     /**
      * Money in cash accounts at the end of [month] (what the plan assigns). Credit cards hold debt, not money: their
-     * spending isn't cash (it moves money between categories instead), but a payment from a cash account is, and so
-     * is a part sent into To budget on a card (e.g. a reward credit).
+     * spending isn't cash (it moves money between categories instead), but a payment from a cash account is. A part
+     * sent into To budget on a card (a reward credit, an adjustment) isn't cash either: see paymentActivity.
      */
     public long cash(YearMonth month){
         String end=month.atEndOfMonth().toString();long n=0;for(Account a:accounts)if(!a.credit()&&a.date.compareTo(end)<=0)n+=a.opening;
         for(Entry e:entries){if(e.date.compareTo(end)>0)continue;Account a=account(e.account);if(a==null)continue;
             if(e.transfer()){Account to=account(e.destination);if(to!=null&&a.credit()!=to.credit())n+=a.credit()?-e.amount:e.amount;}
-            else n+=a.credit()?e.amountIn(""):e.amount;}
+            else if(!a.credit())n+=e.amount;}
         return n;
     }
     public long balance(Account a,boolean clearedOnly){long n=a.opening;for(Entry e:entries)if(!clearedOnly||e.cleared){if(e.account.equals(a.id))n+=e.amount;if(e.destination.equals(a.id))n-=e.amount;}return n;}
@@ -136,12 +136,19 @@ public final class Budget {
      * with net spending gets its share of what the category could pay for (the rest is credit overspending).
      */
     public long movedToCard(Category c,YearMonth m,Account card){
-        long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);
-        return all==mine?funded:BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(mine)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();
+        long mine=creditSpent(c,m,card);if(mine<=0)return mine;long all=creditSpending(c,m),funded=all-creditOverspent(c,m);if(all==mine)return funded;
+        // Rounded by running total (cards in account order), so the cards' shares add up to the funded amount exactly.
+        long before=0;for(Account a:accounts){if(a==card)break;if(a.credit())before+=Math.max(0,creditSpent(c,m,a));}
+        return share(funded,before+mine,all)-share(funded,before,all);
     }
+    private static long share(long funded,long part,long all){return BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(part)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();}
+    // A card's To budget parts (a reward credit, a refund with no category, a reconcile adjustment) change what's owed
+    // without moving cash, so they move money between To budget and the payment category: an inflow frees set-aside
+    // money (less is owed), an outflow sets more aside from To budget (more is owed).
     private long paymentActivity(Category pc,YearMonth m){
         Account card=account(pc.cardAccount);if(card==null)return 0;long n=0;for(Category c:categories)if(!c.payment())n+=movedToCard(c,m,card);
         for(Entry e:entries)if(e.transfer()&&e.destination.equals(card.id)&&e.date.startsWith(m.toString())){Account from=account(e.account);if(from!=null&&!from.credit())n+=e.amount;}
+        for(Entry e:entries)if(!e.transfer()&&e.account.equals(card.id)&&e.date.startsWith(m.toString()))n-=e.amountIn("");
         return n;
     }
     public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
@@ -164,10 +171,12 @@ public final class Budget {
     public long income(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.date.startsWith(m.toString()))n+=e.amountIn("");return n;}
     /** Fund targets' order in [m]: earliest due day or upcoming bill first (neither = end of month), otherwise as in the plan. */
     public List<Category> fundOrder(YearMonth m){List<Category> list=new ArrayList<>(categories);list.sort(Comparator.comparingInt(c->firstDue(c,m)));return list;}
+    /** What Budget reset returns in [m]: each category's positive Available. Card payment money stays: it pays debt already spent. */
+    public Map<Category,Long> resetAmounts(YearMonth m){Map<Category,Long> map=new LinkedHashMap<>();for(Category c:categories){if(c.payment())continue;long a=available(c,m);if(a>0)map.put(c,a);}return map;}
     /** Budget reset: every category's positive Available in [m] goes back into To budget. Returns the total. */
     public long planReset(YearMonth m){
         if(m.isAfter(YearMonth.now()))throw new IllegalArgumentException("Reset this month or an earlier one.");
-        long total=0;for(Category c:categories){if(c.payment())continue;long a=available(c,m);if(a>0){assign(c,m,-a);total+=a;}}return total; // card payment money stays: it pays debt already spent
+        long total=0;for(Map.Entry<Category,Long> r:resetAmounts(m).entrySet()){assign(r.getKey(),m,-r.getValue());total+=r.getValue();}return total;
     }
     /** Net worth at the end of [m]: everything in the accounts. */
     public long netWorth(YearMonth m){long n=0;for(Account a:accounts)n+=balanceAt(a,m);return n;}
@@ -213,7 +222,7 @@ public final class Budget {
     public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a $0 balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
     public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");Category p=paymentCategory(a);
         if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);}
-    /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference. */
+    /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference (on a card, see paymentActivity). */
     public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
     // Quick assign: what each choice adds to this month's Assigned.
     public long spent(Category c,YearMonth m){return Math.max(0,-activity(c,m));}

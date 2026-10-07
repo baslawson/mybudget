@@ -43,12 +43,15 @@ public class MainActivity extends Activity {
         if(state!=null){tab=state.getString("tab","Home");previousTab=state.getString("previousTab","Home");search=state.getString("search","");accountFilter=state.getString("accountFilter","");month=YearMonth.parse(state.getString("month",YearMonth.now().toString()));}
         load();if(storageReadable){render();cleanupPhotos();}
     }
-    // AddExpenseActivity may have saved an expense from another app meanwhile: read it in, so the next save keeps it.
-    // Not while picking a photo for an open transaction form: reloading would close the form the photo is for.
-    @Override protected void onRestart(){super.onRestart();if(pickingPhoto)return;String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null||!storageReadable)return;try{budget=BudgetStore.decode(raw);for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}catch(Exception e){toast("Could not reload your budget.");}}
+    // The saved data as this screen last read or wrote it. AddExpenseActivity may save an expense from another app
+    // meanwhile: when the saved data differs, it's read in (open forms close, as they show the old budget), so the next save keeps it.
+    private String loaded;
+    private boolean reloadIfChanged(){String raw=prefs().getString("data",null);if(raw==null||raw.equals(loaded)||!storageReadable)return false;Budget fresh;try{fresh=BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("Could not reload your budget.");}fresh.fromPlanner.addAll(budget.fromPlanner);budget=fresh;loaded=raw;return true;}
     private boolean pickingPhoto;private java.util.function.Consumer<Uri> photoTarget;
     // Automatic backup: today's, if it hasn't run yet (the daily job may not have had a chance).
-    @Override protected void onResume(){super.onResume();if(!storageReadable)return;AutoBackup.schedule(this);if(prefs().getString("auto_backup_tree",null)!=null)new Thread(()->AutoBackup.run(getApplicationContext(),false)).start();}
+    // Not reloaded on return from the photo picker: that would close the form the photo is for (its save still reads the latest data).
+    @Override protected void onResume(){super.onResume();if(!storageReadable)return;if(pickingPhoto)pickingPhoto=false;else try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}}catch(IllegalStateException e){toast(e.getMessage());}
+        AutoBackup.schedule(this);if(prefs().getString("auto_backup_tree",null)!=null)new Thread(()->AutoBackup.run(getApplicationContext(),false)).start();}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("month",month.toString());super.onSaveInstanceState(state);}
     private void options(View anchor){
         PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");menu.getMenu().add(hideAmounts?"Show amounts":"Hide amounts");menu.getMenu().add("Budget reset");
@@ -60,7 +63,7 @@ public class MainActivity extends Activity {
     /** Budget reset: every category's money in this month goes back into To budget, to start the plan afresh. The budget before is kept for Undo. */
     private void planReset(){
         if(!storageReadable)return;if(month.isAfter(YearMonth.now())){toast("Reset this month or an earlier one.");return;}
-        long total=0;int n=0;for(Budget.Category c:budget.categories){long a=budget.available(c,month);if(a>0){total+=a;n++;}}
+        Map<Budget.Category,Long> back=budget.resetAmounts(month);long total=0;for(long a:back.values())total+=a;int n=back.size(); // exactly what the reset returns
         if(n==0){toast("No category has money to return this month.");return;}
         String monthName=month.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
         new AlertDialog.Builder(this).setTitle("Budget reset").setMessage("Return "+money(total)+" from "+count(n,"category","categories")+" into To budget in "+monthName+", then assign it again by today's priorities?\n\nTargets and transactions stay. You can undo this on Budget.")
@@ -73,7 +76,7 @@ public class MainActivity extends Activity {
             Budget previous;try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The plan from before the reset can't be read. Nothing was changed.");return;}
             android.content.SharedPreferences.Editor edit=prefs().edit().remove("before_reset").remove("before_reset_at");if(previous==null)edit.remove("data");else edit.putString("data",before);
             if(!edit.commit()){toast("Could not save to device storage.");return;}
-            if(previous==null){budget=new Budget();load();}else budget=previous;render();toast("Budget reset undone.");}).show();
+            if(previous==null){budget=new Budget();load();}else{budget=previous;loaded=before;}render();toast("Budget reset undone.");}).show();
     }
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
@@ -108,7 +111,7 @@ public class MainActivity extends Activity {
     private String when(String iso){try{return LocalDateTime.parse(iso).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a",Locale.forLanguageTag("en-AU")));}catch(Exception e){return "an unknown date";}}
     private void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){toast("No app on this device can save or open files.");}}
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(request==PHOTO){pickingPhoto=false;java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);return;}if(result!=RESULT_OK||uri==null||!storageReadable)return;
+        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(request==PHOTO){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);return;}if(result!=RESULT_OK||uri==null||!storageReadable)return;
         if(request==AUTO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception e){toast("MyBudget couldn't keep access to that folder. Choose another.");return;}prefs().edit().putString("auto_backup_tree",uri.toString()).remove("auto_backup_last").remove("auto_backup_error").apply();AutoBackup.schedule(this);String tree=uri.toString();new Thread(()->{String e=AutoBackup.run(this,true);runOnUiThread(()->{toast(e==null?"Automatic backup is on. First backup saved.":e);render();});}).start();return;}
         if(request==IMPORT){List<List<String>> rows;try{rows=CsvImport.parse(read(uri));}catch(Exception e){toast(e instanceof IOException&&e.getMessage()!=null?e.getMessage():"Could not read that file.");return;}if(rows.isEmpty()){toast("That file has no rows.");return;}importDialog(rows);return;}
         if(request==RESTORE){BudgetStore.Backup backup;try{backup=BudgetStore.readBackup(read(uri));}catch(Exception e){String m=e.getMessage();toast((e instanceof org.json.JSONException||e instanceof IOException)&&m!=null?m:"Could not read that file.");return;}confirmRestore(backup);return;}
@@ -173,7 +176,7 @@ public class MainActivity extends Activity {
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->{
                 // The budget being replaced is kept (empty: there was none) for Undo restore.
                 String current=prefs().getString("data",null);
-                try{if(!prefs().edit().putString("data",BudgetStore.encode(b)).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).remove("before_reset").remove("before_reset_at").commit())throw new IllegalStateException();}
+                try{String raw=BudgetStore.encode(b);if(!prefs().edit().putString("data",raw).putString("before_restore",current==null?"":current).putString("before_restore_at",LocalDateTime.now().withNano(0).toString()).remove("before_reset").remove("before_reset_at").commit())throw new IllegalStateException();loaded=raw;}
                 catch(Exception e){toast("Could not save the restored budget. Nothing was changed.");return;}
                 budget=b;for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();toast("Budget restored.");
             }).show();
@@ -185,7 +188,7 @@ public class MainActivity extends Activity {
                 Budget previous;try{previous=before.isEmpty()?null:BudgetStore.decode(before);}catch(Exception e){toast("The budget from before the restore can't be read. Nothing was changed.");return;}
                 android.content.SharedPreferences.Editor edit=prefs().edit().remove("before_restore").remove("before_restore_at").remove("before_reset").remove("before_reset_at");if(previous==null)edit.remove("data");else edit.putString("data",before);
                 if(!edit.commit()){toast("Could not save to device storage.");return;}
-                if(previous==null){budget=new Budget();load();}else budget=previous;for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();toast("Restore undone.");
+                if(previous==null){budget=new Budget();load();}else{budget=previous;loaded=before;}for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();toast("Restore undone.");
             }).show();
     }
     private void chooseTheme(){
@@ -376,8 +379,11 @@ public class MainActivity extends Activity {
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private void commit(Runnable action){
         if(!storageReadable)throw new IllegalStateException("Saved data could not be read.");
-        Budget before;try{before=BudgetStore.decode(BudgetStore.encode(budget));}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}
-        try{action.run();String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");}
+        // Saved meanwhile (split screen: an expense from Planner): open forms hold the old budget, so they close and nothing
+        // is saved over the new data; the change is made again on what is there now.
+        if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();throw new IllegalArgumentException("MyBudget changed meanwhile (an expense from Planner came in). Make your change again.");}
+        Budget before;try{before=BudgetStore.decode(BudgetStore.encode(budget));before.fromPlanner.addAll(budget.fromPlanner);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}
+        try{action.run();String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");loaded=raw;}
         catch(Exception e){budget=before;throw new IllegalArgumentException(e.getMessage()==null?"Check your entry.":e.getMessage());}
     }
     private void dialog(String title,LinearLayout f,Runnable action){
@@ -539,8 +545,8 @@ public class MainActivity extends Activity {
         dialog("Edit account",f,()->{String n=required(name);for(Budget.Account o:budget.accounts)if(!o.id.equals(id)&&o.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");budget.rename(accountById(id),n);});
     }
     private void load(){
-        String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null){for(String[] item:new String[][]{{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}}){Budget.Category c=new Budget.Category(item[0]);c.group=item[1];budget.categories.add(c);}return;}
-        try{budget=BudgetStore.decode(raw);if(!raw.contains("\"version\"")){String updated=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("legacy_backup",raw).putString("data",updated).commit())throw new IllegalStateException("Migration could not be saved.");toast("Budget upgraded. Existing balances preserved; monthly assignments begin this month.");}}
+        String raw=getSharedPreferences("budget",0).getString("data",null);loaded=raw;if(raw==null){for(String[] item:new String[][]{{"Rent","Bills"},{"Utilities","Bills"},{"Groceries","Everyday"},{"Transport","Everyday"},{"Dining out","Everyday"},{"Annual insurance","True expenses"},{"Car repairs","True expenses"},{"Emergency fund","Savings"}}){Budget.Category c=new Budget.Category(item[0]);c.group=item[1];budget.categories.add(c);}return;}
+        try{budget=BudgetStore.decode(raw);if(!raw.contains("\"version\"")){String updated=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("legacy_backup",raw).putString("data",updated).commit())throw new IllegalStateException("Migration could not be saved.");loaded=updated;toast("Budget upgraded. Existing balances preserved; monthly assignments begin this month.");}}
         catch(Exception e){storageReadable=false;new AlertDialog.Builder(this).setTitle("Unable to load budget").setMessage("Your saved data has been preserved. Close the app to avoid changes.").setPositiveButton("Close",(d,w)->finish()).setCancelable(false).show();}
     }
 }

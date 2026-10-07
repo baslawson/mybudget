@@ -40,6 +40,8 @@ public class AddExpenseActivity extends Activity {
     private void done(String summary){setResult(RESULT_OK,new Intent().putExtra("summary",summary));finish();}
     private String sender(){ComponentName from=getCallingActivity();if(from==null)return "another app";try{return getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(from.getPackageName(),0)).toString();}catch(Exception e){return "another app";}}
     private boolean save(){try{String raw=BudgetStore.encode(budget);return getSharedPreferences("budget",0).edit().putString("data",raw).commit();}catch(Exception e){return false;}}
+    // The budget as saved now: MyBudget may have saved changes while this dialog was open, and saving the copy read at the start would drop them.
+    private void reload(){String raw=getSharedPreferences("budget",0).getString("data",null);try{budget=raw==null?new Budget():BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("MyBudget couldn't read its saved budget. Open MyBudget to check it.");}}
     private TextView label(LinearLayout f,String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setPadding(0,dp(6),0,dp(2));f.addView(v);return v;}
     private EditText field(LinearLayout f,String hint,String value,int type){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);e.setInputType(type);f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
     // A date shown as "7 Oct 2026" that opens the date picker (up to today); the ISO date is kept in its tag.
@@ -85,6 +87,9 @@ public class AddExpenseActivity extends Activity {
                 if(category.getSelectedItemPosition()==0)throw new IllegalArgumentException("Choose a category.");
                 Budget.Category c=categories.get(category.getSelectedItemPosition()-1);Budget.Account a=accounts.get(account.getSelectedItemPosition());
                 long cents=Budget.cents(amountField.getText().toString());String day=LocalDate.parse((String)dateField.getTag()).toString();
+                reload();Budget.Entry already=budget.external(id);
+                if(already!=null){PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey);setResult(RESULT_OK,new Intent().putExtra("summary","Already in MyBudget: "+already.payee+" "+money(-already.amount)));dialog.dismiss();return;}
+                if(budget.category(c.id)==null)throw new IllegalArgumentException("That category no longer exists.");if(budget.account(a.id)==null)throw new IllegalArgumentException("That account no longer exists.");
                 Budget.Entry e=new Budget.Entry(payeeField.getText().toString().trim(),c.id,a.id,day,-cents);e.memo=note;e.externalId=id;e.billKey=billKey;
                 budget.validate(e);budget.entries.add(0,e);
                 if(!save()){budget.entries.remove(e);throw new IllegalStateException("Could not save to device storage.");}
@@ -102,7 +107,9 @@ public class AddExpenseActivity extends Activity {
         dialog=new AlertDialog.Builder(this).setTitle("Remove this expense?")
             .setMessage("You marked "+e.payee+" unpaid in "+sender()+". Remove the "+money(-e.amount)+" expense"+(c==null?"":" from "+c.name)+" too?")
             .setNegativeButton("Keep it",(d,w)->setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid. MyBudget kept the expense.")))
-            .setPositiveButton("Remove",(d,w)->{budget.entries.remove(e);if(save())setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid and removed from MyBudget."));else{budget.entries.add(0,e);Toast.makeText(this,"Could not save to device storage.",Toast.LENGTH_LONG).show();}})
+            .setPositiveButton("Remove",(d,w)->{try{reload();}catch(IllegalStateException ex){Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();return;}
+                Budget.Entry now=budget.external(id);if(now==null){setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid. The expense was already gone from MyBudget."));return;}
+                budget.entries.remove(now);if(save())setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid and removed from MyBudget."));else Toast.makeText(this,"Could not save to device storage.",Toast.LENGTH_LONG).show();})
             .create();
         dialog.setOnDismissListener(d->finish());dialog.show();
     }

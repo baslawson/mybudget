@@ -52,8 +52,9 @@ public final class CsvImport {
      * otherwise [amountColumn] holds money in and [outflowColumn] money out.
      */
     public static Result run(Budget budget,List<List<String>> rows,boolean header,int dateColumn,int payeeColumn,int amountColumn,int outflowColumn,String dateFormat,Budget.Account account){
-        Result r=new Result();Set<String> seen=new HashSet<>();
-        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))seen.add(key(e.date,e.amount,e.payee));
+        // Each row already in the account matches one imported row: two identical rows in one statement are two transactions.
+        Result r=new Result();Map<String,Integer> existing=new HashMap<>();
+        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.payee),1,Integer::sum);
         Budget.Category toCategorize=null;LocalDate today=LocalDate.now();
         for(int i=header?1:0;i<rows.size();i++){List<String> row=rows.get(i);
             LocalDate d;long cents;String payee;
@@ -63,7 +64,7 @@ public final class CsvImport {
             }catch(Exception e){r.unreadable++;continue;}
             if(cents==0){r.unreadable++;continue;}if(payee.isEmpty())payee="(no payee)";if(payee.length()>80)payee=payee.substring(0,80);
             if(d.isAfter(today)){r.future++;continue;}if(d.toString().compareTo(account.date)<0){r.beforeOpening++;continue;}
-            String k=key(d.toString(),cents,payee);if(!seen.add(k)){r.duplicates++;continue;}
+            String k=key(d.toString(),cents,payee);if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;continue;}
             Budget.Entry last=budget.lastForPayee(payee);Budget.Category known=last==null||last.split()||last.transfer()?null:budget.category(last.category);if(known!=null&&known.payment())known=null;
             String category;
             if(cents>0)category=known!=null&&last.amount>0?known.id:"";

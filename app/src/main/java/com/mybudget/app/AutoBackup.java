@@ -38,11 +38,13 @@ public class AutoBackup extends JobService {
         if(tree==null||raw==null)return null;String today=LocalDate.now().toString();if(!force&&today.equals(prefs.getString("auto_backup_last","")))return null;
         try{
             Uri treeUri=Uri.parse(tree),folder=DocumentsContract.buildDocumentUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));
-            String name=PREFIX+today+".json";Map<String,String> existing=children(context,treeUri);
-            if(existing.containsKey(name))DocumentsContract.deleteDocument(context.getContentResolver(),DocumentsContract.buildDocumentUriUsingTree(treeUri,existing.remove(name)));
-            Uri file=DocumentsContract.createDocument(context.getContentResolver(),folder,"application/json",name);if(file==null)throw new IllegalStateException("The folder didn't accept a new file.");
+            String name=PREFIX+today+".json";Map<String,String> existing=children(context,treeUri);String replaced=existing.remove(name);
+            // Today's backup (Back up now) is replaced only once the new one is written: the folder names the new file "… (1)" meanwhile.
             String text=BudgetStore.backup(BudgetStore.decode(raw),LocalDateTime.now());
+            Uri file=DocumentsContract.createDocument(context.getContentResolver(),folder,"application/json",name);if(file==null)throw new IllegalStateException("The folder didn't accept a new file.");
             try(OutputStream out=context.getContentResolver().openOutputStream(file,"w")){if(out==null)throw new IllegalStateException("The file couldn't be written.");out.write(text.getBytes(StandardCharsets.UTF_8));}
+            catch(Exception e){try{DocumentsContract.deleteDocument(context.getContentResolver(),file);}catch(Exception ignored){}throw e;}
+            if(replaced!=null){DocumentsContract.deleteDocument(context.getContentResolver(),DocumentsContract.buildDocumentUriUsingTree(treeUri,replaced));try{DocumentsContract.renameDocument(context.getContentResolver(),file,name);}catch(Exception ignored){}} // a folder that can't rename keeps "… (1)"
             List<String> old=new ArrayList<>(existing.keySet());old.removeIf(n->!n.startsWith(PREFIX));Collections.sort(old,Collections.reverseOrder());
             for(int i=KEEP-1;i<old.size();i++)DocumentsContract.deleteDocument(context.getContentResolver(),DocumentsContract.buildDocumentUriUsingTree(treeUri,existing.get(old.get(i))));
             prefs.edit().putString("auto_backup_last",today).remove("auto_backup_error").apply();return null;
