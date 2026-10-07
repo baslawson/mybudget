@@ -2,13 +2,13 @@
 
 A native, offline envelope budgeting app with an original interface, informed by YNAB's official method and product documentation. Give the money you have a purpose: record income, assign it to categories, track expenses, and move money to cover overspending.
 
-## Download 0.0.0
+## Download 0.0.1
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.0/MyBudget-0.0.0.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.0) · [Add to Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.mybudget.app%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbaslawson%2Fmybudget%22%2C%22author%22%3A%22baslawson%22%2C%22name%22%3A%22MyBudget%22%7D)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.1/MyBudget-0.0.1.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.1) · [Add to Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.mybudget.app%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbaslawson%2Fmybudget%22%2C%22author%22%3A%22baslawson%22%2C%22name%22%3A%22MyBudget%22%7D)
 
-Android 8+ (API 26). Version `0.0.0`, version code `3`, package `com.mybudget.app`. The universal release APK is approximately 46 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.1`, version code `4`, package `com.mybudget.app`. The universal release APK is approximately 49 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
-This initial release uses local device storage and manual entries. It does not sync accounts or back up/export budgets. The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
+This release uses local device storage and manual entries, plus expenses you confirm from Planner (below). It does not sync accounts or back up/export budgets. The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
 ## Screenshots
 
@@ -26,13 +26,24 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 - Light, Dark and Auto appearances persist across restarts. Auto follows the device theme, including changes while the app is open. Settings returns to the previous screen.
 - Latest UI refinements: compact category rows with Available emphasized; secondary Assigned/Activity values; target descriptions, progress and remaining funding; matching navigation icons; tighter spacing with comfortable touch targets.
 - Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
-- Initial published version: **0.0.0**, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link. The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
+- Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link) and **0.0.1** (expenses from Planner). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
 - Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
 - Existing budget data is retained during APK updates. No bank sync, credit-card handling or cloud/export backup is implemented.
+- Planner and MyBudget are linked apps. Planner can send paid bills for a confirmed expense and request removal when a payment is undone. Included from 0.0.1. BudgetInstrumentation covers adding once and removing on undo, and passed on the Pixel 7 Pro emulator. The full round trip from Planner has not been tested automatically.
 
 ## Working agreement
 
 Before future coding, present a plan describing the proposed changes and wait for the user's approval. Implement only after approval. The user likes the current visual direction; preserve the branding and overall style when refining it.
+
+Treat Planner and MyBudget as linked apps in all future plans, code changes and testing. Preserve the payment handoff, duplicate prevention, undo confirmation and stored link identifiers. Changes to the integration contract must account for both apps.
+
+## Planner integration
+
+Planner's “Send paid bills to MyBudget” opens `AddExpenseActivity` using `com.mybudget.app.action.ADD_EXPENSE`. The handoff includes `paymentId`, `billKey`, `payee`, `amountCents` (a long integer), `currency` (`AUD`), `date` (`YYYY-MM-DD`) and an optional `note`. The user confirms the expense before it is saved and chooses its category and account. Repeat bills suggest the category and account from the previous linked entry; an existing payment ID prevents a duplicate expense.
+
+When Planner marks a payment unpaid, `com.mybudget.app.action.PAYMENT_UNDONE` with the same `paymentId` asks whether to remove the linked expense. The user can keep it. Successful handoffs return `RESULT_OK` with a `summary`; cancellation defaults to `RESULT_CANCELED`. Both actions are exported to other apps, so preserve user confirmation before adding or removing data.
+
+Budget storage version 3 persists `externalId` and `billKey` on entries and continues to read version 2 budgets. MainActivity reloads saved data on restart to incorporate expenses received from another app. Future changes to storage, transaction editing, activity lifecycle or package/action names must consider this connection and verify the flow between both apps.
 
 ## Run
 
