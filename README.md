@@ -4,7 +4,11 @@ A native, offline envelope budgeting app. Give every dollar you have a job: put 
 
 ## Download 0.0.3
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.3/MyBudget-0.0.3.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.3) · [Add to Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.mybudget.app%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fbaslawson%2Fmybudget%22%2C%22author%22%3A%22baslawson%22%2C%22name%22%3A%22MyBudget%22%7D)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.3/MyBudget-0.0.3.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.3)
+
+Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
+
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
 Android 8+ (API 26). Version `0.0.3`, version code `6`, package `com.mybudget.app`. The universal release APK is approximately 105 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
