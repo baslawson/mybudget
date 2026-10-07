@@ -2,6 +2,6 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.mybudget.app'
     compileSdk 35
-    defaultConfig { applicationId 'com.mybudget.app'; minSdk 26; targetSdk 35; versionCode 9; versionName '0.0.6'; testInstrumentationRunner 'com.mybudget.app.BudgetInstrumentation' }
+    defaultConfig { applicationId 'com.mybudget.app'; minSdk 26; targetSdk 35; versionCode 10; versionName '0.0.7'; testInstrumentationRunner 'com.mybudget.app.BudgetInstrumentation' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
