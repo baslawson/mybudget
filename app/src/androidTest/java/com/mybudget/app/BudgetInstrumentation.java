@@ -28,8 +28,28 @@ public class BudgetInstrumentation extends Instrumentation {
         Intent intent=new Intent(getTargetContext(),MainActivity.class);intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);Activity activity=startActivitySync(intent);waitForIdleSync();if(activity.isFinishing())throw new AssertionError("Activity closed");
         for(String tab:new String[]{"Plan","Spending","Accounts","Reflect","Home"}){runOnMainSync(()->{View button=find(activity.getWindow().getDecorView(),tab,true);if(button==null)throw new AssertionError("Missing tab "+tab);button.performClick();if(find(activity.getWindow().getDecorView(),tab,false)==null)throw new AssertionError("Missing screen "+tab);});waitForIdleSync();}
         sentPayments(day);
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo.\n");finish(Activity.RESULT_OK,result);
+        backups(migrated);
+        // Hidden categories and closed accounts are saved; budgets saved before them read as visible and open.
+        Budget flags=BudgetStore.decode(BudgetStore.encode(migrated));flags.categories.get(1).hidden=true;flags.accounts.get(1).closed=true;
+        Budget flagsBack=BudgetStore.decode(BudgetStore.encode(flags));if(flagsBack.categories.get(0).hidden||!flagsBack.categories.get(1).hidden||flagsBack.accounts.get(0).closed||!flagsBack.accounts.get(1).closed)throw new AssertionError("Hidden/closed not saved");
+        JSONObject older=new JSONObject(BudgetStore.encode(flags));older.getJSONArray("categories").getJSONObject(1).remove("hidden");older.getJSONArray("accounts").getJSONObject(1).remove("closed");
+        Budget olderBack=BudgetStore.decode(older.toString());if(olderBack.categories.get(1).hidden||olderBack.accounts.get(1).closed)throw new AssertionError("Older budget not read as visible/open");
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
+    // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
+    private void backups(Budget b)throws Exception{
+        YearMonth month=YearMonth.now();b.entries.get(0).externalId="pay-b";b.entries.get(0).billKey="planner-series-b";
+        String file=BudgetStore.backup(b,LocalDateTime.of(2026,10,7,12,30,15,999));JSONObject root=new JSONObject(file);
+        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=1||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
+        BudgetStore.Backup read=BudgetStore.readBackup("\n"+file);Budget r=read.budget;
+        if(!read.created.equals("2026-10-07T12:30:15")||!BudgetStore.encode(r).equals(BudgetStore.encode(b)))throw new AssertionError("Backup lost data");
+        eq(r.cash(month),b.cash(month));eq(r.ready(month),b.ready(month));if(r.external("pay-b")==null||r.lastForBill("planner-series-b")==null)throw new AssertionError("Planner link ids lost");
+        refused(BudgetStore.encode(b),"isn't a MyBudget backup");refused("{broken","isn't a MyBudget backup");refused("[]","isn't a MyBudget backup");
+        refused(root.put("backupVersion",2).toString(),"newer MyBudget");
+        root.put("backupVersion",1).getJSONArray("entries").getJSONObject(0).put("account","missing");refused(root.toString(),"damaged");
+        root=new JSONObject(file);root.put("version",9);refused(root.toString(),"damaged");
+    }
+    private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
     // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.
     private void sentPayments(String day)throws Exception{
         android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String saved=prefs.getString("data",null);

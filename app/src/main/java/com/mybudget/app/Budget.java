@@ -10,12 +10,14 @@ public final class Budget {
     public static final class Category {
         public String id=Budget.id(), name, group="Everyday", targetType="Refill", due="";
         public long target;
+        public boolean hidden; // left out of Plan and pickers; its money still counts
         public final Map<String,Long> assigned=new TreeMap<>();
         public Category(String name) { this.name=name; }
     }
     public static final class Account {
         public String id=Budget.id(), name, date, reconciled="";
         public long opening;
+        public boolean closed; // only at a zero balance; keeps its transactions
         public Account(String name,String date,long opening) { this.name=name;this.date=date;this.opening=opening; }
     }
     public static final class Entry {
@@ -60,6 +62,40 @@ public final class Budget {
     }
     public long spending(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&!e.category.isEmpty()&&e.date.startsWith(m.toString()))n-=e.amount;return n;}
     public long income(YearMonth m){long n=0;for(Entry e:entries)if(!e.transfer()&&e.category.isEmpty()&&e.date.startsWith(m.toString()))n+=e.amount;return n;}
+    // Categories: delete (moving history to another), reorder within a group.
+    public boolean used(Category c){for(Entry e:entries)if(e.category.equals(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
+    public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.category.equals(c.id))n++;return n;}
+    /** Deletes [c]; its transactions and monthly assignments move to [into] (needed when it was used). Cash doesn't change. */
+    public void deleteCategory(Category c,Category into){
+        if(into==c||(into==null&&used(c)))throw new IllegalArgumentException("Choose another category to take its transactions and money.");
+        if(into!=null){for(Entry e:entries)if(e.category.equals(c.id))e.category=into.id;for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
+        categories.remove(c);
+    }
+    /** Swaps [c] with the next category of its group up (-1) or down (+1); false at the end of the group. */
+    public boolean reorder(Category c,int direction){int i=categories.indexOf(c);for(int j=i+direction;j>=0&&j<categories.size();j+=direction)if(categories.get(j).group.equals(c.group)){Collections.swap(categories,i,j);return true;}return false;}
+    // Accounts: close at zero, delete only unused.
+    public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;return false;}
+    public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a $0 balance.");a.closed=true;}
+    public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");accounts.remove(a);}
+    /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow to Ready to Assign for the difference. */
+    public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
+    // Quick assign: what each choice adds to this month's Assigned.
+    public long spent(Category c,YearMonth m){return Math.max(0,-activity(c,m));}
+    public long averageSpent(Category c,YearMonth m){long n=0;for(int i=1;i<=3;i++)n+=spent(c,m.minusMonths(i));return n/3;}
+    /** Change that puts Assigned at 0, or as near as the rules allow (money already spent can't be returned). */
+    public long resetChange(Category c,YearMonth m){long a=assigned(c,m);return a<=0?-a:-Math.min(a,Math.max(0,available(c,m)));}
+    // Payees: newest first, and the last transaction with one (for its category).
+    public List<String> payees(){List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));LinkedHashMap<String,String> seen=new LinkedHashMap<>();for(Entry e:ordered)if(!e.transfer())seen.putIfAbsent(e.payee.toLowerCase(Locale.ROOT),e.payee);return new ArrayList<>(seen.values());}
+    public Entry lastForPayee(String payee){Entry best=null;for(Entry e:entries)if(!e.transfer()&&e.payee.equalsIgnoreCase(payee.trim())&&(best==null||e.date.compareTo(best.date)>0))best=e;return best;}
+    /** Every transaction as CSV for spreadsheets, newest date first. Export only: a backup is what restores. */
+    public String csv(){
+        StringBuilder out=new StringBuilder("Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n");List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));
+        for(Entry e:ordered){Category c=category(e.category);Account a=account(e.account),to=account(e.destination);
+            out.append(String.join(",",e.date,cell(e.payee),cell(e.transfer()?"":c==null?"Income":c.name),cell(e.transfer()||c==null?"":c.group),cell(a==null?"":a.name),cell(to==null?"":to.name),BigDecimal.valueOf(e.amount,2).toPlainString(),cell(e.memo),e.cleared?"Yes":"No")).append("\r\n");}
+        return out.toString();
+    }
+    // A spreadsheet runs text starting with = + - @ as a formula: a leading ' keeps it text. Quoted when needed.
+    static String cell(String s){if(s==null)s="";if(!s.isEmpty()&&"=+-@\t\r".indexOf(s.charAt(0))>=0)s="'"+s;return s.matches("(?s).*[,\"\r\n].*")?"\""+s.replace("\"","\"\"")+"\"":s;}
     public void validate(Entry e){
         Account a=account(e.account);if(a==null)throw new IllegalArgumentException("Choose an account.");LocalDate date=LocalDate.parse(e.date);
         if(date.isAfter(LocalDate.now()))throw new IllegalArgumentException("Use today or a past date.");if(e.date.compareTo(a.date)<0)throw new IllegalArgumentException("Transaction date is before this account's opening date.");

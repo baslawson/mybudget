@@ -28,7 +28,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 - Transaction forms adapt to expense, income and refund. Income hides the category and uses an income-source prompt. Notes are optional. Target editing explains each behavior and shows a deadline only for balance goals.
 - Published versions: **0.0.0** (first release, with a signed universal release APK, fictional demo screenshots and an Obtainium installation link) and **0.0.1** (expenses from Planner). The earlier 76.2 KB measurement was for a debug build before the latest UI refinements.
 - Verification completed: APK build; calculation checks; Android migration/persistence checks; all five tabs rendered; visual inspection; theme persistence and system-theme switching; income field visibility; conditional target deadline. Checks used the Pixel 7 Pro emulator. Physical-device verification remains outstanding.
-- Existing budget data is retained during APK updates. No bank sync, credit-card handling or cloud/export backup is implemented.
+- Existing budget data is retained during APK updates. Settings > Backup saves a backup file, restores it (with Undo restore) and exports transactions as CSV; not yet in a release. Also not yet released: hide/delete/reorder categories, edit/close/delete accounts, reconcile adjustments, a date picker, payee suggestions, quick assign amounts and Cover overspending. No bank sync, credit-card handling or automatic/cloud backup is implemented.
 - Planner and MyBudget are linked apps. Planner can send paid bills for a confirmed expense and request removal when a payment is undone. Included from 0.0.1. BudgetInstrumentation covers adding once and removing on undo, and passed on the Pixel 7 Pro emulator. The full round trip from Planner has not been tested automatically.
 
 ## Working agreement
@@ -43,7 +43,7 @@ Planner's “Send paid bills to MyBudget” opens `AddExpenseActivity` using `co
 
 When Planner marks a payment unpaid, `com.mybudget.app.action.PAYMENT_UNDONE` with the same `paymentId` asks whether to remove the linked expense. The user can keep it. Successful handoffs return `RESULT_OK` with a `summary`; cancellation defaults to `RESULT_CANCELED`. Both actions are exported to other apps, so preserve user confirmation before adding or removing data.
 
-Budget storage version 3 persists `externalId` and `billKey` on entries and continues to read version 2 budgets. MainActivity reloads saved data on restart to incorporate expenses received from another app. Future changes to storage, transaction editing, activity lifecycle or package/action names must consider this connection and verify the flow between both apps.
+Budget storage version 3 persists `externalId` and `billKey` on entries and continues to read version 2 budgets. MainActivity reloads saved data on restart to incorporate expenses received from another app. The add-expense dialog leaves out hidden categories and closed accounts (a suggestion pointing at one is dropped). Categories carry an optional `hidden` flag and accounts an optional `closed` flag; both read as false when missing, so storage stays at version 3. Backups keep `externalId` and `billKey`, so a payment restored from a backup is still not added twice. Restoring an older backup drops expenses Planner sent after it; if such a bill is later marked unpaid, MyBudget finds nothing to remove and asks nothing. Future changes to storage, transaction editing, activity lifecycle or package/action names must consider this connection and verify the flow between both apps.
 
 ## Run
 
@@ -60,7 +60,9 @@ Open the **three-dot menu > Settings > Theme** to choose **Light**, **Dark**, or
 
 Amounts are AUD and stored as integer cents. Each month's Plan displays Assigned, Activity and Available for grouped categories. Positive available balances roll forward. Uncovered cash overspending resets the category at rollover and reduces the following month's Ready to Assign. Transactions are recorded from an account's opening date onward. Future assignments reserve existing money; future income is never assumed.
 
-Tap categories to assign or return money, move money, edit their group or target, or view transactions. Targets support monthly refill, a fresh monthly contribution, and a savings balance with an optional due month. Fund Targets assigns existing money in category order, up to the available amount.
+Tap categories to assign or return money, move money, edit their group or target, view transactions, move them up or down within their group, hide them, or delete them. A hidden category leaves Plan and the pickers (including Planner's bills) but its money still counts; Plan lists hidden categories at the bottom with what they hold. Deleting a category that was used moves its transactions and monthly assignments to a category you choose, so cash is unchanged and Planner's bills suggest the new category. Assign offers quick amounts: needed for the target, assigned last month, spent last month, average spent over the last three months, and reset to $0 (as far as money not yet spent allows). An overspent category offers Cover overspending: pick a category with money, or Ready to Assign, and the amount is filled in. Move Money lists what each category has available. Dates are picked from a calendar and shown as "7 Oct 2026"; they're stored as `YYYY-MM-DD`. The payee field suggests payees used before, and picking one on a new transaction fills in its last category.
+
+Accounts can be renamed (opening balance and date stay fixed), closed at a $0 balance (they move to Closed accounts, keep their transactions and can be reopened) or deleted when they have no transactions. Reconcile offers a cleared "Reconciliation adjustment" to Ready to Assign when your bank's cleared balance differs. Targets support monthly refill, a fresh monthly contribution, and a savings balance with an optional due month. Fund Targets assigns existing money in category order, up to the available amount.
 
 Plan rows emphasize Available, with Assigned and Activity as secondary details. Targets show their behavior, funding progress and the amount left to fund this month; the target editor explains each type with an example. Bottom navigation includes icons. Transaction forms adapt to Expense, Income and Category refund; income hides the category, and notes are optional.
 
@@ -70,13 +72,23 @@ The first upgrade preserves old category balances, cash and transactions and ret
 
 ## Scope
 
-This version supports multiple cash accounts and saves locally on the device. It has no bank sync, credit-card/debt handling, scheduled or split transactions, shared plans, or cloud/export backup yet. Target types are a subset of YNAB's options. Uninstalling or clearing app storage deletes the budget.
+This version supports multiple cash accounts and saves locally on the device. It has no bank sync, credit-card/debt handling, scheduled or split transactions, shared plans, or automatic/cloud backup yet. Target types are a subset of YNAB's options. Uninstalling or clearing app storage deletes the budget, so keep a backup file (below).
+
+## Backup, restore and export
+
+**Settings > Backup** works through Android's file picker, so MyBudget needs no storage permission.
+
+- **Back up budget** saves `MyBudget-backup-YYYY-MM-DD.json` wherever you choose (Downloads, Drive, a computer). It holds the whole budget: accounts, categories, targets, monthly assignments and every transaction, including the Planner link identifiers. The file is the saved budget JSON plus `app`, `backupVersion` (1) and `created` fields.
+- **Restore from backup** reads the whole file first and refuses anything that isn't a readable MyBudget backup, or one from a newer MyBudget, without changing anything. It then shows the backup's date and counts and asks before replacing the budget on this device. The replaced budget is kept on the device, and **Undo restore** in Settings puts it back until the next restore.
+- **Export transactions (CSV)** saves every transaction for a spreadsheet: date, payee, category, group, account, transfer to, amount, note, cleared. Text starting with `= + - @` gets a leading `'` so spreadsheets don't run it as a formula. A CSV can't be restored.
+
+Backups are plain, unencrypted files: keep them somewhere private.
 
 ## Calculation checks
 
-Compile `Budget.java` and `tests/BudgetTest.java` with a JDK, then run `BudgetTest`. Checks cover exact cents, monthly assignments, rollover, overspending, edit/delete recalculation, targets, transfers, cleared balances, refunds and future reservations.
+Compile `Budget.java` and `tests/BudgetTest.java` with a JDK, then run `BudgetTest`. Checks cover exact cents, monthly assignments, rollover, overspending, edit/delete recalculation, targets, transfers, cleared balances, refunds, future reservations, the CSV export, deleting and reordering categories, closing and deleting accounts, reconcile adjustments, quick assign amounts and payee suggestions.
 
-Build Android tests with `gradlew.bat assembleDebugAndroidTest`. Install both debug APKs and run `adb shell am instrument -w com.mybudget.app.test/com.mybudget.app.BudgetInstrumentation`. Tests exercise migration and persistence using Android's real JSON implementation and launch the actual Activity.
+Build Android tests with `gradlew.bat assembleDebugAndroidTest`. Install both debug APKs and run `adb shell am instrument -w com.mybudget.app.test/com.mybudget.app.BudgetInstrumentation`. Tests exercise migration, persistence and backup files using Android's real JSON implementation and launch the actual Activity.
 
 ## Release signing
 

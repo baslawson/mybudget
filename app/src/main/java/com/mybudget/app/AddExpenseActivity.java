@@ -42,30 +42,40 @@ public class AddExpenseActivity extends Activity {
     private boolean save(){try{String raw=BudgetStore.encode(budget);return getSharedPreferences("budget",0).edit().putString("data",raw).commit();}catch(Exception e){return false;}}
     private TextView label(LinearLayout f,String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setPadding(0,dp(6),0,dp(2));f.addView(v);return v;}
     private EditText field(LinearLayout f,String hint,String value,int type){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);e.setInputType(type);f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
+    // A date shown as "7 Oct 2026" that opens the date picker (up to today); the ISO date is kept in its tag.
+    private EditText dateField(LinearLayout f,String iso){
+        EditText e=new EditText(this);e.setTag(iso);e.setText(MainActivity.pretty(iso));e.setFocusable(false);e.setCursorVisible(false);
+        e.setOnClickListener(v->{LocalDate d=LocalDate.parse((String)e.getTag());DatePickerDialog picker=new DatePickerDialog(this,(p,y,m,day)->{String chosen=LocalDate.of(y,m+1,day).toString();e.setTag(chosen);e.setText(MainActivity.pretty(chosen));},d.getYear(),d.getMonthValue()-1,d.getDayOfMonth());picker.getDatePicker().setMaxDate(System.currentTimeMillis());picker.show();});
+        f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;
+    }
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
 
     private void add(Intent intent,String id){
         Budget.Entry existing=budget.external(id);
         if(existing!=null){done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
         if(!"AUD".equals(intent.getStringExtra("currency"))){fail("MyBudget records AUD only, so this payment wasn't added.");return;}
-        if(budget.accounts.isEmpty()||budget.categories.isEmpty()){fail("Open MyBudget and add an account first, then mark the bill paid again.");return;}
+        // Hidden categories and closed accounts aren't offered (as in MyBudget's own forms).
+        List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden)categories.add(c);
+        List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed)accounts.add(a);
+        if(accounts.isEmpty()||categories.isEmpty()){fail("Open MyBudget and add an account first, then mark the bill paid again.");return;}
         String billKey=text(intent,"billKey",100),payee=text(intent,"payee",80),note=text(intent,"note",200);
         long sent=intent.getLongExtra("amountCents",0);String date=text(intent,"date",10);
         try{LocalDate.parse(date);}catch(Exception e){date=LocalDate.now().toString();}
         Budget.Entry last=budget.lastForBill(billKey);
         Budget.Category suggested=last==null?null:budget.category(last.category);Budget.Account lastAccount=last==null?null:budget.account(last.account);
+        if(!categories.contains(suggested))suggested=null;if(!accounts.contains(lastAccount))lastAccount=null;
         LinearLayout f=new LinearLayout(this);f.setOrientation(LinearLayout.VERTICAL);f.setPadding(dp(24),dp(4),dp(24),dp(4));
         label(f,"From "+sender(),12);
         if(last!=null&&YearMonth.from(LocalDate.parse(last.date)).equals(YearMonth.from(LocalDate.parse(date))))
-            label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+last.date+". Save only if this is another payment.",13);
+            label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+MainActivity.pretty(last.date)+". Save only if this is another payment.",13);
         label(f,"Payee",12);EditText payeeField=field(f,"Payee",payee,InputType.TYPE_CLASS_TEXT);
         label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);amountField.setTextSize(22);
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
-        label(f,"Date",12);EditText dateField=field(f,"YYYY-MM-DD",date,InputType.TYPE_CLASS_DATETIME);
-        String[] categoryNames=new String[budget.categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<budget.categories.size();i++){Budget.Category c=budget.categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
-        label(f,"Category",12);Spinner category=new Spinner(this);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:budget.categories.indexOf(suggested)+1);f.addView(category);
+        label(f,"Date",12);EditText dateField=dateField(f,date);
+        String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
+        label(f,"Category",12);Spinner category=new Spinner(this);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
         if(suggested!=null)label(f,"Suggested from last time for this bill.",12);
-        label(f,"Account",12);Spinner account=new Spinner(this);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,budget.accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:budget.accounts.indexOf(lastAccount));f.addView(account);
+        label(f,"Account",12);Spinner account=new Spinner(this);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
         if(!note.isEmpty())label(f,"Note: "+note,12);
         ScrollView scroll=new ScrollView(this);scroll.addView(f);
         dialog=new AlertDialog.Builder(this).setTitle("Add expense").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
@@ -73,8 +83,8 @@ public class AddExpenseActivity extends Activity {
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try{
                 if(category.getSelectedItemPosition()==0)throw new IllegalArgumentException("Choose a category.");
-                Budget.Category c=budget.categories.get(category.getSelectedItemPosition()-1);Budget.Account a=budget.accounts.get(account.getSelectedItemPosition());
-                long cents=Budget.cents(amountField.getText().toString());String day=LocalDate.parse(dateField.getText().toString().trim()).toString();
+                Budget.Category c=categories.get(category.getSelectedItemPosition()-1);Budget.Account a=accounts.get(account.getSelectedItemPosition());
+                long cents=Budget.cents(amountField.getText().toString());String day=LocalDate.parse((String)dateField.getTag()).toString();
                 Budget.Entry e=new Budget.Entry(payeeField.getText().toString().trim(),c.id,a.id,day,-cents);e.memo=note;e.externalId=id;e.billKey=billKey;
                 budget.validate(e);budget.entries.add(0,e);
                 if(!save()){budget.entries.remove(e);throw new IllegalStateException("Could not save to device storage.");}
