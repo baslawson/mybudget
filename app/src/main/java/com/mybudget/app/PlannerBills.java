@@ -14,6 +14,10 @@ import java.util.*;
  * they're kept in preferences (planner_bills, planner_bills_at), not in the budget: they aren't money, only what's
  * coming, and the expense still arrives when the bill is marked paid in Planner (AddExpenseActivity). On Android 14
  * and later only Planner's packages are accepted, since Planner shares its identity with the broadcast.
+ * Currencies: Planner sends "billsAll" (every currency, each bill with its "currency") and, for a MyBudget before
+ * currencies, "bills" (its AUD bills). Without billsAll (an older Planner) the bills are AUD. The whole list is kept, each
+ * bill with its currency; only those in the budget's currency are planned for (read), so after a change of currency in
+ * Settings that currency's bills show at once, and a list saved before currencies (no "currency") counts as AUD.
  */
 public class PlannerBills extends BroadcastReceiver {
     public static final String ACTION="com.mybudget.app.action.UPCOMING_BILLS";
@@ -22,14 +26,18 @@ public class PlannerBills extends BroadcastReceiver {
     @Override public void onReceive(Context context,Intent intent){
         if(!ACTION.equals(intent.getAction()))return;
         if(Build.VERSION.SDK_INT>=34&&!PLANNER.contains(getSentFromPackage()))return;
-        String clean;try{clean=clean(intent.getStringExtra("bills"));}catch(Exception e){return;}
+        String clean;try{clean=clean(intent);}catch(Exception e){return;}
         context.getSharedPreferences("budget",0).edit().putString("planner_bills",clean).putString("planner_bills_at",LocalDateTime.now().withNano(0).toString()).apply();
     }
-    /** Checks and trims a list from Planner; throws if it isn't one. */
-    static String clean(String raw)throws JSONException{
+    /** The list a broadcast carries, checked: billsAll when it's there (every currency), else bills (AUD). */
+    static String clean(Intent intent)throws JSONException{String all=intent.getStringExtra("billsAll");return all!=null?clean(all,true):clean(intent.getStringExtra("bills"),false);}
+    static String clean(String raw)throws JSONException{return clean(raw,false);}
+    /** Checks and trims a list from Planner; throws if it isn't one. [withCurrency]: billsAll, each bill with its currency (one without a known currency is left out); else all AUD. */
+    static String clean(String raw,boolean withCurrency)throws JSONException{
         JSONArray in=new JSONArray(raw==null?"[]":raw),out=new JSONArray();
         for(int i=0;i<in.length()&&out.length()<MAX;i++){JSONObject b=in.getJSONObject(i);String id=b.getString("id"),key=b.getString("billKey"),payee=b.getString("payee").trim();LocalDate due=LocalDate.parse(b.getString("due"));
-            if(id.isEmpty()||id.length()>100||key.isEmpty()||key.length()>100||payee.isEmpty())continue;JSONObject o=new JSONObject().put("id",id).put("billKey",key).put("payee",payee.length()>80?payee.substring(0,80):payee).put("due",due.toString());
+            String currency=withCurrency?b.optString("currency","").trim():Budget.DEFAULT_CURRENCY;
+            if(id.isEmpty()||id.length()>100||key.isEmpty()||key.length()>100||payee.isEmpty()||!Budget.knownCurrency(currency))continue;JSONObject o=new JSONObject().put("id",id).put("billKey",key).put("payee",payee.length()>80?payee.substring(0,80):payee).put("due",due.toString()).put("currency",currency);
             if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0||c>10_000_000_000L)continue;o.put("amountCents",c);}out.put(o);}
         return out.toString();
     }
@@ -61,11 +69,11 @@ public class PlannerBills extends BroadcastReceiver {
         }
         a.remove(drop);return a.toString();
     }
-    /** The saved list as upcoming transactions (amount negative, 0 = no amount), each with its planned category. */
+    /** The saved list's bills in the budget's currency as upcoming transactions (amount negative, 0 = no amount), each with its planned category. */
     static List<Budget.Scheduled> read(Context context,Budget budget){
         List<Budget.Scheduled> list=new ArrayList<>();if(stale(context))return list;
         try{JSONArray a=new JSONArray(context.getSharedPreferences("budget",0).getString("planner_bills","[]"));
-            for(int i=0;i<a.length();i++){JSONObject b=a.getJSONObject(i);String key=b.getString("billKey");Budget.Scheduled s=new Budget.Scheduled(b.getString("payee"),budget.plannerCategory(key),"",b.getString("due"),-b.optLong("amountCents",0),"Never");s.id=b.getString("id");s.billKey=key;list.add(s);}
+            for(int i=0;i<a.length();i++){JSONObject b=a.getJSONObject(i);if(!Budget.sameCurrency(b.optString("currency",""),budget.currency))continue;String key=b.getString("billKey");Budget.Scheduled s=new Budget.Scheduled(b.getString("payee"),budget.plannerCategory(key),"",b.getString("due"),-b.optLong("amountCents",0),"Never");s.id=b.getString("id");s.billKey=key;list.add(s);}
         }catch(Exception ignored){}
         return list;
     }

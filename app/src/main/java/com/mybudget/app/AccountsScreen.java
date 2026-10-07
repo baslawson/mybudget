@@ -47,11 +47,11 @@ final class AccountsScreen extends Ui {
     void addAccount(){
         LinearLayout f=form();
         Spinner type=spinner(f,"Type",new String[]{"Cash, checking or savings","Credit card","Tracking: an asset (savings elsewhere, investments, house, super)","Tracking: a loan or debt (mortgage, car loan)"},0);
-        EditText name=field(f,"Account name",false),opening=field(f,"Current cash balance (AUD)",true);
+        EditText name=field(f,"Account name",false),opening=field(f,"Current cash balance ("+code()+")",true);
         f.addView(label("Opening date",12,main.muted,true));EditText day=dateField(f,LocalDate.now().toString());
         TextView help=label("",13,main.muted,false);f.addView(help);
         Runnable adapt=()->{int t=type.getSelectedItemPosition();boolean card=t==1;
-            opening.setHint(card?"Amount owed now (AUD, 0 if paid off)":t==2?"What it's worth now (AUD)":t==3?"Amount owed now (AUD)":"Current cash balance (AUD)");
+            opening.setHint(card?"Amount owed now ("+code()+", 0 if paid off)":t==2?"What it's worth now ("+code()+")":t==3?"Amount owed now ("+code()+")":"Current cash balance ("+code()+")");
             help.setText(card?"What you owe now is old debt: it gets a payment category with nothing set aside, so assign money to that category to pay it down. New spending on the card moves the category's money there for you.":t>=2?"Off budget: it doesn't change To budget or your categories, only Net worth. Update its balance now and then."+(t==3?" Add the interest rate and payment in Edit account for the payoff planner.":""):"Enter transactions from the opening date onward.");};
         adapt.run();onPick(type,adapt);
         dialog("Add account",f,()->{String n=required(name);
@@ -68,7 +68,7 @@ final class AccountsScreen extends Ui {
     private void reconcile(Budget.Account a){
         LinearLayout f=form();f.addView(label("Cleared balance: "+money(main.budget.balance(a,true)),18,main.ink,true));
         f.addView(label("Compare with your bank's cleared balance, excluding pending transactions. Mark transactions cleared in Transactions first.",14,main.muted,false));
-        EditText value=field(f,"Bank's cleared balance (AUD)",true);
+        EditText value=field(f,"Bank's cleared balance ("+code()+")",true);
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Reconcile "+a.name)
             .setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Reconcile",null).create();
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
@@ -93,17 +93,17 @@ final class AccountsScreen extends Ui {
             .setMessage("It moves to Closed accounts and isn't offered for new transactions. Its history stays, and you can reopen it.")
             .setNegativeButton("Cancel",null)
             .setPositiveButton("Close account",(d,w)->{if(main.change(()->main.budget.close(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
-        else f.addView(label("To close it, first move its "+money(balance)+" to another account: an account closes at $0.",13,main.muted,false));
+        else f.addView(label("To close it, first move its "+money(balance)+" to another account: an account closes at a zero balance.",13,main.muted,false));
         if(!main.budget.usedAccount(a))f.addView(button("Delete account",()->new AlertDialog.Builder(main).setTitle("Delete "+a.name+"?")
             .setMessage("It has no transactions. Its opening balance of "+money(a.opening)+" leaves your plan.").setNegativeButton("Cancel",null)
             .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Account deleted",()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
         // A loan's terms, for the payoff planner.
         LinearLayout terms=column();if(a.liability)f.addView(terms);terms.addView(label("Loan terms (for the payoff planner)",12,main.muted,true));
         EditText rate=field(terms,"Interest rate (% a year, e.g. 6.25)",false);
-        rate.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);EditText payment=field(terms,"Regular payment (AUD)",true);
+        rate.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);EditText payment=field(terms,"Regular payment ("+code()+")",true);
         Spinner often=spinner(terms,"Paid",Budget.FREQUENCIES,Arrays.asList(Budget.FREQUENCIES).indexOf(a.frequency));
         if(a.rate>0)rate.setText(a.ratePercent().stripTrailingZeros().toPlainString());
-        if(a.payment>0){if(main.hideAmounts)payment.setHint("Regular payment: $••• (empty keeps it)");else payment.setText(decimal(a.payment));} // Hide amounts: the payment isn't shown
+        if(a.payment>0){if(main.hideAmounts)payment.setHint("Regular payment: "+money(a.payment)+" (empty keeps it)");else payment.setText(decimal(a.payment));} // Hide amounts: the payment isn't shown
         dialog("Edit account",f,()->{String n=required(name);
             for(Budget.Account o:main.budget.accounts)if(!o.id.equals(id)&&o.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");
             long r=0,p=0;if(a.liability){String rt=rate.getText().toString().trim();
@@ -118,7 +118,7 @@ final class AccountsScreen extends Ui {
     private void updateBalance(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;long now=main.budget.balance(a,false);LinearLayout f=form();
         f.addView(label((a.liability?"Owed now: "+money(-now):"Balance now: "+money(now))+". Enter the figure from your statement for the date below; the difference from its balance on that date is recorded as a balance update. It doesn't touch your budget.",13,main.muted,false));
-        EditText value=field(f,a.liability?"Amount owed (AUD)":"What it's worth (AUD)",true);f.addView(label("Date",12,main.muted,true));
+        EditText value=field(f,a.liability?"Amount owed ("+code()+")":"What it's worth ("+code()+")",true);f.addView(label("Date",12,main.muted,true));
         EditText day=dateField(f,LocalDate.now().toString());
         dialog("Update "+a.name,f,()->{long v=Budget.parse(value.getText().toString());
             if(v<0)throw new IllegalArgumentException("Enter the amount as a positive number.");
@@ -133,7 +133,7 @@ final class AccountsScreen extends Ui {
         long monthly=Budget.perMonth(a.payment,a.frequency);java.math.BigDecimal rate=a.ratePercent();
         f.addView(label("Owed "+money(owed)+" at "+rate.stripTrailingZeros().toPlainString()+"% a year, paying "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT)+(a.frequency.equals("Monthly")?"":" (about "+money(monthly)+" a month)")+".",14,main.ink,false));
         Budget.Payoff base=Budget.payoff(owed,rate,monthly,0);f.addView(label(payoffText(base),17,base.finished?main.green:main.red,true));
-        f.addView(label("Pay extra each payment",12,main.muted,true));EditText extra=field(f,"Extra (AUD)",true);
+        f.addView(label("Pay extra each payment",12,main.muted,true));EditText extra=field(f,"Extra ("+code()+")",true);
         TextView result=label("",15,main.blue,true);f.addView(result);
         f.addView(label("Interest is worked out monthly on what's owed, rounded to the cent; a weekly or fortnightly payment counts as its monthly average. Your lender's figures may differ a little.",12,main.muted,false));
         onText(extra,()->{long x;try{String t=extra.getText().toString().trim();

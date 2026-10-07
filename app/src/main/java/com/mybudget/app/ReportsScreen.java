@@ -47,7 +47,7 @@ final class ReportsScreen extends Ui {
         age.addView(label("How old your money is when you spend it, over your last 10 outflows. 30 days or more means you're spending last month's income.",13,main.muted,false));
         main.content.addView(label("Last six months",20,main.ink,true));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
             main.content.addView(label(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In "+money(main.budget.income(m))+"   Out "+money(main.budget.spending(m)),13,main.muted,false));}
-        main.content.addView(label("AUD / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
+        main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
     }
     static final String[] PERIODS={"This month","Last month","Last 3 months","This year"};
     // Categorical colours in fixed order (the validated chart palette, light and dark steps); Other is grey.

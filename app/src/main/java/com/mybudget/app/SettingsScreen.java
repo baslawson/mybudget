@@ -9,7 +9,7 @@ import android.widget.*;
 import java.time.*;
 import java.util.*;
 
-/** Settings: theme, backup and restore, automatic backup, CSV import and export, flags, payees and import rules. */
+/** Settings: theme, currency, backup and restore, automatic backup, CSV import and export, flags, payees and import rules. */
 final class SettingsScreen extends Ui {
     SettingsScreen(MainActivity main){super(main);}
     boolean showBackup; // open scrolled to Backup (Home's backup reminder)
@@ -18,6 +18,10 @@ final class SettingsScreen extends Ui {
         appearance.addView(label("Theme",20,main.ink,true));
         appearance.addView(label("Choose Light, Dark, or follow your device automatically.",14,main.muted,false));
         appearance.addView(button("Theme: "+main.themeMode,this::chooseTheme));
+        // The budget's one currency (Budget.currency): how money is shown, and which of Planner's bills come in.
+        LinearLayout money=card();money.addView(label("Currency",20,main.ink,true));
+        money.addView(label("Amounts are shown in this currency, in your phone's number style. Planner's bills are added only when they're in it.",14,main.muted,false));
+        money.addView(button("Currency: "+code(),this::chooseCurrency));
         TextView backupTitle=label("Backup",18,main.blue,true);main.content.addView(backupTitle);LinearLayout backup=card();
         if(showBackup){showBackup=false;main.content.post(()->((ScrollView)main.content.getParent()).smoothScrollTo(0,backupTitle.getTop()));} // from Home's backup reminder
         backup.addView(label("Back up and restore",20,main.ink,true));
@@ -200,6 +204,18 @@ final class SettingsScreen extends Ui {
                 if(previous==null){main.budget=new Budget();main.load();}else{main.budget=previous;main.loaded=before;}
                 for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();main.render();toast("Restore undone.");
             }).show();
+    }
+    // Common currencies first, then the rest A to Z. Amounts stay as they are (no conversion), so the change asks first.
+    private void chooseCurrency(){
+        List<String> codes=Budget.currencyChoices();String[] names=new String[codes.size()];
+        for(int i=0;i<names.length;i++)names[i]=codes.get(i)+" · "+Currency.getInstance(codes.get(i)).getDisplayName(Locale.getDefault());
+        new AlertDialog.Builder(main).setTitle("Currency").setSingleChoiceItems(names,codes.indexOf(code()),(dialog,which)->{
+            String chosen=codes.get(which);dialog.dismiss();if(chosen.equals(code()))return;
+            new AlertDialog.Builder(main).setTitle("Show amounts in "+chosen+"?")
+                .setMessage("Amounts aren't converted, only shown in "+chosen+": "+Budget.money(10000,main.money())+" becomes "+Budget.money(10000,Budget.moneyFormat(chosen,Locale.getDefault()))+". Planner's bills in other currencies won't be added or planned for.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Change to "+chosen,(d,w)->{
+                    try{main.commit(()->main.budget.currency=chosen);main.render();toast("Amounts are now shown in "+chosen+".");}catch(Exception e){toast(e.getMessage());}}).show();
+        }).setNegativeButton("Cancel",null).show();
     }
     private void chooseTheme(){
         String[] modes={"Light","Dark","Auto"};int selected=Arrays.asList(modes).indexOf(main.themeMode);

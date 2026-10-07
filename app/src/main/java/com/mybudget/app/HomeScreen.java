@@ -21,7 +21,7 @@ final class HomeScreen extends Ui {
         if(ready>0){alerts++;
             alert(money(ready)+" in To budget is waiting to be assigned",main.blue,"Give it a job in Budget, or use Fund targets.",()->{main.tab="Plan";main.render();});}
         else if(ready<0){alerts++;
-            alert("To budget is below $0 by "+money(-ready),main.red,"More is assigned than you have. Return money from a category in Budget.",()->{main.tab="Plan";main.render();});}
+            alert("To budget is below zero by "+money(-ready),main.red,"More is assigned than you have. Return money from a category in Budget.",()->{main.tab="Plan";main.render();});}
         LocalDate today=LocalDate.now();List<Budget.Scheduled> soon=main.budget.dueWithin(today,7);
         for(Budget.Scheduled s:soon.subList(0,Math.min(5,soon.size()))){alerts++;LocalDate d=LocalDate.parse(s.next);
             boolean planner=main.budget.fromPlanner.contains(s);String id=s.id;

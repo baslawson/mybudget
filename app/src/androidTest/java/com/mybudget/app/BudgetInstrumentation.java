@@ -28,6 +28,7 @@ public class BudgetInstrumentation extends Instrumentation {
         Intent intent=new Intent(getTargetContext(),MainActivity.class);intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);Activity activity=startActivitySync(intent);waitForIdleSync();if(activity.isFinishing())throw new AssertionError("Activity closed");
         for(String tab:new String[]{"Budget","Transactions","Accounts","Reports","Home"}){runOnMainSync(()->{View button=find(activity.getWindow().getDecorView(),tab,true);if(button==null)throw new AssertionError("Missing tab "+tab);button.performClick();if(find(activity.getWindow().getDecorView(),tab,false)==null)throw new AssertionError("Missing screen "+tab);});waitForIdleSync();}
         sentPayments(day);
+        currencies(migrated,day);
         dataSafety((MainActivity)activity,day);
         backups(migrated);
         // Hidden categories and closed accounts are saved; budgets saved before them read as visible and open.
@@ -93,7 +94,7 @@ public class BudgetInstrumentation extends Instrumentation {
         finally{if(keptAt==null)bp.edit().remove("planner_bills_at").commit();else bp.edit().putString("planner_bills_at",keptAt).commit();}
         boolean badList=false;try{PlannerBills.clean("{not a list");}catch(JSONException expected){badList=true;}if(!badList)throw new AssertionError("Bad list accepted");
         boolean newer=false;try{BudgetStore.decode(v4.put("version",7).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 7 accepted");
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 7 is refused, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile.\n");finish(Activity.RESULT_OK,result);
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 7 is refused, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile, and the budget currency round-trips (backups too), older data reads as AUD, and Planner payments and bills in another currency are left out.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
     // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
     private void backups(Budget b)throws Exception{
@@ -154,6 +155,45 @@ public class BudgetInstrumentation extends Instrumentation {
         b.pin(b.categories.get(1),true);String pinned=b.categories.get(1).id;
         for(Budget back:new Budget[]{BudgetStore.decode(BudgetStore.encode(b)),BudgetStore.readBackup(BudgetStore.backup(b,LocalDateTime.now())).budget}){if(!back.category(pinned).pinned||back.categories.get(0).pinned) /* the pin itself round-trips; this category is hidden here, so pinned() leaves it out */throw new AssertionError("Pinned category lost");if(!BudgetStore.encode(back).equals(BudgetStore.encode(b)))throw new AssertionError("Round trip changed data");}
         JSONObject older=new JSONObject(BudgetStore.encode(b));for(int i=0;i<older.getJSONArray("categories").length();i++)older.getJSONArray("categories").getJSONObject(i).remove("pinned");if(!BudgetStore.decode(older.toString()).pinned().isEmpty())throw new AssertionError("Older budget not read as unpinned");
+    }
+    // One currency per budget: it round-trips (backups too), older data reads as AUD, Planner's payments and bills in another currency stay out.
+    private void currencies(Budget b,String day)throws Exception{
+        Budget eur=BudgetStore.decode(BudgetStore.encode(b));eur.currency="EUR";
+        for(Budget back:new Budget[]{BudgetStore.decode(BudgetStore.encode(eur)),BudgetStore.readBackup(BudgetStore.backup(eur,LocalDateTime.now())).budget})
+            if(!back.currency.equals("EUR")||!BudgetStore.encode(back).equals(BudgetStore.encode(eur)))throw new AssertionError("Currency lost");
+        JSONObject v5=new JSONObject(BudgetStore.encode(eur)).put("version",5);if(!BudgetStore.decode(v5.toString()).currency.equals("AUD"))throw new AssertionError("Version 5 not read as AUD");
+        JSONObject v1=new JSONObject(BudgetStore.backup(eur,LocalDateTime.now())).put("backupVersion",2).put("version",5);if(!BudgetStore.readBackup(v1.toString()).budget.currency.equals("AUD"))throw new AssertionError("Version 2 backup not read as AUD");
+        JSONObject none=new JSONObject(BudgetStore.encode(eur));none.remove("currency");if(!BudgetStore.decode(none.toString()).currency.equals("AUD"))throw new AssertionError("Missing currency not AUD");
+        JSONObject bad=new JSONObject(BudgetStore.backup(eur,LocalDateTime.now())).put("currency","ZZZ");refused(bad.toString(),"damaged");
+        // Planner's paid bill in another currency (or none, meaning AUD, into an EUR budget) is refused and nothing is saved; one in EUR is added.
+        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String saved=prefs.getString("data",null),bills=prefs.getString("planner_bills",null),billsAt=prefs.getString("planner_bills_at",null);
+        try{
+            Budget seed=new Budget();Budget.Account bank=new Budget.Account("Everyday",day,100000);seed.accounts.add(bank);Budget.Category power=new Budget.Category("Utilities");seed.categories.add(power);
+            for(int i=0;i<2;i++){seed.currency=i==0?"AUD":"EUR";String raw=BudgetStore.encode(seed);if(!prefs.edit().putString("data",raw).commit())throw new AssertionError("Seed not saved");
+                Intent add=new Intent(AddExpenseActivity.ACTION_ADD).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra("paymentId","pay-c"+i).putExtra("billKey","planner-series-c").putExtra("payee","Netflix").putExtra("amountCents",1599L).putExtra("date",LocalDate.now().toString());
+                if(i==0)add.putExtra("currency","USD"); // i==1: none sent, so AUD
+                getTargetContext().startActivity(add);waitForIdleSync();Thread.sleep(1500);waitForIdleSync();
+                if(!raw.equals(prefs.getString("data",null)))throw new AssertionError("A payment in another currency was saved");}
+            Intent add=new Intent(AddExpenseActivity.ACTION_ADD).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra("paymentId","pay-c2").putExtra("billKey","planner-series-c").putExtra("payee","Netflix").putExtra("amountCents",1599L).putExtra("currency","EUR").putExtra("date",LocalDate.now().toString());
+            AddExpenseActivity screen=(AddExpenseActivity)startActivitySync(add);waitForIdleSync();
+            runOnMainSync(()->{((android.widget.Spinner)find(screen.dialog.getWindow().getDecorView(),"Choose a category",false).getParent()).setSelection(1);screen.dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();});waitForIdleSync();
+            Budget.Entry sent=BudgetStore.decode(prefs.getString("data",null)).external("pay-c2");if(sent==null||sent.amount!=-1599)throw new AssertionError("A payment in the budget's currency not added");
+            // Upcoming bills: billsAll is used when sent (each bill in its currency; a bill without a known one is left out), else bills, as AUD.
+            String all="[{\"id\":\"b1\",\"billKey\":\"k1\",\"payee\":\"Rent\",\"due\":\"2026-10-20\",\"amountCents\":100000,\"currency\":\"AUD\"},{\"id\":\"b2\",\"billKey\":\"k2\",\"payee\":\"Netflix\",\"due\":\"2026-10-21\",\"amountCents\":1599,\"currency\":\"USD\"},"
+                +"{\"id\":\"b3\",\"billKey\":\"k3\",\"payee\":\"Gym\",\"due\":\"2026-10-22\"},{\"id\":\"b4\",\"billKey\":\"k4\",\"payee\":\"Odd\",\"due\":\"2026-10-23\",\"currency\":\"ZZZ\"}]";
+            String old="[{\"id\":\"b1\",\"billKey\":\"k1\",\"payee\":\"Rent\",\"due\":\"2026-10-20\",\"amountCents\":100000}]";
+            Intent both=new Intent(PlannerBills.ACTION).putExtra("bills",old).putExtra("billsAll",all),only=new Intent(PlannerBills.ACTION).putExtra("bills",old);
+            JSONArray kept=new JSONArray(PlannerBills.clean(both));if(kept.length()!=2||!kept.getJSONObject(1).getString("currency").equals("USD"))throw new AssertionError("billsAll not used: "+kept);
+            String[][] cases={{PlannerBills.clean(both),"AUD","b1"},{PlannerBills.clean(both),"USD","b2"},{PlannerBills.clean(both),"EUR",""},{PlannerBills.clean(only),"AUD","b1"},{PlannerBills.clean(only),"EUR",""},{old,"AUD","b1"},{old,"USD",""}};
+            for(String[] c:cases){prefs.edit().putString("planner_bills",c[0]).putString("planner_bills_at",LocalDateTime.now().withNano(0).toString()).commit();seed.currency=c[1];
+                StringBuilder ids=new StringBuilder();for(Budget.Scheduled s:PlannerBills.read(getTargetContext(),seed))ids.append(s.id);
+                if(!ids.toString().equals(c[2]))throw new AssertionError("Bills for "+c[1]+": "+ids+" from "+c[0]);}
+        }finally{
+            android.content.SharedPreferences.Editor restore=prefs.edit();String[][] keys={{"data",saved},{"planner_bills",bills},{"planner_bills_at",billsAt}};
+            for(String[] k:keys)if(k[1]==null)restore.remove(k[0]);else restore.putString(k[0],k[1]);restore.commit();
+        }
     }
     private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
     // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.

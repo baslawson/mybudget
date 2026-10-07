@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format).");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -657,5 +657,21 @@ public class BudgetTest {
         if(!DataSafety.autoBackupsToDelete(folder,DataSafety.autoBackupName(today)).isEmpty())throw new AssertionError("6 old + today's = 7: none deleted");
         folder.add("MyBudget-auto-2026-09-20.json");folder.add(DataSafety.autoBackupName(today));
         same(String.join(",",DataSafety.autoBackupsToDelete(folder,DataSafety.autoBackupName(today))),"MyBudget-auto-2026-09-20.json","The oldest beyond 7 go; today's and other files stay");
+    }
+    // One currency per budget: AUD unless chosen; Planner's bills only in it (none sent: AUD); two decimals always, in the locale's style.
+    static void currencies(){
+        same(new Budget().currency,"AUD","A new budget is in AUD");
+        for(String ok:new String[]{"AUD","NZD","EUR","JPY","CHF"})if(!Budget.knownCurrency(ok))throw new AssertionError("Known: "+ok);
+        for(String bad:new String[]{"aud","AU","AUDD","ABC","XXX","XTS","XAU","ZZZ","",null})if(Budget.knownCurrency(bad))throw new AssertionError("Unknown: "+bad);
+        if(!Budget.sameCurrency(null,"AUD")||!Budget.sameCurrency("","AUD")||!Budget.sameCurrency("AUD","AUD")||!Budget.sameCurrency("EUR","EUR"))throw new AssertionError("Same currency accepted");
+        if(Budget.sameCurrency("USD","AUD")||Budget.sameCurrency("AUD","EUR")||Budget.sameCurrency(null,"EUR")||Budget.sameCurrency("aud","AUD"))throw new AssertionError("Other currency refused (none sent is AUD)");
+        java.util.List<String> choices=Budget.currencyChoices();same(String.join(",",choices.subList(0,7)),"AUD,NZD,USD,CAD,GBP,EUR,JPY","Common currencies first");
+        java.util.List<String> rest=new java.util.ArrayList<>(choices.subList(7,choices.size())),sorted=new java.util.ArrayList<>(rest);java.util.Collections.sort(sorted);
+        if(!rest.equals(sorted)||!rest.contains("CHF")||rest.contains("AUD")||rest.contains("XXX")||rest.contains("ADP")||rest.contains("DEM")||new java.util.HashSet<>(choices).size()!=choices.size())throw new AssertionError("The rest A to Z, once each: "+rest);
+        java.util.Locale au=java.util.Locale.forLanguageTag("en-AU");
+        same(Budget.money(123456,Budget.moneyFormat("AUD",au)),"$1,234.56","AUD in Australia");same(Budget.money(-1234,Budget.moneyFormat("AUD",au)),"-$12.34","Negative AUD");
+        same(Budget.money(123456,Budget.moneyFormat("EUR",java.util.Locale.GERMANY)).replace(' ',' '),"1.234,56 €","EUR in Germany");
+        String yen=Budget.money(100000,Budget.moneyFormat("JPY",au));if(!yen.endsWith("1,000.00")||yen.contains("$"))throw new AssertionError("JPY keeps two decimals: "+yen);
+        same(Budget.money(500,Budget.moneyFormat("nonsense",au)),"$5.00","An unknown code shows as AUD");
     }
 }

@@ -39,7 +39,9 @@ public class MainActivity extends Activity {
     private String previousTab="Home";
     YearMonth month=YearMonth.now();
     boolean storageReadable=true,showHidden=false;
-    final NumberFormat currency=NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-AU"));
+    // Money in the budget's currency (Settings), in the device's number style; made again when the currency changes.
+    private NumberFormat moneyFormat;private String moneyCode;
+    NumberFormat money(){if(moneyFormat==null||!budget.currency.equals(moneyCode)){moneyCode=budget.currency;moneyFormat=Budget.moneyFormat(moneyCode,Locale.getDefault());}return moneyFormat;}
     @Override public void onCreate(Bundle state){
         themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");
         hideAmounts=getSharedPreferences("appearance",0).getBoolean("hideAmounts",false);

@@ -23,7 +23,8 @@ class Ui {
     String when(String iso){try{return LocalDateTime.parse(iso).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a",Locale.forLanguageTag("en-AU")));}catch(Exception e){return "an unknown date";}}
     static String count(int n,String one,String many){return n+" "+(n==1?one:many);}
     int dp(int n){return(int)(n*main.getResources().getDisplayMetrics().density);}
-    String money(long cents){return main.hideAmounts?"$•••":main.currency.format(java.math.BigDecimal.valueOf(cents,2));}
+    String money(long cents){return main.hideAmounts?main.money().getCurrency().getSymbol(Locale.getDefault())+"•••":Budget.money(cents,main.money());}
+    String code(){return main.budget.currency;} // the budget's currency, for labels such as "Amount (AUD)"
     String decimal(long cents){return java.math.BigDecimal.valueOf(cents,2).toPlainString();}
     LinearLayout column(){LinearLayout v=new LinearLayout(main);v.setOrientation(LinearLayout.VERTICAL);return v;}
     TextView label(String text,int size,int color,boolean bold){TextView v=new TextView(main);v.setText(text);v.setTextSize(size);

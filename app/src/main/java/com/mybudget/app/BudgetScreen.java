@@ -81,7 +81,7 @@ final class BudgetScreen extends Ui {
         long onCredit=main.budget.creditOverspent(c,main.month);
         if(available<0&&onCredit>=-available)row.addView(label("Overspent on a credit card by "+money(-available)+": it becomes card debt unless you cover it",12,main.amber,true));
         else if(cover>0)row.addView(label("Overspent by "+money(cover)+" - tap to cover",12,main.red,true));
-        else if(available<0)row.addView(label("Below $0 by a refund or credit on the card: it carries on, with nothing to cover",12,main.amber,false));
+        else if(available<0)row.addView(label("Below zero by a refund or credit on the card: it carries on, with nothing to cover",12,main.amber,false));
         if(c.payment()){Budget.Account card=main.budget.account(c.cardAccount);
             if(card!=null){long owed=-main.budget.balance(card,false);
                 row.addView(label("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),12,main.muted,false));}}
@@ -180,7 +180,7 @@ final class BudgetScreen extends Ui {
         LinearLayout f=form();f.addView(label(money(main.budget.spendable(main.month))+" to budget",16,main.blue,true));
         long now=main.budget.assigned(c,main.month);
         f.addView(label("Assigned this month: "+money(now)+". A positive amount adds money; a negative one returns it.",13,main.muted,false));
-        EditText amount=field(f,"Amount (AUD)",true);TextView result=label("",13,main.blue,true);f.addView(result);
+        EditText amount=field(f,"Amount ("+code()+")",true);TextView result=label("",13,main.blue,true);f.addView(result);
         onText(amount,()->{try{result.setText("Assigned becomes "+money(now+Budget.parse(amount.getText().toString())));}catch(Exception e){result.setText("");}});
         // Quick amounts: each fills in the change to this month's Assigned.
         f.addView(label("Quick amounts",12,main.muted,true));YearMonth last=main.month.minusMonths(1);
@@ -193,17 +193,17 @@ final class BudgetScreen extends Ui {
         if(!c.payment()){names.add("Spent last month: "+money(spentLast));changes.add(spentLast-now);
             names.add("Average spent, last 3 months: "+money(average));changes.add(average-now);} // a card payment isn't spending
         long available=main.budget.available(c,main.month),toZero=main.budget.resetAvailableChange(c,main.month);
-        if(toZero!=0){names.add((toZero==-available?"Reset available to $0":"Cover overspending")+" (now "+money(available)+")");
+        if(toZero!=0){names.add((toZero==-available?"Reset available to zero":"Cover overspending")+" (now "+money(available)+")");
             changes.add(toZero);} // not offered in a future month when carried money would have to go
         long reset=main.budget.resetChange(c,main.month);
-        if(reset!=0){names.add(reset==-now?"Reset assigned to $0":"Reset assigned: return what's left, "+money(-reset));changes.add(reset);}
+        if(reset!=0){names.add(reset==-now?"Reset assigned to zero":"Reset assigned: return what's left, "+money(-reset));changes.add(reset);}
         for(int i=0;i<names.size();i++){long change=changes.get(i);Button b=button(names.get(i),()->amount.setText(decimal(change)));
             b.setTextSize(12);b.setMinHeight(dp(40));b.setMinimumHeight(dp(40));f.addView(b);}
         dialog("Assign to "+c.name,f,()->main.budget.assign(main.categoryById(c.id),main.month,Budget.parse(amount.getText().toString())));
     }
     private String[] availableNames(){return main.budget.categories.stream().map(c->c.name+" ("+money(main.budget.available(c,main.month))+")").toArray(String[]::new);}
     private void move(){if(main.budget.categories.size()<2){toast("Create two categories first.");return;}LinearLayout f=form();
-        Spinner from=spinner(f,"From",availableNames(),0),to=spinner(f,"To",availableNames(),1);EditText amount=field(f,"Amount (AUD)",true);
+        Spinner from=spinner(f,"From",availableNames(),0),to=spinner(f,"To",availableNames(),1);EditText amount=field(f,"Amount ("+code()+")",true);
         dialog("Move money",f,()->main.budget.move(main.budget.categories.get(from.getSelectedItemPosition()),main.budget.categories.get(to.getSelectedItemPosition()),main.month,Budget.cents(amount.getText().toString())));}
     private void autoAssign(){long remaining=Math.max(0,main.budget.spendable(main.month));long total=0;
         for(Budget.Category c:main.budget.categories)if(!c.hidden)total+=main.budget.fundNeed(c,main.month);long fund=Math.min(remaining,total);

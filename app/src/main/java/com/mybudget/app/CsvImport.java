@@ -37,7 +37,7 @@ public final class CsvImport {
         if(t.endsWith("DR")){negative=true;t=t.substring(0,t.length()-2).trim();}else if(t.endsWith("CR"))t=t.substring(0,t.length()-2).trim();
         if(t.startsWith("(")&&t.endsWith(")")){negative=!negative;t=t.substring(1,t.length()-1);}
         t=t.replace("$","").replace(",","").replace(" ","").replace("AUD","");if(t.startsWith("+"))t=t.substring(1);
-        long v=new BigDecimal(t).movePointRight(2).longValueExact();if(Math.abs(v)>10_000_000_000L)throw new IllegalArgumentException("Over $100 million."); // as typed amounts (Budget.evaluate)
+        long v=new BigDecimal(t).movePointRight(2).longValueExact();if(Math.abs(v)>10_000_000_000L)throw new IllegalArgumentException("Over 100 million."); // as typed amounts (Budget.evaluate)
         return negative?-Math.abs(v):v;
     }
     public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),DateTimeFormatter.ofPattern(format,Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));}

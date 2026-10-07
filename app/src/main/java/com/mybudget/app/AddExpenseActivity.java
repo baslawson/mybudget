@@ -8,7 +8,6 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.widget.*;
 import java.math.BigDecimal;
-import java.text.NumberFormat;
 import java.time.*;
 import java.util.*;
 
@@ -20,7 +19,6 @@ import java.util.*;
 public class AddExpenseActivity extends Activity {
     public static final String ACTION_ADD="com.mybudget.app.action.ADD_EXPENSE",ACTION_UNDONE="com.mybudget.app.action.PAYMENT_UNDONE";
     private Budget budget;
-    private final NumberFormat currency=NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-AU"));
     AlertDialog dialog; // package-private for BudgetInstrumentation
     @Override public void onCreate(Bundle state){
         String themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");
@@ -35,7 +33,7 @@ public class AddExpenseActivity extends Activity {
         if(ACTION_UNDONE.equals(intent.getAction()))undone(id);else if(ACTION_ADD.equals(intent.getAction()))add(intent,id);else finish();
     }
     private String text(Intent intent,String key,int max){String s=intent.getStringExtra(key);return s==null?"":s.trim().substring(0,Math.min(max,s.trim().length()));}
-    private String money(long cents){return currency.format(BigDecimal.valueOf(cents,2));}
+    private String money(long cents){return Budget.money(cents,Budget.moneyFormat(budget.currency,Locale.getDefault()));} // in the budget's currency, as in MyBudget
     private void fail(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();finish();}
     private void done(String summary){setResult(RESULT_OK,new Intent().putExtra("summary",summary));finish();}
     private String sender(){ComponentName from=getCallingActivity();if(from==null)return "another app";try{return getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(from.getPackageName(),0)).toString();}catch(Exception e){return "another app";}}
@@ -55,7 +53,8 @@ public class AddExpenseActivity extends Activity {
     private void add(Intent intent,String id){
         Budget.Entry existing=budget.external(id);
         if(existing!=null){PlannerBills.dropPaid(this,text(intent,"upcomingId",100),text(intent,"billKey",100),id,-existing.amount);done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
-        if(!"AUD".equals(intent.getStringExtra("currency"))){fail("MyBudget records AUD only, so this payment wasn't added.");return;}
+        // Only in the budget's currency (amounts aren't converted); a Planner from before currencies sends none: AUD.
+        if(!Budget.sameCurrency(intent.getStringExtra("currency"),budget.currency)){fail("This bill is in "+text(intent,"currency",3)+", but your budget is in "+budget.currency+", so it wasn't added.");return;}
         // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
         List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
         List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed&&!a.tracking())accounts.add(a); // tracking accounts are off budget: no categories
@@ -72,7 +71,7 @@ public class AddExpenseActivity extends Activity {
             label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+Ui.pretty(last.date)+". Save only if this is another payment.",13);
         // Payees used before are suggested (as in MyBudget's own form).
         label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);
-        label(f,"Amount (AUD)",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
+        label(f,"Amount ("+budget.currency+")",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}

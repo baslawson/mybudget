@@ -11,6 +11,7 @@ public final class BudgetStore {
     // payees, pins, bankPayee): 0.0.5 read them as version 4 and dropped them on its next save. Version 4 reads with defaults.
     // Version 6 adds upcoming splits (a scheduled transaction's category "split" with its "splits"): MyBudget 0.0.7 would
     // refuse or lose them, so it must refuse the data instead. Versions 2 to 5 read as before (no upcoming splits).
+    // Version 6 also adds the budget's "currency" (ISO 4217); versions 1 to 5 read as AUD, the only currency before it.
     public static final int VERSION=6;
     public static String encode(Budget b) throws JSONException {
         JSONObject root=new JSONObject().put("version",VERSION);JSONArray categories=new JSONArray(),accounts=new JSONArray(),entries=new JSONArray(),scheduled=new JSONArray();
@@ -24,11 +25,11 @@ public final class BudgetStore {
         JSONObject notes=new JSONObject();for(Map.Entry<String,String> m:b.monthNotes.entrySet())notes.put(m.getKey(),m.getValue());
         JSONArray flagNames=new JSONArray();for(String n:b.flagNames)flagNames.put(n);JSONArray hidden=new JSONArray();for(String p:b.hiddenPayees)hidden.put(p);
         JSONArray rules=new JSONArray();for(Budget.Rule r:b.rules)rules.put(new JSONObject().put("contains",r.contains).put("rename",r.rename).put("category",r.category));
-        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).put("billCategories",bills).put("monthNotes",notes).put("flagNames",flagNames).put("hiddenPayees",hidden).put("rules",rules).toString();
+        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).put("billCategories",bills).put("monthNotes",notes).put("flagNames",flagNames).put("hiddenPayees",hidden).put("rules",rules).put("currency",b.currency).toString();
     }
     /** A backup file: the saved budget plus what marks it as MyBudget's, and when it was made (local date-time). */
     // Backup version 2: storage version 5 inside (MyBudget 0.0.5 refuses it as newer). Version 1 backups still restore.
-    // Backup version 3: storage version 6 (upcoming splits; MyBudget 0.0.7 refuses it as newer). Versions 1 and 2 still restore.
+    // Backup version 3: storage version 6 (upcoming splits, the currency; MyBudget 0.0.7 refuses it as newer). Versions 1 and 2 still restore.
     public static final int BACKUP_VERSION=3;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
@@ -69,6 +70,8 @@ public final class BudgetStore {
         JSONArray flagNames=root.optJSONArray("flagNames");if(flagNames!=null)for(int i=1;i<Math.min(flagNames.length(),Budget.FLAGS.length);i++){String n=flagNames.optString(i,"").trim();b.flagNames[i]=n.length()>30?n.substring(0,30):n;}
         JSONArray hidden=root.optJSONArray("hiddenPayees");if(hidden!=null)for(int i=0;i<hidden.length();i++){String p=hidden.getString(i).trim().toLowerCase(Locale.ROOT);if(!p.isEmpty())b.hiddenPayees.add(p);}
         JSONArray rules=root.optJSONArray("rules");if(rules!=null)for(int i=0;i<rules.length();i++){JSONObject j=rules.getJSONObject(i);Budget.Rule r=new Budget.Rule(j.getString("contains"),j.optString("rename",""),j.optString("category",""));if(b.category(r.category)==null)r.category="";boolean twice=false;for(Budget.Rule o:b.rules)twice|=o.contains.trim().equalsIgnoreCase(r.contains.trim());if(!twice&&!r.contains.trim().isEmpty()&&(!r.rename.trim().isEmpty()||!r.category.isEmpty()))b.rules.add(r);} // a repeated text never matched (the first wins): dropped
+        // Currency (version 6; missing: AUD). An unknown code is damaged data, refused rather than shown as some other money.
+        if(version>=6){String code=root.optString("currency",Budget.DEFAULT_CURRENCY);if(!Budget.knownCurrency(code))throw new JSONException("Unknown currency.");b.currency=code;}
         JSONArray scheduled=root.optJSONArray("scheduled");
         if(scheduled!=null)for(int i=0;i<scheduled.length();i++){JSONObject j=scheduled.getJSONObject(i);LocalDate.parse(j.getString("next"));Budget.Scheduled s=new Budget.Scheduled(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("next"),j.getLong("amount"),j.getString("repeat"));s.id=j.getString("id");s.day=Math.max(0,Math.min(31,j.optInt("day",s.day)));s.memo=j.optString("memo","");s.billKey=j.optString("billKey","");
             // Upcoming splits (version 6): parts in known categories (or To budget), adding up to the amount, only with category "split".

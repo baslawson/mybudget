@@ -37,7 +37,7 @@ final class TransactionForms extends Ui {
         TextView guidance=label("",12,main.muted,false);f.addView(guidance);
         // Payees used before are suggested; picking one on a new transaction fills in the category it had last time.
         AutoCompleteTextView payee=suggestField(f,"Payee",()->main.budget.payees());
-        f.addView(label("Amount (AUD)",12,main.muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);
+        f.addView(label("Amount ("+code()+")",12,main.muted,true));EditText amount=field(f,"0.00",true);amount.setTextSize(24);
         f.addView(label("Date",12,main.muted,true));
         EditText day=dateField(f,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);
         Spinner account=spinner(f,"Account",accounts.stream().map(a->a.name).toArray(String[]::new),keepAccount==null?0:accounts.indexOf(main.budget.account(keepAccount)));
@@ -179,7 +179,7 @@ final class TransactionForms extends Ui {
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
             List<Budget.Split> result=new ArrayList<>();
             for(int i=0;i<cats.size();i++){long cents;
-                try{cents=Budget.cents(amounts.get(i).getText().toString());}catch(Exception e){toast("Give every part an amount above $0.");return;}
+                try{cents=Budget.cents(amounts.get(i).getText().toString());}catch(Exception e){toast("Give every part an amount above zero.");return;}
                 int c=cats.get(i).getSelectedItemPosition();Budget.Split part=new Budget.Split(c==categories.size()?"":categories.get(c).id,cents);
                 part.memo=memos.get(i).getText().toString().trim();result.add(part);}
             if(result.size()<2){toast("A split needs at least two parts. Use Remove split for one category.");return;}
@@ -230,7 +230,7 @@ final class TransactionForms extends Ui {
             boolean out=!a.tracking()&&b.tracking(),in=a.tracking()&&!b.tracking();categoryBox.setVisibility(out?View.VISIBLE:View.GONE);
             crossing.setText(out?"It leaves your budget: it's spending from this category.":in?"It comes into your budget: it's income to To budget.":"");
             crossing.setVisibility(out||in?View.VISIBLE:View.GONE);};adapt.run();onPick(from,adapt);onPick(to,adapt);
-        EditText amount=field(f,"Amount (AUD)",true);if(preset>0)amount.setText(decimal(preset));f.addView(label("Date",12,main.muted,true));
+        EditText amount=field(f,"Amount ("+code()+")",true);if(preset>0)amount.setText(decimal(preset));f.addView(label("Date",12,main.muted,true));
         EditText day=dateField(f,old==null?LocalDate.now().toString():old.date);CheckBox cleared=new CheckBox(main);
         cleared.setText("Cleared in both accounts");f.addView(cleared);if(old!=null){amount.setText(decimal(-old.amount));
             cleared.setChecked(old.cleared);f.addView(button("Delete transfer",()->delete(old)));}
@@ -246,7 +246,7 @@ final class TransactionForms extends Ui {
         Budget.Account a=main.budget.account(accountId);if(a==null)return;LinearLayout f=form();
         f.addView(label(a.name+" is a tracking account: off budget, no category. A positive amount raises its balance"+(a.liability?" (less owed)":"")+"; a negative one lowers it.",13,main.muted,false));
         AutoCompleteTextView payee=suggestField(f,"Payee or description",()->main.budget.payees());
-        EditText amount=field(f,"Amount (AUD, + or -)",true);f.addView(label("Date",12,main.muted,true));EditText day=dateField(f,old.date);
+        EditText amount=field(f,"Amount ("+code()+", + or -)",true);f.addView(label("Date",12,main.muted,true));EditText day=dateField(f,old.date);
         EditText memo=field(f,"Note (optional)",false);
         CheckBox cleared=new CheckBox(main);cleared.setText("Cleared");f.addView(cleared);Spinner flag=spinner(f,"Flag",flagChoices(),old.flag);
         payee.setText(old.payee,false);amount.setText(decimal(old.amount));memo.setText(old.memo);cleared.setChecked(old.cleared);

@@ -85,6 +85,33 @@ public final class Budget {
     public final List<Scheduled> fromPlanner=new ArrayList<>();
     /** A Planner bill (billKey) -> the category chosen for it here, until its first expense says so. */
     public final Map<String,String> billCategories=new TreeMap<>();
+    // The budget's one currency (ISO 4217; "AUD" unless chosen in Settings; storage version 6). Amounts are cents whatever it
+    // is: changing it converts nothing, it only changes how money is shown. Planner's bills come in only in this currency.
+    public static final String DEFAULT_CURRENCY="AUD";
+    public String currency=DEFAULT_CURRENCY;
+    /** A currency MyBudget can use: one of the currencies this phone knows, but not gold, test or "no currency" codes. */
+    public static boolean knownCurrency(String code){return code!=null&&code.matches("[A-Z]{3}")&&!NOT_MONEY.contains(code)&&available().contains(code);}
+    private static final Set<String> NOT_MONEY=new HashSet<>(Arrays.asList("XAU","XAG","XPT","XPD","XDR","XBA","XBB","XBC","XBD","XSU","XUA","XTS","XXX"));
+    private static Set<String> codes;
+    // Android makes up a currency for any three letters (Currency.getInstance("ZZZ") works there), so only the listed ones count.
+    private static synchronized Set<String> available(){if(codes==null){codes=new HashSet<>();for(Currency c:Currency.getAvailableCurrencies())codes.add(c.getCurrencyCode());}return codes;}
+    /** Whether a Planner bill or payment in [sent] can go into a budget in [budget]; none sent (a Planner before currencies) is AUD. */
+    public static boolean sameCurrency(String sent,String budget){return (sent==null||sent.trim().isEmpty()?DEFAULT_CURRENCY:sent.trim()).equals(budget);}
+    static final String[] COMMON_CURRENCIES={"AUD","NZD","USD","CAD","GBP","EUR","JPY"};
+    /**
+     * Currencies to choose from: the common ones first, then the others in use today (some country's currency on this phone),
+     * A to Z by code. Currency.getAvailableCurrencies() also has old ones (pesetas, 1927 afghanis), so it isn't the list.
+     */
+    public static List<String> currencyChoices(){List<String> all=new ArrayList<>(Arrays.asList(COMMON_CURRENCIES));TreeSet<String> rest=new TreeSet<>();
+        for(Locale l:Locale.getAvailableLocales()){if(l.getCountry().isEmpty())continue;try{Currency c=Currency.getInstance(l);if(c!=null&&!all.contains(c.getCurrencyCode())&&knownCurrency(c.getCurrencyCode()))rest.add(c.getCurrencyCode());}catch(IllegalArgumentException ignored){}}
+        all.addAll(rest);return all;}
+    /**
+     * Money in [code] in [locale]'s number style ("$1,234.56" for AUD in Australia, "1.234,56 €" for EUR in Germany), always
+     * with the two decimals stored, even for a currency without cents (JPY): amounts are cents in every currency.
+     */
+    public static java.text.NumberFormat moneyFormat(String code,Locale locale){java.text.NumberFormat f=java.text.NumberFormat.getCurrencyInstance(locale);
+        f.setCurrency(Currency.getInstance(knownCurrency(code)?code:DEFAULT_CURRENCY));f.setMinimumFractionDigits(2);f.setMaximumFractionDigits(2);return f;}
+    public static String money(long cents,java.text.NumberFormat format){return format.format(BigDecimal.valueOf(cents,2));}
     /** The category for a Planner bill: the one chosen here, else its last expense's; "" when not known yet. */
     public String plannerCategory(String billKey){String id=billCategories.get(billKey);Category c=id==null?null:category(id);if(c!=null&&!c.payment())return c.id;Entry last=lastForBill(billKey);c=last==null||last.split()?null:category(last.category);return c==null||c.payment()?"":c.id;}
     private List<Scheduled> planned(){List<Scheduled> all=new ArrayList<>(scheduled);all.addAll(fromPlanner);return all;}
@@ -150,7 +177,7 @@ public final class Budget {
     public static long evaluate(String input) {
         try {String s=input.replaceAll("\\s","");if(s.length()>100)throw new IllegalArgumentException();Calc c=new Calc(s);BigDecimal v=c.sum();if(c.at!=s.length())throw new IllegalArgumentException();
             long cents=v.movePointRight(2).longValueExact();if(cents < -10_000_000_000L || cents>10_000_000_000L)throw new IllegalArgumentException();return cents;}
-        catch(RuntimeException e){throw new IllegalArgumentException("Enter an amount with at most two decimal places (maximum $100 million).");}
+        catch(RuntimeException e){throw new IllegalArgumentException("Enter an amount with at most two decimal places (maximum 100 million).");}
     }
     /** As evaluate, but text starting with + adds to [current] ("+50" on a $300 target makes $350). */
     public static long adjust(String input,long current){String s=input.trim();return s.startsWith("+")?evaluate(BigDecimal.valueOf(current,2).toPlainString()+s):evaluate(s);}
@@ -418,7 +445,7 @@ public final class Budget {
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
     public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
-    public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a $0 balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
+    public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a zero balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
     public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");Category p=paymentCategory(a);
         if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);}
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference (on a card, see paymentActivity). */
