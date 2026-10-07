@@ -1,4 +1,5 @@
 import com.mybudget.app.Budget;
+import com.mybudget.app.CsvImport;
 import java.time.YearMonth;
 
 public class BudgetTest {
@@ -33,8 +34,30 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign and payees.");
+    }
+    static void phaseF(){
+        // CSV reading: quotes, commas and line breaks in fields, BOM, CRLF.
+        java.util.List<java.util.List<String>> rows=CsvImport.parse("﻿Date,Description,Amount\r\n3/10/2026,\"Coles, Sydney\",-45.10\r\n\"4/10/2026\",\"Say \"\"hi\"\"\nline 2\",\"$1,200.00\"\r\n\r\n");
+        equal(rows.size(),3,"Rows (blank line skipped)");same(rows.get(1).get(1),"Coles, Sydney","Quoted comma");same(rows.get(2).get(1),"Say \"hi\"\nline 2","Quotes and line break");same(rows.get(0).get(0),"Date","BOM removed");
+        equal(CsvImport.amount("-45.10"),-4510,"Signed");equal(CsvImport.amount("$1,200.00"),120000,"Dollar sign and comma");equal(CsvImport.amount("(12.50)"),-1250,"Brackets");equal(CsvImport.amount("12.50 DR"),-1250,"Debit");equal(CsvImport.amount("12.50 CR"),1250,"Credit");
+        if(!CsvImport.looksLikeHeader(rows.get(0))||CsvImport.looksLikeHeader(rows.get(1)))throw new AssertionError("Header detection");
+        same(CsvImport.detectDateFormat(rows,0,true),"d/M/uuuu","Australian dates");
+        same(CsvImport.detectDateFormat(CsvImport.parse("12/31/2025\n1/2/2026\n"),0,false),"M/d/uuuu","US dates when day/month can't read them");same(CsvImport.detectDateFormat(CsvImport.parse("2026-10-03\n"),0,false),"uuuu-MM-dd","ISO");
+        if(CsvImport.detectDateFormat(CsvImport.parse("yesterday\n"),0,false)!=null)throw new AssertionError("Unreadable dates");
+        // Import: payee memory, To categorize, duplicates, future and early rows skipped.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        Budget.Entry old=new Budget.Entry("Coles",food.id,bank.id,"2026-09-01",-1000);b.entries.add(old);Budget.Entry dup=new Budget.Entry("Netflix",food.id,bank.id,"2026-10-02",-1699);b.entries.add(dup);
+        String future=java.time.LocalDate.now().plusDays(3).format(java.time.format.DateTimeFormatter.ofPattern("d/M/uuuu"));
+        java.util.List<java.util.List<String>> statement=CsvImport.parse("Date,Payee,Amount\n3/10/2026,COLES,-45.10\n2/10/2026,Netflix,-16.99\n4/10/2026,Employer,2500.00\n5/10/2026,Hardware,-30\n"+future+",Later,-1\n1/12/2025,Early,-1\nnot a date,X,-1\n");
+        CsvImport.Result r=CsvImport.run(b,statement,true,0,1,2,-1,"d/M/uuuu",bank);
+        equal(r.added,3,"Added");equal(r.duplicates,1,"Duplicate skipped");equal(r.future,1,"Future skipped");equal(r.beforeOpening,1,"Before opening skipped");equal(r.unreadable,1,"Unreadable row");
+        Budget.Entry coles=r.entries.get(0);same(coles.category,food.id,"Payee memory (case-insensitive)");if(!coles.cleared)throw new AssertionError("Imported rows are cleared");
+        same(r.entries.get(1).category,"","Income to Ready to Assign");Budget.Category tc=b.category(r.entries.get(2).category);same(tc.name,CsvImport.TO_CATEGORIZE,"Unknown payee to To categorize");
+        CsvImport.Result again=CsvImport.run(b,statement,true,0,1,2,-1,"d/M/uuuu",bank);equal(again.added,0,"Importing twice adds nothing");equal(again.duplicates,4,"All known");equal(b.categories.size(),2,"One To categorize category");
+        // Separate money-in and money-out columns.
+        CsvImport.Result split=CsvImport.run(b,CsvImport.parse("6/10/2026,Shop,,12.00\n6/10/2026,Refund,3.00,\n"),false,0,1,2,3,"d/M/uuuu",bank);equal(split.added,2,"In/out columns");equal(split.entries.get(0).amount,-1200,"Out column is negative");equal(split.entries.get(1).amount,300,"In column positive");
     }
     static void phaseE(){
         YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1);

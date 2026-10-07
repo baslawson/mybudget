@@ -80,7 +80,7 @@ The first upgrade preserves old category balances, cash and transactions and ret
 
 ## Scope
 
-This version supports cash accounts and credit cards and saves locally on the device. It has no bank sync, loans, shared plans, or automatic/cloud backup yet. Target types are a subset of YNAB's options. Uninstalling or clearing app storage deletes the budget, so keep a backup file (below).
+This version supports cash accounts and credit cards and saves locally on the device. It has no bank sync, loans or shared plans. Target types are a subset of YNAB's options. Uninstalling or clearing app storage deletes the budget, so keep a backup file (below).
 
 ## Backup, restore and export
 
@@ -90,11 +90,15 @@ This version supports cash accounts and credit cards and saves locally on the de
 - **Restore from backup** reads the whole file first and refuses anything that isn't a readable MyBudget backup, or one from a newer MyBudget, without changing anything. It then shows the backup's date and counts and asks before replacing the budget on this device. The replaced budget is kept on the device, and **Undo restore** in Settings puts it back until the next restore.
 - **Export transactions (CSV)** saves every transaction for a spreadsheet: date, payee, category, group, account, transfer to, amount, note, cleared. Text starting with `= + - @` gets a leading `'` so spreadsheets don't run it as a formula. A CSV can't be restored.
 
+- **Automatic backup** (Settings): choose a folder once (Android's folder picker; Drive folders work where the Drive app offers them) and MyBudget saves `MyBudget-auto-YYYY-MM-DD.json` there once a day, keeping the newest 7 and leaving other files alone. It runs as a daily background job and when MyBudget opens; Back up now writes one at once, and Turn off stops it (files already saved stay).
+- **Import transactions (CSV)** (Settings): pick a bank statement CSV and match its columns (date, payee, amount, or separate money in and out columns); the columns are guessed from the header and remembered for next time. Dates are read as day/month first (also ISO, `7 Oct 2026` and, when day/month can't read them, US month/day). Rows already in the account (same date, amount and payee), dated in the future, or before the account opened are skipped. Outflows get the category last used with their payee, otherwise a new **To categorize** category; inflows go to Ready to Assign. Imported rows are cleared and noted "Imported".
+- **Photos** on transactions (e.g. receipts) are kept on this phone (in the app's files, at most 1600 px). Backups hold the budget, not photos: a restore says how many photos aren't on the phone. Photos no transaction uses are deleted when MyBudget starts.
+
 Backups are plain, unencrypted files: keep them somewhere private.
 
 ## Calculation checks
 
-Compile `Budget.java` and `tests/BudgetTest.java` with a JDK, then run `BudgetTest`. Checks cover exact cents, monthly assignments, rollover, overspending, edit/delete recalculation, targets, transfers, cleared balances, refunds, future reservations, the CSV export, deleting and reordering categories, closing and deleting accounts, reconcile adjustments, quick assign amounts and payee suggestions.
+Compile `Budget.java`, `CsvImport.java` and `tests/BudgetTest.java` with a JDK, then run `BudgetTest`. Checks cover exact cents, monthly assignments, rollover, overspending, edit/delete recalculation, targets, transfers, cleared balances, refunds, future reservations, the CSV export, deleting and reordering categories, closing and deleting accounts, reconcile adjustments, quick assign amounts and payee suggestions.
 
 Build Android tests with `gradlew.bat assembleDebugAndroidTest`. Install both debug APKs and run `adb shell am instrument -w com.mybudget.app.test/com.mybudget.app.BudgetInstrumentation`. Tests exercise migration, persistence and backup files using Android's real JSON implementation and launch the actual Activity.
 

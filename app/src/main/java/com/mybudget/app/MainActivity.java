@@ -10,6 +10,7 @@ import android.graphics.drawable.Drawable;
 import android.content.res.ColorStateList;
 import android.content.Intent;
 import android.net.Uri;
+import android.graphics.BitmapFactory;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import android.text.*;
@@ -40,10 +41,14 @@ public class MainActivity extends Activity {
         else{ink=Color.rgb(27,39,62);blue=Color.rgb(57,77,165);muted=Color.rgb(111,121,140);red=Color.rgb(178,51,55);amber=Color.rgb(159,104,12);green=Color.rgb(32,115,85);canvas=Color.rgb(243,245,250);surface=Color.WHITE;buttonSurface=Color.rgb(231,235,249);primary=blue;}
         getWindow().getDecorView().setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if(state!=null){tab=state.getString("tab","Home");previousTab=state.getString("previousTab","Home");search=state.getString("search","");accountFilter=state.getString("accountFilter","");month=YearMonth.parse(state.getString("month",YearMonth.now().toString()));}
-        load();if(storageReadable)render();
+        load();if(storageReadable){render();cleanupPhotos();}
     }
     // AddExpenseActivity may have saved an expense from another app meanwhile: read it in, so the next save keeps it.
-    @Override protected void onRestart(){super.onRestart();String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null||!storageReadable)return;try{budget=BudgetStore.decode(raw);for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}catch(Exception e){toast("Could not reload your budget.");}}
+    // Not while picking a photo for an open transaction form: reloading would close the form the photo is for.
+    @Override protected void onRestart(){super.onRestart();if(pickingPhoto)return;String raw=getSharedPreferences("budget",0).getString("data",null);if(raw==null||!storageReadable)return;try{budget=BudgetStore.decode(raw);for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();}catch(Exception e){toast("Could not reload your budget.");}}
+    private boolean pickingPhoto;private java.util.function.Consumer<Uri> photoTarget;
+    // Automatic backup: today's, if it hasn't run yet (the daily job may not have had a chance).
+    @Override protected void onResume(){super.onResume();if(!storageReadable)return;AutoBackup.schedule(this);if(prefs().getString("auto_backup_tree",null)!=null)new Thread(()->AutoBackup.run(getApplicationContext(),false)).start();}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("month",month.toString());super.onSaveInstanceState(state);}
     private void options(View anchor){
         PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");menu.getMenu().add(hideAmounts?"Show amounts":"Hide amounts");menu.getMenu().add("Plan reset");
@@ -82,20 +87,76 @@ public class MainActivity extends Activity {
         backup.addView(button("Restore from backup",()->pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),RESTORE)));
         String restoredAt=prefs().getString("before_restore_at",null);
         if(restoredAt!=null){backup.addView(label("Restored from a backup on "+when(restoredAt)+". Undo puts back the budget you had before.",13,muted,false));backup.addView(button("Undo restore",this::undoRestore));}
+        int photos=photoCount();if(photos>0)backup.addView(label(count(photos,"photo stays","photos stay")+" on this phone: backups hold the budget, not photos.",13,muted,false));
+        // Automatic backup to a folder picked once (Drive's folder works too, through the system picker).
+        LinearLayout auto=card();auto.addView(label("Automatic backup",20,ink,true));String tree=prefs().getString("auto_backup_tree",null);
+        if(tree==null){auto.addView(label("Once a day, MyBudget can save a backup to a folder you choose, keeping the last 7.",14,muted,false));auto.addView(button("Choose a folder and turn on",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);try{startActivityForResult(i,AUTO);}catch(android.content.ActivityNotFoundException e){toast("No app on this device can choose a folder.");}}));}
+        else{String last=prefs().getString("auto_backup_last",null),error=prefs().getString("auto_backup_error",null);
+            auto.addView(label("On: a backup a day to "+folderName(tree)+", keeping the last 7."+(last==null?"":" Last: "+pretty(last)+"."),14,muted,false));if(error!=null)auto.addView(label(error,13,red,true));
+            auto.addView(button("Back up now",()->new Thread(()->{String e=AutoBackup.run(this,true);runOnUiThread(()->{toast(e==null?"Backed up to "+folderName(tree)+".":e);if(tab.equals("Settings"))render();});}).start()));
+            auto.addView(button("Turn off",()->{try{getContentResolver().releasePersistableUriPermission(Uri.parse(tree),Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception ignored){}prefs().edit().remove("auto_backup_tree").remove("auto_backup_last").remove("auto_backup_error").apply();AutoBackup.schedule(this);render();toast("Automatic backup is off. Backups already saved stay in the folder.");}));}
+        content.addView(label("Import",18,blue,true));LinearLayout imports=card();imports.addView(label("Import a bank statement",20,ink,true));
+        imports.addView(label("Pick a CSV from your bank and match its columns once. Rows already in the account are skipped; new payees go to "+CsvImport.TO_CATEGORIZE+" until you choose their category.",14,muted,false));
+        imports.addView(button("Import transactions (CSV)",()->pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),IMPORT)));
         LinearLayout export=card();export.addView(label("Export transactions",20,ink,true));export.addView(label("A CSV file of every transaction for a spreadsheet. It can't be restored; use a backup for that.",14,muted,false));
         export.addView(button("Export transactions (CSV)",()->pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("text/csv").putExtra(Intent.EXTRA_TITLE,"MyBudget-transactions-"+LocalDate.now()+".csv"),EXPORT)));
     }
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
-    private static final int BACKUP=1,RESTORE=2,EXPORT=3;
+    private static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6;
+    private String folderName(String tree){try{String id=android.provider.DocumentsContract.getTreeDocumentId(Uri.parse(tree));int c=id.lastIndexOf(':');String n=c>=0?id.substring(c+1):id;return n.isEmpty()?"the folder you chose":n;}catch(Exception e){return "the folder you chose";}}
     private android.content.SharedPreferences prefs(){return getSharedPreferences("budget",0);}
     private String when(String iso){try{return LocalDateTime.parse(iso).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a",Locale.forLanguageTag("en-AU")));}catch(Exception e){return "an unknown date";}}
     private void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){toast("No app on this device can save or open files.");}}
     @Override protected void onActivityResult(int request,int result,Intent data){
-        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(result!=RESULT_OK||uri==null||!storageReadable)return;
+        super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();if(request==PHOTO){pickingPhoto=false;java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);return;}if(result!=RESULT_OK||uri==null||!storageReadable)return;
+        if(request==AUTO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception e){toast("MyBudget couldn't keep access to that folder. Choose another.");return;}prefs().edit().putString("auto_backup_tree",uri.toString()).remove("auto_backup_last").remove("auto_backup_error").apply();AutoBackup.schedule(this);String tree=uri.toString();new Thread(()->{String e=AutoBackup.run(this,true);runOnUiThread(()->{toast(e==null?"Automatic backup is on. First backup saved.":e);render();});}).start();return;}
+        if(request==IMPORT){List<List<String>> rows;try{rows=CsvImport.parse(read(uri));}catch(Exception e){toast(e instanceof IOException&&e.getMessage()!=null?e.getMessage():"Could not read that file.");return;}if(rows.isEmpty()){toast("That file has no rows.");return;}importDialog(rows);return;}
         if(request==RESTORE){BudgetStore.Backup backup;try{backup=BudgetStore.readBackup(read(uri));}catch(Exception e){String m=e.getMessage();toast((e instanceof org.json.JSONException||e instanceof IOException)&&m!=null?m:"Could not read that file.");return;}confirmRestore(backup);return;}
-        try{write(uri,request==BACKUP?BudgetStore.backup(budget,LocalDateTime.now()):"﻿"+budget.csv());toast(request==BACKUP?"Budget backed up.":"Transactions exported.");}
+        try{write(uri,request==BACKUP?BudgetStore.backup(budget,LocalDateTime.now()):"﻿"+budget.csv());toast(request==BACKUP?(photoCount()>0?"Budget backed up. Photos stay on this phone.":"Budget backed up."):"Transactions exported.");}
         catch(Exception e){try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}toast(request==BACKUP?"Could not save the backup.":"Could not save the export.");}
     }
+    /** Matches a statement's columns (remembered by header name for next time), then imports into one account. */
+    private void importDialog(List<List<String>> rows){
+        List<Budget.Account> accounts=openAccounts();if(accounts.isEmpty()){toast("Add an account first.");return;}
+        List<String> first=rows.get(0);int columns=0;for(List<String> r:rows)columns=Math.max(columns,r.size());boolean header=CsvImport.looksLikeHeader(first);
+        String[] names=new String[columns],withNone=new String[columns+1];withNone[0]="None: one signed amount column";
+        for(int i=0;i<columns;i++){String sample=rows.size()>(header?1:0)&&i<rows.get(header?1:0).size()?rows.get(header?1:0).get(i):"";names[i]=(header&&i<first.size()&&!first.get(i).isEmpty()?first.get(i):"Column "+(i+1))+(sample.isEmpty()?"":"  (e.g. "+(sample.length()>24?sample.substring(0,24)+"…":sample)+")");withNone[i+1]=names[i];}
+        // Guess from header words, or from what was used last time with the same headers.
+        int date=guess(first,header,new String[]{"date"},0),payee=guess(first,header,new String[]{"description","payee","narrative","details","merchant","memo"},Math.min(1,columns-1)),amount=guess(first,header,new String[]{"amount","credit"},Math.min(2,columns-1)),out=-1;
+        if(header){int debit=guess(first,true,new String[]{"debit","out","withdrawal"},-1);if(debit>=0&&debit!=amount)out=debit;}
+        String saved=prefs().getString("import_columns",null);if(saved!=null&&header){String[] p=saved.split("\u0001");if(p.length==5&&p[0].equals(String.join("\u0002",first))){date=Integer.parseInt(p[1]);payee=Integer.parseInt(p[2]);amount=Integer.parseInt(p[3]);out=Integer.parseInt(p[4]);}}
+        LinearLayout f=form();f.addView(label(count(rows.size()-(header?1:0),"row","rows")+" in the file.",14,ink,true));CheckBox hasHeader=new CheckBox(this);hasHeader.setText("The first row is column names");hasHeader.setChecked(header);hasHeader.setMinHeight(dp(48));f.addView(hasHeader);
+        Spinner dateCol=spinner(f,"Date",names,date),payeeCol=spinner(f,"Payee or description",names,payee),amountCol=spinner(f,"Amount (or money in)",names,amount),outCol=spinner(f,"Money out (if it's a separate column)",withNone,out+1),account=spinner(f,"Into account",accounts.stream().map(a->a.name).toArray(String[]::new),0);
+        f.addView(label("Imported rows are marked cleared. Dates in the future or before the account opened are skipped.",12,muted,false));
+        ScrollView scroll=new ScrollView(this);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(this).setTitle("Import transactions").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Import",null).create();
+        d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
+            boolean h=hasHeader.isChecked();int dc=dateCol.getSelectedItemPosition(),pc=payeeCol.getSelectedItemPosition(),ac=amountCol.getSelectedItemPosition(),oc=outCol.getSelectedItemPosition()-1;
+            String format=CsvImport.detectDateFormat(rows,dc,h);if(format==null){toast("MyBudget can't read the dates in that column. Check the Date column.");return;}
+            Budget.Account a=accounts.get(account.getSelectedItemPosition());CsvImport.Result[] r=new CsvImport.Result[1];
+            if(!change(()->r[0]=CsvImport.run(budget,rows,h,dc,pc,ac,oc,format,accountById(a.id))))return;
+            if(h)prefs().edit().putString("import_columns",String.join("\u0002",first)+"\u0001"+dc+"\u0001"+pc+"\u0001"+ac+"\u0001"+oc).apply();
+            d.dismiss();CsvImport.Result x=r[0];List<String> skipped=new ArrayList<>();if(x.duplicates>0)skipped.add(x.duplicates+" already there");if(x.future>0)skipped.add(x.future+" in the future");if(x.beforeOpening>0)skipped.add(x.beforeOpening+" before the account opened");if(x.unreadable>0)skipped.add(x.unreadable+" unreadable");
+            boolean sorting=false;for(Budget.Entry e:x.entries){Budget.Category c=budget.category(e.category);if(c!=null&&c.name.equals(CsvImport.TO_CATEGORIZE))sorting=true;}
+            new AlertDialog.Builder(this).setTitle(count(x.added,"transaction","transactions")+" imported").setMessage((skipped.isEmpty()?"Nothing was skipped.":"Skipped: "+String.join(", ",skipped)+".")+(sorting?"\n\nSome are in "+CsvImport.TO_CATEGORIZE+": open them in Spending to choose their category.":"")).setPositiveButton("OK",null).show();
+            if(sorting){tab="Spending";search=CsvImport.TO_CATEGORIZE;accountFilter="";render();}
+        }));d.show();
+    }
+    // Photos: JPEGs in files/photos, at most 1600 px on the long side, turned upright from the camera's EXIF.
+    private File photoDir(){File d=new File(getFilesDir(),"photos");d.mkdirs();return d;}
+    private String copyPhoto(Uri uri)throws IOException{
+        BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;try(InputStream in=getContentResolver().openInputStream(uri)){BitmapFactory.decodeStream(in,null,bounds);}
+        if(bounds.outWidth<=0)throw new IOException("Not an image.");int sample=1;while(Math.max(bounds.outWidth,bounds.outHeight)/(sample*2)>=1600)sample*=2;
+        BitmapFactory.Options o=new BitmapFactory.Options();o.inSampleSize=sample;android.graphics.Bitmap bm;try(InputStream in=getContentResolver().openInputStream(uri)){bm=BitmapFactory.decodeStream(in,null,o);}if(bm==null)throw new IOException("Not an image.");
+        int rotate=0;try(InputStream in=getContentResolver().openInputStream(uri)){if(in!=null){int t=new android.media.ExifInterface(in).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,1);rotate=t==6?90:t==3?180:t==8?270:0;}}catch(Exception ignored){}
+        float scale=Math.min(1f,1600f/Math.max(bm.getWidth(),bm.getHeight()));android.graphics.Matrix m=new android.graphics.Matrix();m.postScale(scale,scale);m.postRotate(rotate);android.graphics.Bitmap out=android.graphics.Bitmap.createBitmap(bm,0,0,bm.getWidth(),bm.getHeight(),m,true);
+        String name=UUID.randomUUID()+".jpg";try(OutputStream os=new FileOutputStream(new File(photoDir(),name))){if(!out.compress(android.graphics.Bitmap.CompressFormat.JPEG,85,os))throw new IOException("Could not save the photo.");}return name;
+    }
+    private android.graphics.Bitmap photoBitmap(String name,int max){File file=new File(photoDir(),name);if(name.isEmpty()||!file.isFile())return null;BitmapFactory.Options b=new BitmapFactory.Options();b.inJustDecodeBounds=true;BitmapFactory.decodeFile(file.getPath(),b);int s=1;while(Math.max(b.outWidth,b.outHeight)/(s*2)>=max)s*=2;BitmapFactory.Options o=new BitmapFactory.Options();o.inSampleSize=s;return BitmapFactory.decodeFile(file.getPath(),o);}
+    private void viewPhoto(String name){android.graphics.Bitmap bm=photoBitmap(name,1600);if(bm==null){toast("The photo isn't on this phone.");return;}ImageView img=new ImageView(this);img.setImageBitmap(bm);img.setAdjustViewBounds(true);img.setContentDescription("Photo of this transaction");new AlertDialog.Builder(this).setView(img).setPositiveButton("Close",null).show();}
+    private int photoCount(){int n=0;for(Budget.Entry e:budget.entries)if(!e.photo.isEmpty())n++;return n;}
+    /** Deletes photo files no transaction uses (a form cancelled after adding one, a deleted transaction); keeps those Undo restore / Undo plan reset could bring back. */
+    private void cleanupPhotos(){Set<String> used=new HashSet<>();for(Budget.Entry e:budget.entries)used.add(e.photo);for(String key:new String[]{"before_restore","before_reset"}){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\"photo\":\"([^\"]+)\"").matcher(prefs().getString(key,""));while(m.find())used.add(m.group(1));}File[] files=new File(getDataDir(),"files/photos").listFiles(); /* listing only: getFilesDir() would create the folder */if(files!=null)for(File file:files)if(!used.contains(file.getName()))file.delete();}
+    private static int guess(List<String> header,boolean has,String[] words,int fallback){if(has)for(String w:words)for(int i=0;i<header.size();i++)if(header.get(i).toLowerCase(Locale.ROOT).contains(w))return i;return fallback;}
     private void write(Uri uri,String text)throws IOException{
         OutputStream out;try{out=getContentResolver().openOutputStream(uri,"wt");}catch(FileNotFoundException|IllegalArgumentException|UnsupportedOperationException e){out=getContentResolver().openOutputStream(uri,"w");}
         if(out==null)throw new IOException();try(OutputStream o=out){o.write(text.getBytes(StandardCharsets.UTF_8));}
@@ -107,8 +168,8 @@ public class MainActivity extends Activity {
     }
     private static String count(int n,String one,String many){return n+" "+(n==1?one:many);}
     private void confirmRestore(BudgetStore.Backup backup){
-        Budget b=backup.budget;
-        new AlertDialog.Builder(this).setTitle("Restore this backup?").setMessage("Backup made "+when(backup.created)+"\n\n"+count(b.accounts.size(),"account","accounts")+", "+count(b.categories.size(),"category","categories")+", "+count(b.entries.size(),"transaction","transactions")+".\n\nThis replaces the budget on this device. You can undo it afterwards in Settings.")
+        Budget b=backup.budget;int missing=0;for(Budget.Entry e:b.entries)if(!e.photo.isEmpty()&&!new File(photoDir(),e.photo).isFile()){e.photo="";missing++;} // photos aren't in backups
+        new AlertDialog.Builder(this).setTitle("Restore this backup?").setMessage("Backup made "+when(backup.created)+"\n\n"+count(b.accounts.size(),"account","accounts")+", "+count(b.categories.size(),"category","categories")+", "+count(b.entries.size(),"transaction","transactions")+"."+(missing>0?" "+count(missing,"photo isn't","photos aren't")+" on this phone (backups don't hold photos).":"")+"\n\nThis replaces the budget on this device. You can undo it afterwards in Settings.")
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->{
                 // The budget being replaced is kept (empty: there was none) for Undo restore.
                 String current=prefs().getString("data",null);
@@ -252,7 +313,7 @@ public class MainActivity extends Activity {
     private String categoryName(Budget.Entry e){if(e.split()){StringBuilder s=new StringBuilder("Split:");for(Budget.Split p:e.splits){Budget.Category c=budget.category(p.category);s.append(" ").append(c==null?"Ready to Assign":c.name).append(",");}return s.substring(0,s.length()-1);}return e.transfer()?"Transfer":e.category.isEmpty()?"Ready to Assign":budget.category(e.category).name;}
     private void fillEntries(LinearLayout list){
         list.removeAllViews();List<Budget.Entry> ordered=new ArrayList<>(budget.entries);ordered.sort((a,b)->b.date.compareTo(a.date));int n=0;
-        for(Budget.Entry e:ordered){String text=e.payee+" "+categoryName(e)+" "+e.memo+" "+budget.account(e.account).name;if(!e.date.startsWith(month.toString())||!text.toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT))||(!accountFilter.isEmpty()&&!e.account.equals(accountFilter)&&!e.destination.equals(accountFilter)))continue;n++;LinearLayout row=column();row.setPadding(dp(14),dp(10),dp(14),dp(10));row.setBackground(bg(surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(5));list.addView(row,p);row.addView(label(e.payee,17,ink,true));row.addView(label(categoryName(e)+" / "+budget.account(e.account).name+" / "+pretty(e.date),12,muted,false));row.addView(label(money(e.amount)+(e.cleared?"  Cleared":"  Uncleared"),17,e.amount>0?green:ink,true));if(!e.memo.isEmpty())row.addView(label(e.memo,12,muted,false));row.setOnClickListener(v->transaction(e));}
+        for(Budget.Entry e:ordered){String text=e.payee+" "+categoryName(e)+" "+e.memo+" "+budget.account(e.account).name;if(!e.date.startsWith(month.toString())||!text.toLowerCase(Locale.ROOT).contains(search.toLowerCase(Locale.ROOT))||(!accountFilter.isEmpty()&&!e.account.equals(accountFilter)&&!e.destination.equals(accountFilter)))continue;n++;LinearLayout row=column();row.setPadding(dp(14),dp(10),dp(14),dp(10));row.setBackground(bg(surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(5));list.addView(row,p);row.addView(label(e.payee,17,ink,true));row.addView(label(categoryName(e)+" / "+budget.account(e.account).name+" / "+pretty(e.date),12,muted,false));row.addView(label(money(e.amount)+(e.cleared?"  Cleared":"  Uncleared"),17,e.amount>0?green:ink,true));if(!e.memo.isEmpty())row.addView(label(e.memo,12,muted,false));if(!e.photo.isEmpty())row.addView(label("Photo attached",12,blue,false));row.setOnClickListener(v->transaction(e));}
         if(n==0)list.addView(label("No matching transactions this month.",15,muted,false));
     }
     private void accounts(){
@@ -362,6 +423,14 @@ public class MainActivity extends Activity {
         payee.setOnItemClickListener((p,v,position,id)->{Budget.Entry last=budget.lastForPayee(payee.getText().toString());if(old!=null||categoryChosen[0]||last==null)return;
             if(last.category.isEmpty()){kind.setSelection(1);return;}int i=categories.indexOf(budget.category(last.category));if(i<0)return;category.setSelection(i);if(kind.getSelectedItemPosition()==1)kind.setSelection(last.amount<0?0:2);});
         LinearLayout noteFields=column();EditText memo=field(noteFields,"Note (optional)",false);Button note=button(old!=null&&!old.memo.isEmpty()?"Hide note":"+ Add a note",()->{});f.addView(note);f.addView(noteFields);noteFields.setVisibility(old!=null&&!old.memo.isEmpty()?View.VISIBLE:View.GONE);note.setOnClickListener(v->{boolean show=noteFields.getVisibility()!=View.VISIBLE;noteFields.setVisibility(show?View.VISIBLE:View.GONE);note.setText(show?"Hide note":"+ Add a note");});CheckBox cleared=new CheckBox(this);cleared.setText("Cleared at the bank");cleared.setMinHeight(dp(48));f.addView(cleared);
+        // A photo (e.g. a receipt), kept on this phone. Picking one leaves this form open (see onRestart).
+        String[] photo={old!=null?old.photo:""};LinearLayout photoBox=column();if(sched==null)f.addView(photoBox);Runnable[] showPhotoBox=new Runnable[1];
+        showPhotoBox[0]=()->{photoBox.removeAllViews();
+            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->{photoTarget=u->{try{photo[0]=copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}showPhotoBox[0].run();};pickingPhoto=true;
+                try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PHOTO);}catch(Exception e){pickingPhoto=false;photoTarget=null;toast("No app on this device can pick a photo.");}}));
+            else{android.graphics.Bitmap bm=photoBitmap(photo[0],480);if(bm==null)photoBox.addView(label("The photo isn't on this phone.",13,muted,false));else{ImageView img=new ImageView(this);img.setImageBitmap(bm);img.setAdjustViewBounds(true);img.setScaleType(ImageView.ScaleType.FIT_START);img.setContentDescription("Photo of this transaction. Double tap to view it larger.");img.setOnClickListener(v->viewPhoto(photo[0]));photoBox.addView(img,new LinearLayout.LayoutParams(-1,dp(160)));}
+                photoBox.addView(button("Remove photo",()->{photo[0]="";showPhotoBox[0].run();}));}};
+        showPhotoBox[0].run();
         Spinner repeat=null;if(old==null){repeat=spinner(f,"Repeat",REPEAT_LABELS,sched==null?0:Arrays.asList(Budget.Scheduled.REPEATS).indexOf(sched.repeat));f.addView(label("A future date or a repeat makes it upcoming: it waits in Spending, and you enter it when the day comes.",12,muted,false));}
         if(sched!=null){cleared.setVisibility(View.GONE);payee.setText(sched.payee,false);amount.setText(decimal(Math.abs(sched.amount)));memo.setText(sched.memo);if(!sched.memo.isEmpty()){noteFields.setVisibility(View.VISIBLE);note.setText("Hide note");}f.addView(button("Delete upcoming transaction",()->deleteScheduled(sched.id)));}
         if(old!=null){payee.setText(old.payee,false);amount.setText(decimal(Math.abs(old.amount)));memo.setText(old.memo);cleared.setChecked(old.cleared);f.addView(button("Delete transaction",()->delete(old)));}
@@ -377,7 +446,7 @@ public class MainActivity extends Activity {
                 if(sched==null&&!when.isAfter(LocalDate.now())){budget.validate(s);budget.enter(s);if(!rep.equals("Never"))budget.scheduled.add(s);return;} // today or earlier: entered now, the repeat continues
                 budget.validate(s);budget.scheduled.removeIf(t->t.id.equals(s.id));budget.scheduled.add(s);return;
             }
-            Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;e.splits.add(s);}e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
+            Budget.Entry e=new Budget.Entry(p,cat,acc,date(day),cents);e.memo=memoText;e.photo=photo[0];if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;e.splits.add(s);}e.cleared=cleared.isChecked();budget.validate(e);if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;budget.entries.removeIf(t->t.id.equals(old.id));}budget.entries.add(0,e);});
     }
     /** Edits [parts] (category + positive amount per row); at least two parts. Remove split empties them. */
     private void editSplit(List<Budget.Split> parts,List<Budget.Category> categories,Budget.Category first,long total,Runnable done){

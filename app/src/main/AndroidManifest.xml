@@ -8,5 +8,7 @@
             <intent-filter><action android:name="com.mybudget.app.action.ADD_EXPENSE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
             <intent-filter><action android:name="com.mybudget.app.action.PAYMENT_UNDONE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
         </activity>
+        <!-- Automatic backup: a daily job that saves a backup file to the folder the user picked. -->
+        <service android:name=".AutoBackup" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false"/>
     </application>
 </manifest>

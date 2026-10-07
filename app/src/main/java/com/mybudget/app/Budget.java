@@ -32,6 +32,7 @@ public final class Budget {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
         // Set when another app (Planner) sent this expense: its payment id, and its bill (the same for every month's bill).
         public String externalId="",billKey="";
+        public String photo=""; // a JPEG in files/photos (on this phone only: backups don't carry photos)
         public long amount;
         public boolean cleared;
         // A split (category SPLIT) spreads [amount] over parts, each with a category ("" = Ready to Assign).
