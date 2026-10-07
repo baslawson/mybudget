@@ -96,7 +96,7 @@ final class AccountsScreen extends Ui {
         else f.addView(label("To close it, first move its "+money(balance)+" to another account: an account closes at $0.",13,main.muted,false));
         if(!main.budget.usedAccount(a))f.addView(button("Delete account",()->new AlertDialog.Builder(main).setTitle("Delete "+a.name+"?")
             .setMessage("It has no transactions. Its opening balance of "+money(a.opening)+" leaves your plan.").setNegativeButton("Cancel",null)
-            .setPositiveButton("Delete",(d,w)->{if(main.change(()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
+            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Account deleted",()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
         // A loan's terms, for the payoff planner.
         LinearLayout terms=column();if(a.liability)f.addView(terms);terms.addView(label("Loan terms (for the payoff planner)",12,main.muted,true));
         EditText rate=field(terms,"Interest rate (% a year, e.g. 6.25)",false);

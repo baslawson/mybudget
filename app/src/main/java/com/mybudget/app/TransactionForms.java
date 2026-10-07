@@ -184,7 +184,7 @@ final class TransactionForms extends Ui {
         throw new IllegalArgumentException("That upcoming transaction no longer exists.");}
     private void deleteScheduled(String id){new AlertDialog.Builder(main).setTitle("Delete upcoming transaction?")
             .setMessage("It and its repeats are removed. Transactions already entered stay.").setNegativeButton("Cancel",null)
-            .setPositiveButton("Delete",(d,w)->{if(main.change(()->main.budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
+            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Upcoming transaction deleted",()->main.budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
     /** A due upcoming transaction: enter it (it becomes money), skip this date, or edit it. */
     void dueActions(String id){
         Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){return;}
@@ -201,8 +201,8 @@ final class TransactionForms extends Ui {
     String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
     private void delete(Budget.Entry e){new AlertDialog.Builder(main).setTitle("Delete transaction?")
             .setMessage("Account and category balances will be recalculated.").setNegativeButton("Cancel",null)
-            .setPositiveButton("Delete",(d,w)->{try{main.commit(()->main.budget.entries.removeIf(t->t.id.equals(e.id)));main.render();
-                for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}catch(Exception ex){toast(ex.getMessage());}}).show();}
+            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo(e.transfer()?"Transfer deleted":"Transaction deleted",()->{if(!main.budget.entries.removeIf(t->t.id.equals(e.id)))throw new IllegalArgumentException("That transaction no longer exists.");}))
+                for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
     void transfer(){editTransfer(null,null,0);}
     /** A card payment: a transfer from a cash account to the card, for what's set aside (or what's owed, if less). */
     void payCard(String id){Budget.Account card=main.budget.account(id);if(card==null)return;

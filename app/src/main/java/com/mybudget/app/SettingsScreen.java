@@ -12,14 +12,17 @@ import java.util.*;
 /** Settings: theme, backup and restore, automatic backup, CSV import and export, flags, payees and import rules. */
 final class SettingsScreen extends Ui {
     SettingsScreen(MainActivity main){super(main);}
+    boolean showBackup; // open scrolled to Backup (Home's backup reminder)
     void settings(){
         main.content.addView(label("Appearance",18,main.blue,true));LinearLayout appearance=card();
         appearance.addView(label("Theme",20,main.ink,true));
         appearance.addView(label("Choose Light, Dark, or follow your device automatically.",14,main.muted,false));
         appearance.addView(button("Theme: "+main.themeMode,this::chooseTheme));
-        main.content.addView(label("Backup",18,main.blue,true));LinearLayout backup=card();
+        TextView backupTitle=label("Backup",18,main.blue,true);main.content.addView(backupTitle);LinearLayout backup=card();
+        if(showBackup){showBackup=false;main.content.post(()->((ScrollView)main.content.getParent()).smoothScrollTo(0,backupTitle.getTop()));} // from Home's backup reminder
         backup.addView(label("Back up and restore",20,main.ink,true));
         backup.addView(label("Your budget is saved only on this device. Save a backup file somewhere safe, such as Drive or a computer, to restore it after a reinstall or on a new phone.",14,main.muted,false));
+        String lastBackup=AutoBackup.lastBackup(main);backup.addView(label(lastBackup==null?"No backup yet":"Last backup: "+pretty(lastBackup),14,lastBackup==null?main.amber:main.ink,true));
         backup.addView(button("Back up budget",()->main.pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json")
             .putExtra(Intent.EXTRA_TITLE,"MyBudget-backup-"+LocalDate.now()+".json"),MainActivity.BACKUP)));
         backup.addView(button("Restore from backup",()->main.pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),MainActivity.RESTORE)));

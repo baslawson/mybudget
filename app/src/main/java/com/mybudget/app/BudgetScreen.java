@@ -147,7 +147,7 @@ final class BudgetScreen extends Ui {
         Budget.Category c=main.budget.category(id);if(c==null)return;
         if(!main.budget.used(c)){new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?").setMessage("It has no transactions or assigned money.")
                 .setNegativeButton("Cancel",null)
-                .setPositiveButton("Delete",(d,w)->main.change(()->main.budget.deleteCategory(main.categoryById(id),null))).show();return;}
+                .setPositiveButton("Delete",(d,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),null))).show();return;}
         List<Budget.Category> others=new ArrayList<>();for(Budget.Category o:main.budget.categories)if(o!=c&&!o.payment())others.add(o);
         if(others.isEmpty()){toast("Add another category first, to take its transactions and money.");return;}
         String[] labels=others.stream().map(o->o.name+(o.hidden?" (hidden)":"")).toArray(String[]::new);
@@ -156,7 +156,7 @@ final class BudgetScreen extends Ui {
             new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?")
                 .setMessage("Its "+count(count,"transaction","transactions")+" and the money assigned to it in every month move to "+others.get(n).name+". Bills from Planner then suggest "+others.get(n).name+" too. Past months' balances in "+others.get(n).name+" may change.")
                 .setNegativeButton("Cancel",null)
-                    .setPositiveButton("Move and delete",(d2,w)->main.change(()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show();}).show();
+                    .setPositiveButton("Move and delete",(d2,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show();}).show();
     }
     /** Cover overspending: pick the envelope the money comes from (categories with money, or To budget). */
     void cover(String id){

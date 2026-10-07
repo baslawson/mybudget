@@ -32,6 +32,11 @@ final class HomeScreen extends Ui {
         int review=main.budget.toReview().size();
         if(review>0){alerts++;
             alert(count(review,"imported transaction","imported transactions")+" to review",main.amber,"Check each one's payee and category, then approve it.",main.transactionsScreen::review);}
+        // No backup for 14 days (or ever): the budget is only on this phone. "Remind me in a week" snoozes it (device preferences).
+        if(main.backupDue()){alerts++;String last=AutoBackup.lastBackup(main);
+            LinearLayout a=alert(last==null?"Your budget has never been backed up":"No backup in "+DataSafety.daysSince(last,today)+" days",main.amber,"It's saved only on this phone: uninstalling MyBudget or clearing its storage deletes it. Tap to back it up in Settings.",()->{main.settingsScreen.showBackup=true;
+                main.openSettings();});
+            a.addView(button("Remind me in a week",()->{main.prefs().edit().putString("backup_reminder_until",DataSafety.snoozeUntil(LocalDate.now())).apply();main.render();}));}
         if(alerts==0)main.content.addView(label("All set: nothing needs your attention.",15,main.green,true));
         long need=0;for(Budget.Category c:main.budget.categories)if(!c.hidden)need+=main.budget.fundNeed(c,main.month);
         LinearLayout progress=card();progress.addView(label("Your funding progress",19,main.ink,true));

@@ -28,6 +28,7 @@ public class BudgetInstrumentation extends Instrumentation {
         Intent intent=new Intent(getTargetContext(),MainActivity.class);intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);Activity activity=startActivitySync(intent);waitForIdleSync();if(activity.isFinishing())throw new AssertionError("Activity closed");
         for(String tab:new String[]{"Budget","Transactions","Accounts","Reports","Home"}){runOnMainSync(()->{View button=find(activity.getWindow().getDecorView(),tab,true);if(button==null)throw new AssertionError("Missing tab "+tab);button.performClick();if(find(activity.getWindow().getDecorView(),tab,false)==null)throw new AssertionError("Missing screen "+tab);});waitForIdleSync();}
         sentPayments(day);
+        dataSafety((MainActivity)activity,day);
         backups(migrated);
         // Hidden categories and closed accounts are saved; budgets saved before them read as visible and open.
         Budget flags=BudgetStore.decode(BudgetStore.encode(migrated));flags.categories.get(1).hidden=true;flags.accounts.get(1).closed=true;
@@ -82,7 +83,7 @@ public class BudgetInstrumentation extends Instrumentation {
         finally{if(keptAt==null)bp.edit().remove("planner_bills_at").commit();else bp.edit().putString("planner_bills_at",keptAt).commit();}
         boolean badList=false;try{PlannerBills.clean("{not a list");}catch(JSONException expected){badList=true;}if(!badList)throw new AssertionError("Bad list accepted");
         boolean newer=false;try{BudgetStore.decode(v4.put("version",6).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 6 accepted");
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip in version 4, bad splits and version 6 are refused, version 4 data and version 1 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale.\n");finish(Activity.RESULT_OK,result);
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip in version 4, bad splits and version 6 are refused, version 4 data and version 1 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
     // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
     private void backups(Budget b)throws Exception{
@@ -167,6 +168,33 @@ public class BudgetInstrumentation extends Instrumentation {
             Budget after=BudgetStore.decode(prefs.getString("data",null));if(after.external("pay-t")!=null||after.external("pay-old")==null)throw new AssertionError("Undo removed the wrong expense");
         }finally{
             android.content.SharedPreferences.Editor restore=prefs.edit();if(saved==null)restore.remove("data");else restore.putString("data",saved);restore.commit();
+        }
+    }
+    // Home's backup reminder and a delete's Undo, on the running Activity. The saved budget and backup dates are put back afterwards.
+    private void dataSafety(MainActivity main,String day)throws Exception{
+        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);View screen=main.getWindow().getDecorView();
+        String saved=prefs.getString("data",null),last=prefs.getString("last_backup",null),autoLast=prefs.getString("auto_backup_last",null),snooze=prefs.getString("backup_reminder_until",null);
+        try{
+            Budget seed=new Budget();Budget.Account bank=new Budget.Account("Everyday",day,100000);seed.accounts.add(bank);Budget.Category power=new Budget.Category("Utilities");seed.categories.add(power);
+            Budget.Entry paid=new Budget.Entry("Electricity",power.id,bank.id,day,-14280);paid.externalId="pay-u";paid.billKey="planner-series-u";seed.entries.add(paid);String raw=BudgetStore.encode(seed);
+            if(!prefs.edit().putString("data",raw).remove("last_backup").remove("auto_backup_last").remove("backup_reminder_until").commit())throw new AssertionError("Seed not saved");
+            runOnMainSync(()->{main.load();main.tab="Home";main.render();if(find(screen,"Your budget has never been backed up",false)==null)throw new AssertionError("No backup reminder");
+                main.prefs().edit().putString("last_backup",LocalDate.now().toString()).commit();main.render();if(find(screen,"Your budget has never been backed up",false)!=null)throw new AssertionError("Reminder after a backup");
+                main.openSettings();if(find(screen,"Last backup: "+Ui.pretty(LocalDate.now().toString()),false)==null)throw new AssertionError("No Last backup line");main.tab="Home";main.render();
+                // Undo puts the deleted Planner payment back as it was (its ids too).
+                if(!main.deleteWithUndo("Transaction deleted",()->main.budget.entries.removeIf(e->e.externalId.equals("pay-u")))||find(screen,"Transaction deleted",false)==null)throw new AssertionError("No Undo bar");
+                find(screen,"Undo",true).performClick();if(find(screen,"Transaction deleted",false)!=null)throw new AssertionError("Undo bar stayed");});
+            if(!raw.equals(prefs.getString("data",null))||!BudgetStore.decode(prefs.getString("data",null)).external("pay-u").billKey.equals("planner-series-u"))throw new AssertionError("Undo didn't put the budget back");
+            // Saved meanwhile (an expense from Planner): Undo is refused and the new expense stays.
+            runOnMainSync(()->{if(!main.deleteWithUndo("Transaction deleted",()->main.budget.entries.removeIf(e->e.externalId.equals("pay-u"))))throw new AssertionError("Delete failed");});
+            Budget meanwhile=BudgetStore.decode(prefs.getString("data",null));Budget.Entry sent=new Budget.Entry("Water",power.id,bank.id,day,-5000);sent.externalId="pay-v";meanwhile.entries.add(sent);
+            prefs.edit().putString("data",BudgetStore.encode(meanwhile)).commit();
+            runOnMainSync(()->find(screen,"Undo",true).performClick());
+            Budget after=BudgetStore.decode(prefs.getString("data",null));if(after.external("pay-v")==null||after.external("pay-u")!=null)throw new AssertionError("Undo overwrote data saved meanwhile");
+        }finally{
+            android.content.SharedPreferences.Editor restore=prefs.edit();String[][] keys={{"data",saved},{"last_backup",last},{"auto_backup_last",autoLast},{"backup_reminder_until",snooze}};
+            for(String[] k:keys)if(k[1]==null)restore.remove(k[0]);else restore.putString(k[0],k[1]);restore.commit();
+            runOnMainSync(()->{main.budget=new Budget();main.load();main.tab="Home";main.render();});
         }
     }
 }

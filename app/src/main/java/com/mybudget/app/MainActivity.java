@@ -80,7 +80,8 @@ public class MainActivity extends Activity {
         if(pickingPhoto)pickingPhoto=false;else try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();
                 render();}}catch(IllegalStateException e){ui.toast(e.getMessage());}
         AutoBackup.schedule(this);
-        if(prefs().getString("auto_backup_tree",null)!=null)new Thread(()->AutoBackup.run(getApplicationContext(),false)).start();}
+        if(prefs().getString("auto_backup_tree",null)!=null){boolean asked=backupDue(); // Home's backup reminder goes once this succeeds
+            new Thread(()->{AutoBackup.run(getApplicationContext(),false);runOnUiThread(()->{if(asked&&!backupDue()&&tab.equals("Home")&&!isFinishing())render();});}).start();}}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);
         state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("categoryFilter",categoryFilter);
         state.putString("fromFilter",fromFilter);state.putString("toFilter",toFilter);state.putInt("flagFilter",flagFilter);
@@ -94,8 +95,9 @@ public class MainActivity extends Activity {
             if(t.equals("Budget reset"))budgetScreen.planReset();
             else if(t.endsWith("amounts")){if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){ui.toast("Could not save that setting.");
                     return true;}hideAmounts=!hideAmounts;render();}
-            else{if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}return true;});menu.show();
+            else openSettings();return true;});menu.show();
     }
+    void openSettings(){if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
@@ -118,7 +120,7 @@ public class MainActivity extends Activity {
         if(request==RESTORE){BudgetStore.Backup backup;try{backup=BudgetStore.readBackup(read(uri));}catch(Exception e){String m=e.getMessage();
                 ui.toast((e instanceof org.json.JSONException||e instanceof IOException)&&m!=null?m:"Could not read that file.");return;}
             settingsScreen.confirmRestore(backup);return;}
-        try{write(uri,request==BACKUP?BudgetStore.backup(budget,LocalDateTime.now()):"﻿"+budget.csv());
+        try{write(uri,request==BACKUP?BudgetStore.backup(budget,LocalDateTime.now()):"﻿"+budget.csv());if(request==BACKUP){AutoBackup.backedUp(this);render();} // Home's reminder, Settings' Last backup
             ui.toast(request==BACKUP?(photoCount()>0?"Budget backed up. Photos stay on this phone.":"Budget backed up."):"Transactions exported.");}
         catch(Exception e){try{android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);}catch(Exception ignored){}
             ui.toast(request==BACKUP?"Could not save the backup.":"Could not save the export.");}
@@ -199,6 +201,7 @@ public class MainActivity extends Activity {
         months.addView(next,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));if(!tab.equals("Settings"))root.addView(months);
         ScrollView scroll=new ScrollView(this);content=ui.column();scroll.addView(content);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         switch(tab){case"Settings":settingsScreen.settings();break;case"Home":homeScreen.home();break;case"Plan":budgetScreen.plan();break;case"Spending":transactionsScreen.spending();break;case"Accounts":accountsScreen.accounts();break;default:reportsScreen.reflect();}
+        addUndoBar(); // a delete's Undo, above the tabs (gone on another tab)
         if(tab.equals("Settings")){root.addView(ui.button("Back",this::closeSettings));return;}
         LinearLayout nav=new LinearLayout(this);nav.setPadding(0,ui.dp(6),0,0);String[] names={"Home","Plan","Spending","Accounts","Reflect"};
         int[] icons={R.drawable.nav_home,R.drawable.nav_plan,R.drawable.nav_spending,R.drawable.nav_accounts,R.drawable.nav_reflect};
@@ -229,7 +232,37 @@ public class MainActivity extends Activity {
         try{action.run();String raw=BudgetStore.encode(budget);
             if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())throw new IllegalStateException("Could not save to device storage.");loaded=raw;}
         catch(Exception e){budget=before;throw new IllegalArgumentException(e.getMessage()==null?"Check your entry.":e.getMessage());}
+        undoBefore=null; // another change: a delete's Undo is gone
     }
+    /** Home's backup reminder: an account, and no backup for 14 days (or never), unless snoozed for the week (DataSafety). */
+    boolean backupDue(){return DataSafety.backupReminderDue(!budget.accounts.isEmpty(),AutoBackup.lastBackup(this),prefs().getString("backup_reminder_until",null),LocalDate.now());}
+    // Undo for deletes: the saved data from just before the delete and what the delete saved. A bar above the tabs offers
+    // Undo for 8 seconds, until the tab changes or another change is saved; it puts [undoBefore] back through commit(),
+    // only while the saved data is still [undoAfter] (DataSafety.undoAllowed), so nothing saved since is overwritten.
+    String undoBefore,undoAfter,undoText,undoTab;private long undoUntil;private int undoShown;private View undoBar;
+    /** A delete, as change(), then the Undo bar ([done]: "Transaction deleted"). */
+    boolean deleteWithUndo(String done,Runnable action){String[] before={null};
+        try{commit(()->{try{before[0]=BudgetStore.encode(budget);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}action.run();});}
+        catch(Exception e){ui.toast(e.getMessage());return false;}
+        undoBefore=before[0];undoAfter=loaded;undoText=done;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+8000;render();
+        root.announceForAccessibility(done+". Undo is available for a few seconds.");return true;}
+    private void hideUndo(){undoBefore=null;if(undoBar!=null&&undoBar.getParent()instanceof LinearLayout)((LinearLayout)undoBar.getParent()).removeView(undoBar);undoBar=null;}
+    private void addUndoBar(){
+        long left=undoUntil-android.os.SystemClock.uptimeMillis();if(undoBefore==null||!tab.equals(undoTab)||left<=0){undoBefore=null;undoBar=null;return;}
+        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(ui.dp(16),0,ui.dp(4),0);bar.setBackground(ui.bg(primary));
+        TextView text=ui.label(undoText,14,Color.WHITE,false);bar.addView(text,new LinearLayout.LayoutParams(0,-2,1));
+        Button undo=ui.button("Undo",this::undo);undo.setTextColor(Color.WHITE);undo.setTypeface(null,Typeface.BOLD);undo.setBackground(ui.bg(Color.TRANSPARENT));
+        undo.setContentDescription("Undo: "+undoText);bar.addView(undo,new LinearLayout.LayoutParams(-2,-2));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,ui.dp(6),0,0);root.addView(bar,p);undoBar=bar;
+        int shown=++undoShown;getWindow().getDecorView().postDelayed(()->{if(shown==undoShown)hideUndo();},left);}
+    private void undo(){String before=undoBefore,after=undoAfter,done=undoText;hideUndo();if(before==null)return;
+        if(!DataSafety.undoAllowed(prefs().getString("data",null),after,loaded)){
+            try{if(reloadIfChanged())for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}catch(IllegalStateException e){ui.toast(e.getMessage());}
+            render();ui.toast("This can't be undone now: your budget changed since (an expense from Planner came in, or a backup was restored).");return;}
+        try{commit(()->{Budget previous;try{previous=BudgetStore.decode(before);}catch(Exception e){throw new IllegalStateException("The budget from before can't be read. Nothing was changed.");}
+                previous.fromPlanner.addAll(budget.fromPlanner);budget=previous;});}
+        catch(Exception e){ui.toast(e.getMessage());render();return;}
+        for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();String back=done.replace(" deleted"," restored")+".";ui.toast(back);}
     final List<AlertDialog> editors=new ArrayList<>();
     Budget.Account accountById(String id){Budget.Account a=budget.account(id);
         if(a==null)throw new IllegalArgumentException("That account no longer exists.");return a;}

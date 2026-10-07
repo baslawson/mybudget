@@ -1,5 +1,6 @@
 import com.mybudget.app.Budget;
 import com.mybudget.app.CsvImport;
+import com.mybudget.app.DataSafety;
 import java.time.YearMonth;
 import java.time.LocalDate;
 import java.math.BigDecimal;
@@ -36,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups.");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -597,5 +598,36 @@ public class BudgetTest {
             +"2025-01-03,\"Say \"\"hi\"\"\",'=SUM(A1),Bills,\"Bank, main\",,-12.34,\"'-note\nline 2\",Yes\r\n"
             +"2025-01-01,Transfer to Cash,,,\"Bank, main\",Cash,-5.00,,No\r\n","CSV rows: newest first, quoted, formulas kept as text");
         same(new Budget().csv(),"Date,Payee,Category,Group,Account,Transfer to,Amount,Note,Cleared\r\n","Empty budget exports the header");
+    }
+    // Data safety: Home's backup reminder and its snooze, when a delete can still be undone, the daily automatic backup.
+    static void dataSafety(){
+        LocalDate today=LocalDate.of(2026,10,8);
+        if(!DataSafety.backupReminderDue(true,null,null,today))throw new AssertionError("Never backed up: remind");
+        if(DataSafety.backupReminderDue(false,null,null,today))throw new AssertionError("No accounts yet: no reminder");
+        if(DataSafety.backupReminderDue(true,"2026-09-25",null,today))throw new AssertionError("13 days: not yet");
+        if(!DataSafety.backupReminderDue(true,"2026-09-24",null,today))throw new AssertionError("14 days: remind");
+        if(DataSafety.backupReminderDue(true,"2026-10-08",null,today)||DataSafety.backupReminderDue(true,"2026-10-20",null,today))throw new AssertionError("Backed up today (or a date ahead): no reminder");
+        if(!DataSafety.backupReminderDue(true,"not a date","also not",today))throw new AssertionError("Unreadable dates: never backed up, no snooze");
+        equal(DataSafety.daysSince("2026-09-24",today),14,"Days since");equal(DataSafety.daysSince(null,today),-1,"Never");
+        same(DataSafety.latest("2026-09-24","2026-10-01"),"2026-10-01","Automatic backup later");same(DataSafety.latest("2026-10-02",null),"2026-10-02","Only Back up budget");
+        if(DataSafety.latest(null,"")!=null)throw new AssertionError("Neither: never");
+        String until=DataSafety.snoozeUntil(today);same(until,"2026-10-15","A week");
+        if(DataSafety.backupReminderDue(true,null,until,today)||DataSafety.backupReminderDue(true,null,until,today.plusDays(6)))throw new AssertionError("Snoozed for the week");
+        if(!DataSafety.backupReminderDue(true,null,until,today.plusDays(7)))throw new AssertionError("Snooze over after a week");
+        if(!DataSafety.backupReminderDue(true,null,"2027-01-01",today))throw new AssertionError("A snooze further than a week ahead (clock change) is ignored");
+        // Undo of a delete: only while the saved data is what the delete saved, and on screen.
+        if(!DataSafety.undoAllowed("after","after","after"))throw new AssertionError("Unchanged: undo");
+        if(DataSafety.undoAllowed("after+planner","after","after"))throw new AssertionError("Saved meanwhile (Planner): no undo");
+        if(DataSafety.undoAllowed("after","after","older")||DataSafety.undoAllowed(null,"after","after")||DataSafety.undoAllowed("x",null,"x"))throw new AssertionError("Screen out of date, data gone or nothing to undo: no undo");
+        // Automatic backup: a new day writes a new file, the same day doesn't; the newest 7 are kept and other files left alone.
+        if(!DataSafety.autoBackupDue(today,null)||!DataSafety.autoBackupDue(today,"2026-10-07"))throw new AssertionError("New day: back up");
+        if(DataSafety.autoBackupDue(today,"2026-10-08"))throw new AssertionError("Same day: no second backup");
+        same(DataSafety.autoBackupName(today),"MyBudget-auto-2026-10-08.json","Today's file");
+        if(DataSafety.autoBackupName(today).equals(DataSafety.autoBackupName(today.plusDays(1))))throw new AssertionError("A new day's file is a new file");
+        java.util.List<String> folder=new java.util.ArrayList<>(java.util.Arrays.asList("MyBudget-backup-2026-01-01.json","notes.txt","MyBudget-auto-2026-10-01.json"));
+        for(int i=0;i<5;i++)folder.add(DataSafety.autoBackupName(today.minusDays(2+i)));
+        if(!DataSafety.autoBackupsToDelete(folder,DataSafety.autoBackupName(today)).isEmpty())throw new AssertionError("6 old + today's = 7: none deleted");
+        folder.add("MyBudget-auto-2026-09-20.json");folder.add(DataSafety.autoBackupName(today));
+        same(String.join(",",DataSafety.autoBackupsToDelete(folder,DataSafety.autoBackupName(today))),"MyBudget-auto-2026-09-20.json","The oldest beyond 7 go; today's and other files stay");
     }
 }
