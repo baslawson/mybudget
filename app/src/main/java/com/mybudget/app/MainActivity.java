@@ -57,7 +57,9 @@ public class MainActivity extends Activity {
             fromFilter=state.getString("fromFilter","");toFilter=state.getString("toFilter","");flagFilter=state.getInt("flagFilter",-1);
             clearedFilter=state.getInt("clearedFilter",-1);month=YearMonth.parse(state.getString("month",YearMonth.now().toString()));
             period=Math.max(0,Math.min(ReportsScreen.PERIODS.length-1,state.getInt("period",0)));byGroup=state.getBoolean("byGroup",false);
-            trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;}
+            trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;
+            String shot=state.getString("cameraFile",null);if(shot!=null)cameraFile=new File(PhotoProvider.dir(this),shot);} // so it's still deleted when the camera returns
+        else{File[] left=PhotoProvider.dir(this).listFiles();if(left!=null)for(File f:left)f.delete();} // a fresh start: no capture is in progress
         load();if(storageReadable){render();cleanupPhotos();}
     }
     // The saved data as this screen last read or wrote it. AddExpenseActivity may save an expense from another app
@@ -87,6 +89,7 @@ public class MainActivity extends Activity {
         state.putString("fromFilter",fromFilter);state.putString("toFilter",toFilter);state.putInt("flagFilter",flagFilter);
         state.putInt("clearedFilter",clearedFilter);state.putString("month",month.toString());state.putInt("period",period);
         state.putBoolean("byGroup",byGroup);state.putString("trendKey",trendKey);state.putInt("trendMonths",trendMonths);
+        if(cameraFile!=null)state.putString("cameraFile",cameraFile.getName());
         super.onSaveInstanceState(state);}
     private void options(View anchor){
         PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");menu.getMenu().add(hideAmounts?"Show amounts":"Hide amounts");
@@ -101,7 +104,7 @@ public class MainActivity extends Activity {
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
-    static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6;
+    static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6,CAMERA=7;
     android.content.SharedPreferences prefs(){return getSharedPreferences("budget",0);}
     void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);
         try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){ui.toast("No app on this device can save or open files.");}}
@@ -109,6 +112,9 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();
         if(request==PHOTO){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;
             if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);photoReturned();return;}
+        if(request==CAMERA){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;File shot=cameraFile;cameraFile=null;
+            if(result==RESULT_OK&&shot!=null&&shot.length()>0&&target!=null)target.accept(Uri.fromFile(shot)); // copied into photos like a picked one
+            if(shot!=null)shot.delete();photoReturned();return;} // the capture itself never stays, taken or cancelled
         if(result!=RESULT_OK||uri==null||!storageReadable)return;
         if(request==AUTO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception e){ui.toast("MyBudget couldn't keep access to that folder. Choose another.");
                 return;}prefs().edit().putString("auto_backup_tree",uri.toString()).remove("auto_backup_last").remove("auto_backup_error").apply();
@@ -127,6 +133,18 @@ public class MainActivity extends Activity {
     }
     // Photos: JPEGs in files/photos, at most 1600 px on the long side, turned upright from the camera's EXIF.
     File photoDir(){File d=new File(getFilesDir(),"photos");d.mkdirs();return d;}
+    /** Choose from gallery: Android's picker. False when no app can pick one. */
+    boolean choosePhoto(){try{startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),PHOTO);return true;}
+        catch(Exception e){ui.toast("No app on this device can pick a photo.");return false;}}
+    File cameraFile; // a capture in progress (cache/camera): deleted once it's copied into photos, or cancelled
+    /**
+     * Take a photo: the camera app writes into a new cache file (PhotoProvider grants it that one file), then it's copied into
+     * photos like a picked one. No permission is needed while the manifest doesn't declare CAMERA (if it did, the capture would need CAMERA granted first).
+     */
+    boolean takePhoto(){File dir=PhotoProvider.dir(this);dir.mkdirs();File shot=new File(dir,UUID.randomUUID()+".jpg");Uri out=PhotoProvider.uri(this,shot.getName());
+        Intent i=new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE).putExtra(android.provider.MediaStore.EXTRA_OUTPUT,out)
+            .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_READ_URI_PERMISSION);i.setClipData(android.content.ClipData.newRawUri("",out));
+        try{startActivityForResult(i,CAMERA);cameraFile=shot;return true;}catch(Exception e){shot.delete();ui.toast("No camera app on this device can take a photo.");return false;}}
     String copyPhoto(Uri uri)throws IOException{
         BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
         try(InputStream in=getContentResolver().openInputStream(uri)){BitmapFactory.decodeStream(in,null,bounds);}

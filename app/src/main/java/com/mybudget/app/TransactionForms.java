@@ -2,7 +2,6 @@ package com.mybudget.app;
 
 import android.app.*;
 import android.graphics.Color;
-import android.content.Intent;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.*;
@@ -46,7 +45,8 @@ final class TransactionForms extends Ui {
         Spinner category=spinner(categoryFields,"Category",categories.stream().map(c->c.name).toArray(String[]::new),keepCategory.isEmpty()?0:categories.indexOf(main.budget.category(keepCategory)));
         // Split: the parts (positive amounts while editing) replace the category; the amount becomes their total.
         List<Budget.Split> parts=new ArrayList<>();
-        if(old!=null)for(Budget.Split p:old.splits){Budget.Split c=new Budget.Split(p.category,Math.abs(p.amount));c.memo=p.memo;parts.add(c);}
+        for(Budget.Split p:old!=null?old.splits:sched!=null?sched.splits:new ArrayList<Budget.Split>()){Budget.Split c=new Budget.Split(p.category,Math.abs(p.amount));c.memo=p.memo;parts.add(c);
+            Budget.Category pc=main.budget.category(p.category);if(pc!=null&&!pc.payment()&&!categories.contains(pc))categories.add(pc);} // a part's hidden category stays choosable
         TextView splitSummary=label("",13,main.ink,false);categoryFields.addView(splitSummary);
         Button splitButton=button("Split into categories",()->{});categoryFields.addView(splitButton);
         Runnable showSplit=()->{boolean on=!parts.isEmpty();category.setVisibility(on?View.GONE:View.VISIBLE);
@@ -77,12 +77,12 @@ final class TransactionForms extends Ui {
         String[] photo={old!=null?old.photo:""};LinearLayout photoBox=column();if(sched==null)f.addView(photoBox);
         Runnable[] showPhotoBox=new Runnable[1];
         showPhotoBox[0]=()->{photoBox.removeAllViews();
-            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->{main.photoTarget=u->{try{photo[0]=main.copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}
+            // Take a photo (the camera app) or choose one from the gallery; either is copied into photos at most 1600 px.
+            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->new AlertDialog.Builder(main).setTitle("Add a photo")
+                .setItems(new String[]{"Take a photo","Choose from gallery"},(d,n)->{main.photoTarget=u->{try{photo[0]=main.copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}
                     showPhotoBox[0].run();};main.pickingPhoto=true;
                 main.photoForm=main.editors.isEmpty()?null:main.editors.get(main.editors.size()-1); // this form: the newest open one
-                try{main.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*")
-                        .addCategory(Intent.CATEGORY_OPENABLE),MainActivity.PHOTO);}catch(Exception e){main.pickingPhoto=false;main.photoTarget=null;
-                    main.photoForm=null;toast("No app on this device can pick a photo.");}}));
+                if(!(n==0?main.takePhoto():main.choosePhoto())){main.pickingPhoto=false;main.photoTarget=null;main.photoForm=null;}}).show()));
             else{android.graphics.Bitmap bm=main.photoBitmap(photo[0],480);
                 if(bm==null)photoBox.addView(label("The photo isn't on this phone.",13,main.muted,false));else{ImageView img=new ImageView(main);
                     img.setImageBitmap(bm);img.setAdjustViewBounds(true);img.setScaleType(ImageView.ScaleType.FIT_START);
@@ -113,8 +113,8 @@ final class TransactionForms extends Ui {
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];
             LocalDate when=LocalDate.parse((String)day.getTag());
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
-                if(isSplit)throw new IllegalArgumentException("A split can't be upcoming yet. Save it on its day, or use one category.");
                 Budget.Scheduled s=new Budget.Scheduled(p,cat,acc,when.toString(),cents,rep);s.memo=memoText;
+                if(isSplit)for(Budget.Split part:parts){Budget.Split c=new Budget.Split(part.category,part.amount*(k==0?-1:1));c.memo=part.memo;s.splits.add(c);} // entered later with the same parts
                 if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;}
                 if(sched==null&&!when.isAfter(LocalDate.now())){main.budget.validate(s);
                     main.budget.enter(s,photo[0],cleared.isChecked()).flag=flag.getSelectedItemPosition();
@@ -135,12 +135,14 @@ final class TransactionForms extends Ui {
         names[categories.size()]="To budget";
         LinearLayout f=form(),rows=column();f.addView(label("Each part comes out of its own category.",13,main.muted,false));f.addView(rows);
         TextView sum=label("",14,main.blue,true);
-        List<Spinner> cats=new ArrayList<>();List<EditText> amounts=new ArrayList<>();
+        List<Spinner> cats=new ArrayList<>();List<EditText> amounts=new ArrayList<>(),memos=new ArrayList<>();
         EditText[] current={null}; // the part last typed in (Fill remaining fills it)
         Runnable total2=()->{long n=0;
             for(EditText a:amounts){try{n+=Budget.parse(a.getText().toString().isEmpty()?"0":a.getText().toString());}catch(Exception e){}}
             sum.setText("Total "+money(n));};
-        java.util.function.BiConsumer<String,Long> addRow=(category,cents)->{LinearLayout row=new LinearLayout(main);
+        // Each part: its category, amount and remove button, with its own note underneath (optional; the CSV uses it for that part's row).
+        interface Row{void add(String category,Long cents,String note);}
+        Row addRow=(category,cents,note)->{LinearLayout part=column(),row=new LinearLayout(main);part.addView(row);
             row.setGravity(Gravity.CENTER_VERTICAL);Spinner s=new Spinner(main);
             s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));
             int i=category==null?0:category.isEmpty()?categories.size():Math.max(0,categories.indexOf(main.budget.category(category)));
@@ -149,12 +151,14 @@ final class TransactionForms extends Ui {
             if(cents!=null&&cents>0)a.setText(decimal(cents));onText(a,total2);a.setOnFocusChangeListener((v,has)->{if(has)current[0]=a;});
             row.addView(a,new LinearLayout.LayoutParams(dp(110),-2));
             Button x=button("✕",()->{});x.setContentDescription("Remove this part");x.setBackground(bg(Color.TRANSPARENT));
-            x.setOnClickListener(v->{rows.removeView(row);cats.remove(s);amounts.remove(a);if(current[0]==a)current[0]=null;total2.run();});
+            EditText m=new EditText(main);m.setHint("Note for this part (optional)");m.setTextColor(main.ink);m.setSingleLine(true);m.setTextSize(14);
+            m.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);if(note!=null)m.setText(note);part.addView(m,new LinearLayout.LayoutParams(-1,-2));
+            x.setOnClickListener(v->{rows.removeView(part);cats.remove(s);amounts.remove(a);memos.remove(m);if(current[0]==a)current[0]=null;total2.run();});
             row.addView(x,new LinearLayout.LayoutParams(dp(48),dp(48)));
-            rows.addView(row);cats.add(s);amounts.add(a);};
-        if(parts.isEmpty()){addRow.accept(first==null?null:first.id,total);
-            addRow.accept(null,null);}else for(Budget.Split p:parts)addRow.accept(p.category,p.amount);
-        f.addView(button("+ Add a part",()->{addRow.accept(null,null);total2.run();}));
+            rows.addView(part);cats.add(s);amounts.add(a);memos.add(m);};
+        if(parts.isEmpty()){addRow.add(first==null?null:first.id,total,null);
+            addRow.add(null,null,null);}else for(Budget.Split p:parts)addRow.add(p.category,p.amount,p.memo);
+        f.addView(button("+ Add a part",()->{addRow.add(null,null,null);total2.run();}));
         // Helpers over the transaction's amount: Split evenly (leftover cents on the first parts); Fill remaining puts what's left into the part last typed in, else the last empty one.
         LinearLayout helpers=new LinearLayout(main);Button even=button("Split evenly",()->{if(amounts.isEmpty())return;
             if(total<=0){toast("Enter the transaction's amount first.");return;}long[] shares=Budget.splitEvenly(total,amounts.size());
@@ -176,7 +180,8 @@ final class TransactionForms extends Ui {
             List<Budget.Split> result=new ArrayList<>();
             for(int i=0;i<cats.size();i++){long cents;
                 try{cents=Budget.cents(amounts.get(i).getText().toString());}catch(Exception e){toast("Give every part an amount above $0.");return;}
-                int c=cats.get(i).getSelectedItemPosition();result.add(new Budget.Split(c==categories.size()?"":categories.get(c).id,cents));}
+                int c=cats.get(i).getSelectedItemPosition();Budget.Split part=new Budget.Split(c==categories.size()?"":categories.get(c).id,cents);
+                part.memo=memos.get(i).getText().toString().trim();result.add(part);}
             if(result.size()<2){toast("A split needs at least two parts. Use Remove split for one category.");return;}
             parts.clear();parts.addAll(result);done.run();d.dismiss();}));d.show();
     }

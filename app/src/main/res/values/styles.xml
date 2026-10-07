@@ -39,8 +39,9 @@
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
     </style>
-    <!-- The date picker in dark: MyBudget's indigo header and dialog colours instead of Material's grey. -->
-    <style name="DatePickerDialog.Dark" parent="android:style/Theme.Material.Dialog.Alert">
+    <!-- The date picker in dark: MyBudget's indigo header and dialog colours instead of Material's grey. A dialog overlay (as light theme uses), not
+         an alert: an alert is wider than the calendar and left a grey strip beside the header. -->
+    <style name="DatePickerDialog.Dark" parent="android:style/ThemeOverlay.Material.Dialog">
         <item name="android:colorAccent">#B3BFFF</item>
         <item name="android:colorBackgroundFloating">#202635</item>
         <item name="android:textColorPrimary">#EDF1FA</item>

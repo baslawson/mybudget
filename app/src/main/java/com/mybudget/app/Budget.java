@@ -66,6 +66,12 @@ public final class Budget {
         public static final String[] REPEATS={"Never","Weekly","Every 2 weeks","Monthly","Every 3 months","Yearly"};
         public String id=Budget.id(),payee,category,account,next,repeat="Never",memo="",billKey="";
         public long amount;public int day; // day: the day of the month repeats keep (0 = next's day)
+        // An upcoming split (category SPLIT): its parts, as an Entry's; entering it makes a split with the same parts.
+        public final List<Split> splits=new ArrayList<>();
+        public boolean split(){return !splits.isEmpty();}
+        /** The part of this upcoming transaction that goes to category [id] ("" = To budget). */
+        public long amountIn(String id){if(split()){long n=0;for(Split s:splits)if(s.category.equals(id))n+=s.amount;return n;}return category.equals(id)?amount:0;}
+        public boolean touches(String id){if(split()){for(Split s:splits)if(s.category.equals(id))return true;return false;}return category.equals(id);}
         public Scheduled(String payee,String category,String account,String next,long amount,String repeat){this.payee=payee;this.category=category;this.account=account;this.next=next;this.amount=amount;this.repeat=repeat;day=LocalDate.parse(next).getDayOfMonth();}
         /** The date after [d] in this repeat, or null for Never. */
         public LocalDate after(LocalDate d){
@@ -87,23 +93,25 @@ public final class Budget {
     public void validate(Scheduled s){
         Account a=account(s.account);if(a==null)throw new IllegalArgumentException("Choose an account.");LocalDate d=LocalDate.parse(s.next);if(s.next.compareTo(a.date)<0)throw new IllegalArgumentException("The date is before this account's opening date.");
         if(d.isAfter(LocalDate.now().plusYears(5)))throw new IllegalArgumentException("Schedule within the next five years.");
-        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");if(!s.category.isEmpty()&&category(s.category)==null)throw new IllegalArgumentException("Choose a category.");if(!s.category.isEmpty()&&category(s.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);if(a.tracking()&&!s.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
+        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");if(a.tracking()&&!s.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
+        if(s.split()||s.category.equals(SPLIT))validateParts(s.category,s.splits,s.amount);
+        else{if(!s.category.isEmpty()&&category(s.category)==null)throw new IllegalArgumentException("Choose a category.");if(!s.category.isEmpty()&&category(s.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);}
         if(!Arrays.asList(Scheduled.REPEATS).contains(s.repeat))throw new IllegalArgumentException("Choose how often it repeats.");
     }
     /** Enters [s]'s current date as a transaction and moves it to its next date (or removes it). */
     public Entry enter(Scheduled s){return enter(s,"",false);}
     /** As enter(s), with a photo and the Cleared tick (a new repeating transaction dated today or earlier). */
-    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);advance(s);return e;}
+    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
     /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
     public List<LocalDate> datesIn(Scheduled s,YearMonth m){List<LocalDate> list=new ArrayList<>();LocalDate d=LocalDate.parse(s.next),end=m.atEndOfMonth();boolean now=m.equals(YearMonth.now());for(int i=0;i<400&&d!=null&&!d.isAfter(end);i++){if(now||!d.isBefore(m.atDay(1)))list.add(d);d=s.after(d);}return list;}
-    /** Upcoming outflows from [c] in [m]: what scheduled bills will take. */
-    public long upcoming(Category c,YearMonth m){long n=0;for(Scheduled s:planned())if(s.category.equals(c.id)&&s.amount<0)n+=-s.amount*datesIn(s,m).size();return n;}
+    /** Upcoming outflows from [c] in [m]: what scheduled bills will take (each part of an upcoming split in its own category). */
+    public long upcoming(Category c,YearMonth m){long n=0;for(Scheduled s:planned()){long part=s.amountIn(c.id);if(part<0)n+=-part*datesIn(s,m).size();}return n;}
     /** What Fund targets assigns: the target's need, or enough for this month's upcoming bills, whichever is more. */
     public long fundNeed(Category c,YearMonth m){return Math.max(needed(c,m),Math.max(0,upcoming(c,m)-available(c,m)));}
     /** The first day in [m] money is needed by: the due day or the first upcoming bill (32 = none, 0 = overdue). */
-    public int firstDue(Category c,YearMonth m){int first=dueDay(c,m);for(Scheduled s:planned())if(s.category.equals(c.id)&&s.amount<0)for(LocalDate d:datesIn(s,m))first=Math.min(first,d.isBefore(m.atDay(1))?0:d.getDayOfMonth());return first;}
+    public int firstDue(Category c,YearMonth m){int first=dueDay(c,m);for(Scheduled s:planned())if(s.amountIn(c.id)<0)for(LocalDate d:datesIn(s,m))first=Math.min(first,d.isBefore(m.atDay(1))?0:d.getDayOfMonth());return first;}
     /** The target's own due day in [m]: a weekly target's first chosen weekday, a by-date target's date when it falls in [m], else the due day (32 = none). */
     static int dueDay(Category c,YearMonth m){
         if(c.targetType.equals("Weekly"))return c.target>0?m.atDay(1).with(java.time.temporal.TemporalAdjusters.firstInMonth(DayOfWeek.of(c.weekday))).getDayOfMonth():32;
@@ -288,13 +296,14 @@ public final class Budget {
      * Money age (how long money waits before it's spent): money spent is matched to the oldest money received (opening balances and
      * inflows), first in first out; each outflow's age is its matched days weighted by amount. The result is
      * the average over the last 10 outflows up to [until], or -1 when there are none.
+     * Money in and out of the budget counts (budgetAmount): spending on a card is an outflow on its date, like cash spending,
+     * and a card payment (a transfer within the budget) isn't, so the figure follows spending. What a card owed when it was
+     * added isn't money received or spent here.
      */
     public int ageOfMoney(LocalDate until){
         List<long[]> events=new ArrayList<>(); // day, amount (+ in, - out)
-        // Cash accounts only: card spending isn't money spent until the card is paid, and the payment is the outflow.
         for(Account a:accounts)if(a.cash()&&a.opening>0&&!LocalDate.parse(a.date).isAfter(until))events.add(new long[]{LocalDate.parse(a.date).toEpochDay(),a.opening});
-        for(Entry e:entries){if(e.amount==0||LocalDate.parse(e.date).isAfter(until))continue;Account a=account(e.account);if(a==null)continue;long day=LocalDate.parse(e.date).toEpochDay();
-            if(e.transfer()){Account to=account(e.destination);if(to!=null&&a.cash()!=to.cash())events.add(new long[]{day,a.cash()?e.amount:-e.amount});}else if(a.cash())events.add(new long[]{day,e.amount});}
+        for(Entry e:entries){if(LocalDate.parse(e.date).isAfter(until))continue;long n=budgetAmount(e);if(n!=0)events.add(new long[]{LocalDate.parse(e.date).toEpochDay(),n});}
         events.sort((x,y)->x[0]!=y[0]?Long.compare(x[0],y[0]):Long.compare(y[1],x[1])); // a day's money in before money out
         ArrayDeque<long[]> pool=new ArrayDeque<>();List<Double> ages=new ArrayList<>();
         for(long[] ev:events){
@@ -391,14 +400,14 @@ public final class Budget {
     /** Scheduled transactions and Planner's bills due by [today] + [days], overdue ones too, soonest first. */
     public List<Scheduled> dueWithin(LocalDate today,int days){String until=today.plusDays(days).toString();List<Scheduled> list=new ArrayList<>();for(Scheduled s:planned())if(s.next.compareTo(until)<=0)list.add(s);list.sort(Comparator.comparing(s->s.next));return list;}
     // Categories: delete (moving history to another), reorder within a group.
-    public boolean used(Category c){for(Entry e:entries)if(e.touches(c.id))return true;for(Scheduled s:scheduled)if(s.category.equals(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
+    public boolean used(Category c){for(Entry e:entries)if(e.touches(c.id))return true;for(Scheduled s:scheduled)if(s.touches(c.id))return true;for(long v:c.assigned.values())if(v!=0)return true;return false;}
     public int entriesIn(Category c){int n=0;for(Entry e:entries)if(e.touches(c.id))n++;return n;}
     /** Deletes [c]; its transactions and monthly assignments move to [into] (needed when it was used). Cash doesn't change. */
     public void deleteCategory(Category c,Category into){
         if(c.payment())throw new IllegalArgumentException("This is a credit card's payment category. Delete or close the card instead.");
         if(into!=null&&into.payment())throw new IllegalArgumentException("Choose a spending category, not a card payment.");
         if(into==c||(into==null&&used(c)))throw new IllegalArgumentException("Choose another category to take its transactions and money.");
-        if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled)if(s.category.equals(c.id))s.category=into.id;for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
+        if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled){if(s.category.equals(c.id))s.category=into.id;for(Split p:s.splits)if(p.category.equals(c.id))p.category=into.id;}for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
         for(Map.Entry<String,String> m:billCategories.entrySet())if(m.getValue().equals(c.id))m.setValue(into==null?"":into.id);billCategories.values().removeIf(String::isEmpty);
         for(Rule r:rules)if(r.category.equals(c.id))r.category=into==null?"":into.id;rules.removeIf(r->r.rename.isEmpty()&&r.category.isEmpty()); // an import rule left with nothing to do goes
         categories.remove(c);
@@ -552,12 +561,14 @@ public final class Budget {
             if(!a.tracking()&&to.tracking()){if(e.category.isEmpty()||category(e.category)==null)throw new IllegalArgumentException("Choose the category this money comes from: it leaves your budget.");if(category(e.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);}
             else if(!e.category.isEmpty())throw new IllegalArgumentException("Only a transfer out of your budget to a tracking account has a category.");}
         else if(a.tracking()&&!e.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
-        else if(e.split()||e.category.equals(SPLIT)){
-            if(!e.category.equals(SPLIT)||e.splits.size()<2)throw new IllegalArgumentException("A split needs at least two parts.");long sum=0;
-            for(Split p:e.splits){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");if(!p.category.isEmpty()&&category(p.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);sum+=p.amount;}
-            if(sum!=e.amount)throw new IllegalArgumentException("The parts of the split must add up to the total.");
-        }
+        else if(e.split()||e.category.equals(SPLIT))validateParts(e.category,e.splits,e.amount);
         else if(!e.category.isEmpty()&&category(e.category)==null)throw new IllegalArgumentException("Choose a category.");
         else if(!e.category.isEmpty()&&category(e.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);
+    }
+    /** A split's (or an upcoming split's) parts: two or more, none $0, To budget or spending categories, adding up to [amount]. */
+    private void validateParts(String category,List<Split> parts,long amount){
+        if(!category.equals(SPLIT)||parts.size()<2)throw new IllegalArgumentException("A split needs at least two parts.");long sum=0;
+        for(Split p:parts){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");if(!p.category.isEmpty()&&category(p.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);sum+=p.amount;}
+        if(sum!=amount)throw new IllegalArgumentException("The parts of the split must add up to the total.");
     }
 }

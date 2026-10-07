@@ -20,7 +20,7 @@ final class TransactionsScreen extends Ui {
             boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=main.budget.category(s.category);
             Budget.Account a=main.budget.account(s.account);
             LinearLayout row=card();row.addView(label(s.payee,17,main.ink,true));
-            row.addView(label((s.category.isEmpty()?"To budget":c==null?"":c.name)+" / "+(a==null?"":a.name)+" / "+pretty(s.next)+" · "+main.forms.repeatLabel(s),12,main.muted,false));
+            row.addView(label((s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" / "+(a==null?"":a.name)+" / "+pretty(s.next)+" · "+main.forms.repeatLabel(s),12,main.muted,false));
             row.addView(label(money(s.amount),17,s.amount>0?main.green:main.ink,true));
             if(isDue)row.addView(label("Due - tap to enter or skip",12,main.amber,true));String id=s.id;
             row.setOnClickListener(v->main.forms.dueActions(id));}
@@ -131,10 +131,11 @@ final class TransactionsScreen extends Ui {
     }
     private Budget.Entry entryById(String id){for(Budget.Entry e:main.budget.entries)if(e.id.equals(id))return e;
         throw new IllegalArgumentException("That transaction no longer exists.");}
+    /** "Split: Food, Household" (a transaction's or an upcoming one's parts). */
+    private String splitNames(List<Budget.Split> parts){StringBuilder s=new StringBuilder("Split:");
+        for(Budget.Split p:parts){Budget.Category c=main.budget.category(p.category);s.append(" ").append(c==null?"To budget":c.name).append(",");}return s.substring(0,s.length()-1);}
     // Money not given to a category goes into To budget (income and reconcile adjustments).
-    private String categoryName(Budget.Entry e){if(e.split()){StringBuilder s=new StringBuilder("Split:");
-            for(Budget.Split p:e.splits){Budget.Category c=main.budget.category(p.category);
-                s.append(" ").append(c==null?"To budget":c.name).append(",");}return s.substring(0,s.length()-1);}
+    private String categoryName(Budget.Entry e){if(e.split())return splitNames(e.splits);
         Budget.Category c=main.budget.category(e.category);
         if(e.transfer())return c!=null?"Transfer · "+c.name:main.budget.crossing(e)?"Transfer · To budget":"Transfer"; // in or out of the budget, to or from a tracking account
         Budget.Account a=main.budget.account(e.account);return a!=null&&a.tracking()?"Tracking account":c==null?"To budget":c.name;}

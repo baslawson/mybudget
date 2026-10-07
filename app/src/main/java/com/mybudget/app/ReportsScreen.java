@@ -145,7 +145,10 @@ final class ReportsScreen extends Ui {
         LinearLayout table=new LinearLayout(main),names=column(),cols=column();HorizontalScrollView scroll=new HorizontalScrollView(main);
         scroll.addView(cols);table.addView(names,new LinearLayout.LayoutParams(dp(118),-2));
         table.addView(scroll,new LinearLayout.LayoutParams(0,-2,1));card.addView(table);
-        scroll.post(()->scroll.fullScroll(View.FOCUS_RIGHT)); // opens on the newest month, its average and total
+        // Opens scrolled to the end (the average and total). The scrolling part shows whole columns only, so no amount is cut
+        // short at its edge (a cut "-$450.00" read as "450.00"); the names get the width left over.
+        scroll.post(()->{int cell=dp(96),spare=scroll.getWidth()%cell;if(scroll.getWidth()>=cell&&spare>0){LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)names.getLayoutParams();
+            p.width=names.getWidth()+spare;names.setLayoutParams(p);}scroll.post(()->scroll.fullScroll(View.FOCUS_RIGHT));});
         tableRow(names,cols,"",heads,null,main.muted,true,0);
         tableRow(names,cols,"Income",null,null,main.blue,true,0);for(Budget.Row r:t.income)tableRow(names,cols,r.name,heads,r,main.ink,false,8);
         tableRow(names,cols,t.incomeTotal.name,heads,t.incomeTotal,main.ink,true,0);

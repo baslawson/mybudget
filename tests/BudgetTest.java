@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending.");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -391,8 +391,8 @@ public class BudgetTest {
         b.entries.add(new Budget.Entry("Refund",food.id,visa.id,"2025-02-12",2000));equal(b.available(food,feb),22000,"Refund back to the category");equal(b.available(pay,feb),-2000,"Out of the payment category");equal(b.ready(feb),49000,"Ready unchanged by a card refund");
         // Net worth includes card debt; spending/income reports include card spending.
         equal(b.netWorth(feb),b.balanceAt(bank,feb)+b.balanceAt(visa,feb),"Net worth is all accounts");equal(b.netWorth(feb),69000-35000+2000,"Bank 69000, card -33000");equal(b.spending(jan),16000,"Card spending is spending");
-        // Age of Money counts the payment, not the card spending.
-        equal(b.ageOfMoney(java.time.LocalDate.of(2025,1,31)),6,"Only the cash gift (6 days)");
+        // Money age counts card spending on its date (4 and 5 days) as well as the cash gift (6 days); card payments aren't spending.
+        equal(b.ageOfMoney(java.time.LocalDate.of(2025,1,31)),5,"Card spending and the cash gift");equal(b.ageOfMoney(java.time.LocalDate.of(2025,2,28)),5,"The payments in February don't count");
         // Rules.
         rejects(()->b.validate(new Budget.Entry("x",pay.id,bank.id,"2025-02-13",-100)));rejects(()->b.deleteCategory(pay,null));rejects(()->b.deleteCategory(fun,pay));
         b.planReset(feb);equal(b.available(pay,feb),-2000,"Plan reset leaves card payment money");
@@ -400,6 +400,34 @@ public class BudgetTest {
         Budget.Account amex=b.addCard("Amex","2025-01-01",0);Budget.Category amexPay=b.paymentCategory(amex);b.assign(amexPay,feb,100);rejects(()->b.deleteAccount(amex));b.assign(amexPay,feb,-100);amexPay.assigned.clear();b.deleteAccount(amex);if(b.paymentCategory(amex)!=null||b.categories.contains(amexPay))throw new AssertionError("Payment category goes with its card");
         // Two cards: funded spending splits by card.
         Budget.Account mc=b.addCard("Mastercard","2025-01-01",0);b.assign(food,feb,5000);b.entries.add(new Budget.Entry("Shop",food.id,mc.id,"2025-02-14",-3000));equal(b.movedToCard(food,feb,mc),3000,"Moved to the right card");equal(b.movedToCard(food,feb,visa),-2000,"Refund only on Visa");
+    }
+    static void knownGaps(){
+        // Upcoming splits: each part counts in its own category's upcoming bills, Fund targets and due date.
+        YearMonth mar=YearMonth.of(2025,3);LocalDate first=LocalDate.of(2025,3,3);
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);
+        Budget.Category food=new Budget.Category("Food"),home=new Budget.Category("Household"),other=new Budget.Category("Other");b.categories.add(food);b.categories.add(home);b.categories.add(other);
+        Budget.Scheduled shop=new Budget.Scheduled("Supermarket",Budget.SPLIT,bank.id,first.toString(),-9000,"Weekly");shop.splits.add(new Budget.Split(food.id,-7000));shop.splits.add(new Budget.Split(home.id,-2000));shop.splits.get(1).memo="Soap";
+        b.validate(shop);b.scheduled.add(shop);
+        equal(b.upcoming(food,mar),35000,"Food's part x 5 Mondays");equal(b.upcoming(home,mar),10000,"Household's part x 5 Mondays");equal(b.upcoming(other,mar),0,"Not in other categories");
+        b.assign(home,mar,4000);equal(b.fundNeed(home,mar),6000,"Fund targets: the part less what Household has");equal(b.firstDue(food,mar),3,"Due on the 3rd");equal(b.firstDue(other,mar),32,"Other isn't due");
+        // A part into To budget (cash back) isn't an upcoming bill anywhere; a refund part isn't one either.
+        Budget.Scheduled back=new Budget.Scheduled("Cash back",Budget.SPLIT,bank.id,"2025-03-10",-1000,"Never");back.splits.add(new Budget.Split(other.id,-3000));back.splits.add(new Budget.Split("",2000));b.validate(back);b.scheduled.add(back);equal(b.upcoming(other,mar),3000,"Only Other's part");
+        // Entering it makes a split with the same parts and notes; the repeat moves on.
+        Budget.Entry e=b.enter(shop);if(!e.split()||e.splits.size()!=2||!e.category.equals(Budget.SPLIT))throw new AssertionError("Entered as a split");equal(e.amountIn(food.id),-7000,"Food part entered");equal(e.amountIn(home.id),-2000,"Household part entered");same(e.splits.get(1).memo,"Soap","Part's note kept");
+        same(shop.next,"2025-03-10","Next Monday");if(e.splits.get(0)==shop.splits.get(0))throw new AssertionError("Entered parts are copies");equal(b.activity(food,mar),-7000,"Counts in Food");
+        // Checks: parts add up, two or more, no card payment category; deleting a category moves upcoming parts; parts count as use.
+        Budget.Scheduled bad=new Budget.Scheduled("x",Budget.SPLIT,bank.id,"2025-04-01",-1000,"Never");bad.splits.add(new Budget.Split(food.id,-600));bad.splits.add(new Budget.Split(home.id,-300));rejects(()->b.validate(bad));
+        bad.splits.get(1).amount=-400;b.validate(bad);bad.splits.remove(1);bad.splits.get(0).amount=-1000;rejects(()->b.validate(bad));
+        Budget.Scheduled noParts=new Budget.Scheduled("x",Budget.SPLIT,bank.id,"2025-04-01",-1000,"Never");rejects(()->b.validate(noParts));
+        Budget.Account visa=b.addCard("Visa","2025-01-01",0);Budget.Scheduled toCard=new Budget.Scheduled("x",Budget.SPLIT,bank.id,"2025-04-01",-1000,"Never");toCard.splits.add(new Budget.Split(food.id,-500));toCard.splits.add(new Budget.Split(b.paymentCategory(visa).id,-500));rejects(()->b.validate(toCard));
+        Budget.Category spare=new Budget.Category("Spare");b.categories.add(spare);Budget.Scheduled only=new Budget.Scheduled("y",Budget.SPLIT,bank.id,"2025-04-01",-1000,"Never");only.splits.add(new Budget.Split(spare.id,-500));only.splits.add(new Budget.Split(food.id,-500));b.scheduled.add(only);
+        if(!b.used(spare))throw new AssertionError("An upcoming part counts as use");b.deleteCategory(spare,other);same(only.splits.get(0).category,other.id,"Upcoming part moved");
+        // Money age with card spending: the card purchase is the outflow, matched to the oldest money; paying the card isn't spending.
+        Budget a=new Budget();Budget.Account cash=new Budget.Account("Bank","2025-01-01",100000);a.accounts.add(cash);Budget.Category stuff=new Budget.Category("Stuff");a.categories.add(stuff);Budget.Account card=a.addCard("Visa","2025-01-01",30000);
+        a.entries.add(new Budget.Entry("Pay","",cash.id,"2025-02-01",50000));a.entries.add(new Budget.Entry("TV",stuff.id,card.id,"2025-02-11",-120000));
+        equal(a.ageOfMoney(LocalDate.of(2025,2,11)),36,"$1000 41 days old and $200 10 days old");
+        Budget.Entry payCard=new Budget.Entry("Transfer to Visa","",cash.id,"2025-02-20",-120000);payCard.destination=card.id;a.validate(payCard);a.entries.add(payCard);equal(a.ageOfMoney(LocalDate.of(2025,3,1)),36,"The card payment isn't an outflow");
+        a.entries.add(new Budget.Entry("Lunch",stuff.id,card.id,"2025-02-25",-5000));equal(a.ageOfMoney(LocalDate.of(2025,3,1)),30,"Lunch on the card from February's pay: (36 + 24) / 2");
     }
     static void phaseD(){
         YearMonth jan=YearMonth.of(2025,1);
