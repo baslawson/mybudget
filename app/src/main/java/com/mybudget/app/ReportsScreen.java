@@ -68,7 +68,7 @@ final class ReportsScreen extends Ui {
         Budget.Year y=main.budget.year(year);
         body.addView(label("Income "+money(y.income()),17,main.green,true));body.addView(label("Spending "+money(y.spending()),17,main.ink,true));
         body.addView(label("Net (income − spending) "+money(y.net()),15,main.blue,true));
-        if(y.income()==0&&y.spending()==0&&y.top.isEmpty()){body.addView(label("No income or spending in "+year+".",14,main.muted,false));return;}
+        if(y.income()==0&&y.spending()==0&&y.top.isEmpty()){quiet(body,"📊","No income or spending in "+year+".");return;}
         // Month by month: the chart (tap a month for its amounts) and the same as a list.
         String[] names=new String[12];YearMonth[] ms=new YearMonth[12];for(int i=0;i<12;i++){ms[i]=YearMonth.of(year,i+1);names[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMMM"));}
         TextView picked=label("",13,main.ink,true);picked.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(picked);
@@ -85,7 +85,7 @@ final class ReportsScreen extends Ui {
         if(y.refunds>0)body.addView(label("Refunds beyond spending (categories that got more back than they spent): "+money(y.refunds)+", taken off the year's spending.",12,main.muted,false));
     }
     private void yearRows(LinearLayout body,List<Budget.Slice> slices,YearMonth[] r){
-        if(slices.isEmpty()){body.addView(label("No spending this year.",14,main.muted,false));return;}
+        if(slices.isEmpty()){quiet(body,"📊","No spending this year.");return;}
         for(Budget.Slice s:slices){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));
             TextView amount=label(money(s.amount)+"  ·  "+percent(s.tenths),14,main.ink,true);amount.setGravity(Gravity.END);nameAndAmount(row,s.name,amount);
             row.setContentDescription(s.name+", "+money(s.amount)+", "+percent(s.tenths)+". Double tap for its transactions.");
@@ -116,7 +116,7 @@ final class ReportsScreen extends Ui {
     private void fillBreakdown(LinearLayout body){
         body.removeAllViews();YearMonth[] r=periodRange(main.period);List<Budget.Slice> slices=main.budget.breakdown(r[0],r[1],main.byGroup);
         long total=Budget.total(slices);body.addView(label(rangeText(r),12,main.muted,false));
-        if(slices.isEmpty()){body.addView(label("No spending in this period.",14,main.muted,false));return;}
+        if(slices.isEmpty()){quiet(body,"📊","No spending in this period.");return;}
         long[] values=new long[slices.size()];int[] colors=new int[slices.size()];
         for(int i=0;i<values.length;i++){values[i]=slices.get(i).amount;
             colors[i]=slices.get(i).other?main.muted:(main.darkTheme?SLICE_DARK:SLICE_LIGHT)[i];}
@@ -184,7 +184,7 @@ final class ReportsScreen extends Ui {
     private void incomeExpenseTable(){
         LinearLayout card=card();card.addView(heading("Income and expenses",20,main.ink));
         Budget.Table t=main.budget.incomeExpense(main.month.minusMonths(5),6);
-        if(t.income.isEmpty()&&t.expenses.isEmpty()){card.addView(label("No income or spending in the six months to "+main.month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))+".",14,main.muted,false));return;}
+        if(t.income.isEmpty()&&t.expenses.isEmpty()){quiet(card,"📊","No income or spending in the six months to "+main.month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))+".");return;}
         card.addView(label("Six months to "+main.month.format(DateTimeFormatter.ofPattern("MMMM yyyy"))+". Scroll sideways for every month, the average and the total.",12,main.muted,false));
         String[] heads=new String[t.months.length+2];
         for(int i=0;i<t.months.length;i++)heads[i]=t.months[i].format(DateTimeFormatter.ofPattern("MMM yyyy"));heads[heads.length-2]="Average";

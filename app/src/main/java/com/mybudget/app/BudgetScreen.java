@@ -2,6 +2,7 @@ package com.mybudget.app;
 
 import android.app.*;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.text.*;
 import android.view.Gravity;
 import android.view.View;
@@ -48,9 +49,26 @@ final class BudgetScreen extends Ui {
             String every=c.repeatMonths>0?", then every "+c.repeatMonths+" months":"";
             return "Save "+money(c.target)+" by "+pretty(d==null?c.dueDate:d.toString())+every;}
         return "Refill to "+money(c.target)+by+" each month";}
-    void readyCard(){LinearLayout c=card();c.setBackground(bg(main.primary));c.addView(label("TO BUDGET",11,Color.WHITE,true));
-        c.addView(label(money(main.budget.spendable(main.month)),30,Color.WHITE,true));long future=main.budget.futureAssigned(main.month);
-        c.addView(label(future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",12,Color.WHITE,false));}
+    /**
+     * To budget: the brand colour deepening to violet, the figure large. When it changes (an assignment, income) it counts from
+     * the old figure to the new one; when it reaches zero in the month on screen, a burst of confetti: every dollar has a job.
+     */
+    void readyCard(){LinearLayout c=card();GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+            new int[]{main.primary,main.darkTheme?Color.rgb(96,66,168):Color.rgb(88,58,166)});g.setCornerRadius(dp(20));c.setBackground(g);
+        c.setPadding(dp(18),dp(14),dp(18),dp(16));c.setElevation(main.darkTheme?0:dp(3));
+        TextView title=label("TO BUDGET",11,Color.WHITE,true);title.setLetterSpacing(0.12f);title.setAlpha(0.85f);c.addView(title);
+        long ready=main.budget.spendable(main.month);TextView figure=label(money(ready),34,Color.WHITE,true);c.addView(figure);
+        Long before=main.shownReady;boolean sameMonth=main.month.equals(main.shownMonth);main.shownReady=ready;
+        if(motion()&&sameMonth&&before!=null&&before!=ready&&!main.hideAmounts){figure.setContentDescription(money(ready));
+            android.animation.ValueAnimator count=android.animation.ValueAnimator.ofFloat(0f,1f);count.setDuration(700);
+            count.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));long from=before;
+            count.addUpdateListener(a->figure.setText(money(from+Math.round((ready-from)*(float)a.getAnimatedValue()))));
+            count.addListener(new android.animation.AnimatorListenerAdapter(){@Override public void onAnimationEnd(android.animation.Animator a){figure.setText(money(ready));}});
+            figure.setText(money(from));count.start();}
+        boolean allAssigned=ready==0&&!main.budget.accounts.isEmpty()&&!main.budget.categories.isEmpty();long future=main.budget.futureAssigned(main.month);
+        TextView line=label(allAssigned?"Every dollar has a job 🎉":future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",13,Color.WHITE,allAssigned);
+        line.setAlpha(allAssigned?1f:0.9f);c.addView(line);
+        if(allAssigned&&sameMonth&&before!=null&&before!=0){line.setPivotX(0);pop(line);Burst.over(c,main.darkTheme);confirm(c);}}
     private int overspent(){int n=0;for(Budget.Category c:main.budget.categories)if(main.budget.toCover(c,main.month)>0)n++;return n;}
     void categoryCard(Budget.Category c){
         LinearLayout row=card();
@@ -59,11 +77,13 @@ final class BudgetScreen extends Ui {
         LinearLayout heading=new LinearLayout(main);heading.setGravity(Gravity.CENTER_VERTICAL);TextView name=label(c.name,16,main.ink,true);
         name.setPadding(0,0,dp(8),0);boolean large=main.getResources().getConfiguration().fontScale>=1.3f; // large text: the name on its own line, Available under it
         if(large)heading.setOrientation(LinearLayout.VERTICAL);heading.addView(name,large?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));LinearLayout balance=column();
-        TextView caption=label("Available",10,main.muted,false);caption.setGravity(Gravity.END);caption.setPadding(0,0,0,0);balance.addView(caption);
-        TextView value=label(money(available),20,status,true);value.setGravity(Gravity.END);value.setPadding(0,0,0,0);
+        TextView caption=label("Available",10,main.muted,false);caption.setGravity(Gravity.CENTER);caption.setPadding(0,0,0,dp(2));balance.addView(caption);
+        // Available in a pill tinted by its state: green (fine), amber (still to fund, or below zero on a card), red (overspent).
+        TextView value=label(money(available),20,status,true);value.setGravity(Gravity.CENTER);value.setPadding(dp(8),0,dp(8),0);
+        GradientDrawable pill=bg(tint(status,main.darkTheme?46:24));pill.setCornerRadius(dp(14));value.setBackground(pill);
         value.setAutoSizeTextTypeUniformWithConfiguration(12,20,1,android.util.TypedValue.COMPLEX_UNIT_SP);
         float scale=Math.max(1f,Math.min(1.6f,main.getResources().getConfiguration().fontScale)); // large text: room for the whole amount
-        balance.addView(value,new LinearLayout.LayoutParams(-1,Math.round(dp(27)*scale)));
+        balance.addView(value,new LinearLayout.LayoutParams(-1,Math.round(dp(30)*scale)));
         heading.addView(balance,new LinearLayout.LayoutParams(large?-1:Math.round(dp(128)*scale),-2));row.addView(heading);
         LinearLayout details=new LinearLayout(main);
         TextView assigned=label("Assigned  "+money(main.budget.assigned(c,main.month)),11,main.muted,false),activity=label("Activity  "+money(main.budget.activity(c,main.month)),11,main.muted,false);
@@ -74,7 +94,13 @@ final class BudgetScreen extends Ui {
             long goal=t.equals("Weekly")?Budget.weeklyGoal(c,main.month):c.target,base=t.equals("Monthly")||t.equals("Debt")?main.budget.assigned(c,main.month):t.equals("Balance")?available:t.equals("ByDate")?main.budget.carried(c,main.month)+main.budget.assigned(c,main.month):goal-need;
             progress(row,base,goal,status);row.addView(label(targetDescription(c),11,main.muted,false));
             boolean passed=t.equals("ByDate")&&Budget.dueFor(c,main.month)==null;
-            row.addView(c.snoozed.equals(main.month.toString())?label("Target snoozed this month",12,main.muted,true):passed?label("Due date passed: it asks for nothing more",12,main.muted,true):label(need==0?"Funded for this month":money(need)+" left to fund this month",12,need>0?main.amber:main.green,true));}
+            boolean snoozed=c.snoozed.equals(main.month.toString());
+            TextView state=snoozed?label("Target snoozed this month",12,main.muted,true):passed?label("Due date passed: it asks for nothing more",12,main.muted,true):label(need==0?"✓ Funded for this month":money(need)+" left to fund this month",12,need>0?main.amber:main.green,true);
+            if(need==0&&!snoozed&&!passed)state.setContentDescription("Funded for this month");row.addView(state);
+            // A target that was short when this month was last on screen and is funded now: its check mark pops, with a firm tap.
+            String key=main.month+"/"+c.id;boolean funded=need==0&&!snoozed&&!passed;
+            if(funded&&main.shownUnfunded.contains(key)&&main.month.equals(main.shownMonth)){state.setPivotX(0);pop(state);confirm(row);}
+            if(funded)main.shownUnfunded.remove(key);else main.shownUnfunded.add(key);}
         Budget.Pace pace=main.budget.pace(c,main.month,LocalDate.now());
         if(pace!=null)row.addView(label("Spending faster than the month: "+pace.spent+"% spent, "+pace.elapsed+"% of the month gone",12,main.amber,false)); // the current month only
         if(!c.note.isEmpty())row.addView(label(c.note,12,main.muted,false));
@@ -100,16 +126,32 @@ final class BudgetScreen extends Ui {
             LinearLayout.LayoutParams kp=new LinearLayout.LayoutParams(0,-2,1);kp.setMargins(dp(8),0,0,0);
             buttons.addView(keep,kp);r.addView(buttons);}
         if(overspent()>0)main.content.addView(label(count(overspent(),"category","categories")+" overspent - tap to cover",14,main.red,true));
-        main.content.addView(button("Fund targets",this::autoAssign));LinkedHashSet<String> groups=new LinkedHashSet<>();
+        main.content.addView(primary("Fund targets",this::autoAssign));LinkedHashSet<String> groups=new LinkedHashSet<>();
         for(Budget.Category c:main.budget.categories)if(!c.hidden)groups.add(c.group);
-        for(String group:groups){main.content.addView(heading(group,18,main.blue));
-            for(Budget.Category c:main.budget.categories)if(!c.hidden&&c.group.equals(group))categoryCard(c);}
+        Set<String> collapsed=collapsedGroups();
+        for(String group:groups){boolean shut=collapsed.contains(group);long total=0;int n=0;
+            for(Budget.Category c:main.budget.categories)if(!c.hidden&&c.group.equals(group)){total+=main.budget.available(c,main.month);n++;}
+            groupHeader(group,shut,total,n);
+            for(Budget.Category c:main.budget.categories)if(!c.hidden&&c.group.equals(group)&&(!shut||main.budget.toCover(c,main.month)>0))categoryCard(c);} // overspent stays in sight, folded or not
         main.content.addView(button("+ Add category",()->editCategory(null)));main.content.addView(button("Move money",this::move));
         List<Budget.Category> hidden=new ArrayList<>();long held=0;for(Budget.Category c:main.budget.categories)if(c.hidden){hidden.add(c);
             held+=main.budget.available(c,main.month);}
         if(!hidden.isEmpty()){main.content.addView(button((main.showHidden?"Collapse hidden categories (":"Show hidden categories (")+hidden.size()+")"+(held!=0?" · holds "+money(held):""),()->{main.showHidden=!main.showHidden;
                 main.render();}));if(main.showHidden)for(Budget.Category c:hidden)categoryCard(c);}
     }
+    // Groups folded away on Budget: a display choice on this phone (prefs "appearance"), not part of the budget or its backups.
+    private Set<String> collapsedGroups(){return new HashSet<>(main.getSharedPreferences("appearance",0).getStringSet("collapsed_groups",new HashSet<>()));}
+    /** A group's heading: tap to fold its categories away or bring them back. Shows the group's total Available (and, folded, how many). */
+    private void groupHeader(String group,boolean shut,long total,int n){
+        LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));row.setPadding(dp(4),dp(8),dp(4),0);pressable(row);
+        TextView arrow=label(shut?"▸":"▾",16,main.blue,true);arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        row.addView(arrow,new LinearLayout.LayoutParams(dp(22),-2));
+        TextView name=label(group,18,main.blue,true);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+        TextView sum=label((shut?count(n,"category","categories")+" · ":"")+money(total),13,total<0?main.red:main.muted,true);row.addView(sum);
+        heading(row);row.setContentDescription(group+", "+(shut?"collapsed, ":"")+money(total)+" available. Double tap to "+(shut?"show":"hide")+" its categories.");
+        row.setOnClickListener(v->{Set<String> now=collapsedGroups();if(!now.remove(group))now.add(group);tick(v);
+            main.getSharedPreferences("appearance",0).edit().putStringSet("collapsed_groups",now).apply();main.render();});
+        main.content.addView(row,new LinearLayout.LayoutParams(-1,-2));}
     /** The month's note (top of Budget): the text with a small Edit, or a small "+ Note" when there's none. */
     private void monthNoteRow(){
         String note=main.budget.monthNote(main.month);LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);

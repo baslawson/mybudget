@@ -48,7 +48,7 @@ final class TransactionsScreen extends Ui {
             if(main.change(()->main.budget.billCategories.put(billKey,id)))toast("Planned from "+cats.get(n).name+". MyBudget suggests it when the bill is paid, too.");}).show();
     }
     void spending(){
-        main.content.addView(button("+ Add transaction",()->main.forms.transaction(null)));
+        main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));
         int review=main.budget.toReview().size();if(review>0){LinearLayout c=card();
             c.addView(label(count(review,"imported transaction","imported transactions")+" to review",17,main.amber,true));
             c.addView(label("Check each one's payee and category, then approve it.",13,main.muted,false));
@@ -144,19 +144,39 @@ final class TransactionsScreen extends Ui {
         list.removeAllViews();int n=0;
         Budget.Account shown=main.accountFilter.isEmpty()?null:main.budget.account(main.accountFilter);
         Map<String,Long> running=shown==null?null:main.budget.runningBalances(shown); // one account's list: its balance after each transaction
-        for(Budget.Entry e:main.budget.filter(currentFilter())){n++;LinearLayout row=column();row.setPadding(dp(14),dp(10),dp(14),dp(10));
-            row.setBackground(bg(main.surface));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);
-            p.setMargins(0,dp(5),0,dp(5));list.addView(row,p);
-            TextView payee=label(e.payee,17,main.ink,true);
+        // Newest first, under a heading for each day ("Today", "Yesterday", "Monday 6 Oct"). Each row: the payee's initial in a
+        // coloured circle, payee and details in the middle, the amount and Cleared/Uncleared on the right.
+        String day=null;LocalDate today=LocalDate.now();
+        for(Budget.Entry e:main.budget.filter(currentFilter())){n++;
+            if(!e.date.equals(day)){day=e.date;TextView h=heading(dayHeading(LocalDate.parse(e.date),today),13,main.muted);h.setPadding(dp(4),dp(n==1?4:12),0,dp(2));list.addView(h);}
+            LinearLayout row=new LinearLayout(main);row.setGravity(android.view.Gravity.CENTER_VERTICAL);row.setPadding(dp(12),dp(10),dp(14),dp(10));
+            row.setBackground(surface(main.surface));pressable(row);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);
+            p.setMargins(0,dp(4),0,dp(4));list.addView(row,p);
+            row.addView(badge(initial(e.payee),FLAG_COLORS[1+Math.floorMod(e.payee.toLowerCase(Locale.ROOT).hashCode(),FLAG_COLORS.length-1)]));
+            LinearLayout middle=column();middle.setPadding(dp(12),0,dp(8),0);row.addView(middle,new LinearLayout.LayoutParams(0,-2,1));
+            TextView payee=label(e.payee,16,main.ink,true);payee.setPadding(0,0,0,0);
             if(e.flag>0&&e.flag<FLAG_COLORS.length){SpannableString s=new SpannableString("● "+e.payee);
                 s.setSpan(new android.text.style.ForegroundColorSpan(FLAG_COLORS[e.flag]),0,1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);payee.setText(s);
-                payee.setContentDescription(e.payee+", "+main.budget.flagLabel(e.flag)+" flag");}row.addView(payee);
-            if(!e.approved)row.addView(label("To review · imported",12,main.amber,true));
-            row.addView(label(categoryName(e)+" / "+main.budget.account(e.account).name+" / "+pretty(e.date),12,main.muted,false));
-            row.addView(label(money(e.amount)+(e.cleared?"  Cleared":"  Uncleared"),17,e.amount>0?main.green:main.ink,true));
-            if(running!=null&&running.containsKey(e.id))row.addView(label("Balance "+money(running.get(e.id)),12,main.muted,false));
-            if(!e.memo.isEmpty())row.addView(label(e.memo,12,main.muted,false));
-            if(!e.photo.isEmpty())row.addView(label("Photo attached",12,main.blue,false));row.setOnClickListener(v->main.forms.transaction(e));}
-        if(n==0)list.addView(label(main.fromFilter.isEmpty()&&main.toFilter.isEmpty()?"No matching transactions this month.":"No matching transactions in these dates.",15,main.muted,false));
+                payee.setContentDescription(e.payee+", "+main.budget.flagLabel(e.flag)+" flag");}middle.addView(payee);
+            if(!e.approved)middle.addView(label("To review · imported",12,main.amber,true));
+            TextView where=label(categoryName(e)+" · "+main.budget.account(e.account).name,12,main.muted,false);where.setPadding(0,dp(2),0,0);middle.addView(where);
+            if(running!=null&&running.containsKey(e.id))middle.addView(label("Balance "+money(running.get(e.id)),12,main.muted,false));
+            if(!e.memo.isEmpty())middle.addView(label(e.memo,12,main.muted,false));
+            if(!e.photo.isEmpty())middle.addView(label("📎 Photo attached",12,main.blue,false));
+            LinearLayout right=column();right.setGravity(android.view.Gravity.END);
+            TextView amount=label(money(e.amount),16,e.amount>0?main.green:main.ink,true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
+            TextView cleared=label(e.cleared?"Cleared":"Uncleared",11,e.cleared?main.green:main.muted,false);cleared.setGravity(android.view.Gravity.END);cleared.setPadding(0,dp(2),0,0);right.addView(cleared);
+            row.addView(right,new LinearLayout.LayoutParams(-2,-2));row.setOnClickListener(v->main.forms.transaction(e));}
+        if(n==0){boolean none=main.budget.entries.isEmpty();list.addView(emptyRow(none?"🧾":"🔍",none?"No transactions yet. Add what you spend or earn and it shows here.":main.fromFilter.isEmpty()&&main.toFilter.isEmpty()?"No matching transactions this month.":"No matching transactions in these dates."));}
+    }
+    /** "Today", "Yesterday", "Monday 6 Oct" (with the year when it isn't this year). */
+    static String dayHeading(LocalDate d,LocalDate today){if(d.equals(today))return "Today";if(d.equals(today.minusDays(1)))return "Yesterday";
+        return d.format(DateTimeFormatter.ofPattern(d.getYear()==today.getYear()?"EEEE d MMM":"EEEE d MMM yyyy",Locale.forLanguageTag("en-AU")));}
+    /** A payee's badge letter: its first letter or digit ("Transfer to Savings" → T), or "•" when it has none. */
+    static String initial(String payee){for(int i=0;i<payee.length();){int c=payee.codePointAt(i);if(Character.isLetterOrDigit(c))return new String(Character.toChars(Character.toUpperCase(c)));i+=Character.charCount(c);}return "•";}
+    /** The empty list: a symbol and a line, in the list (not a card added to the screen). */
+    private View emptyRow(String symbol,String text){LinearLayout c=column();c.setGravity(android.view.Gravity.CENTER_HORIZONTAL);c.setPadding(dp(20),dp(24),dp(20),dp(24));
+        TextView s=label(symbol,40,main.ink,false);s.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);c.addView(s);
+        TextView t=label(text,15,main.muted,false);t.setGravity(android.view.Gravity.CENTER);c.addView(t);return c;
     }
 }

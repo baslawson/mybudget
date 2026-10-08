@@ -199,11 +199,15 @@ public class MainActivity extends Activity {
     }
     // Hide amounts (⋮ menu) shows dots instead of money everywhere on screen, for showing the plan to someone.
     boolean hideAmounts,darkTheme;
+    // What the screen showed last time, for motion only: the tab and month (to animate a change of either), To budget (to count from the
+    // old figure to the new one), and which targets were short (so a target that just became funded gets its check mark pop).
+    String shownTab;YearMonth shownMonth;Long shownReady;private ScrollView screenScroll;final Set<String> shownUnfunded=new HashSet<>();
     /** What a tab is called on screen (MyBudget's own names; the keys stay as saved in older sessions). */
     static String tabTitle(String tab){switch(tab){case"Plan":return "Budget";case"Spending":return "Transactions";case"Reflect":return "Reports";default:return tab;}}
     void render(){
         budget.fromPlanner.clear();budget.fromPlanner.addAll(PlannerBills.read(this,budget)); // Planner may have sent a new list meanwhile
         if(!budget.cached())budget.cache(true); // month maths are kept from screen to screen until a change (commit), which works them out afresh
+        int keepY=screenScroll!=null&&tab.equals(shownTab)&&month.equals(shownMonth)?screenScroll.getScrollY():0; // the same screen again (after a save): stay where you were
         root=ui.column();root.setBackgroundColor(canvas);root.setPadding(ui.dp(16),ui.dp(12),ui.dp(16),ui.dp(8));setContentView(root);
         root.setOnApplyWindowInsetsListener((v,i)->{root.setPadding(ui.dp(16),i.getSystemWindowInsetTop()+ui.dp(8),ui.dp(16),i.getSystemWindowInsetBottom()+ui.dp(4));return i;});
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
@@ -223,30 +227,39 @@ public class MainActivity extends Activity {
         overflow.setOnClickListener(v->options(v));header.addView(overflow,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));LinearLayout top=ui.column();top.addView(header);
         top.addView(ui.heading(tabTitle(tab),28,ink));
         LinearLayout months=new LinearLayout(this);months.setGravity(Gravity.CENTER_VERTICAL);
-        Button previous=ui.button("\u2039",()->{month=month.minusMonths(1);render();});previous.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);
+        Button previous=ui.button("\u2039",()->{Ui.tick(root);month=month.minusMonths(1);render();});previous.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);
         previous.setContentDescription("Previous month");previous.setBackground(ui.bg(Color.TRANSPARENT));
         months.addView(previous,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));
         TextView title=ui.label(month.format(DateTimeFormatter.ofPattern("MMMM yyyy")),16,ink,true);title.setGravity(Gravity.CENTER);
-        months.addView(title,new LinearLayout.LayoutParams(0,-2,1));Button next=ui.button("\u203a",()->{month=month.plusMonths(1);render();});
+        months.addView(title,new LinearLayout.LayoutParams(0,-2,1));Button next=ui.button("\u203a",()->{Ui.tick(root);month=month.plusMonths(1);render();});
         next.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP,26);next.setContentDescription("Next month");next.setBackground(ui.bg(Color.TRANSPARENT));
         months.addView(next,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));if(!tab.equals("Settings"))top.addView(months);
         ScrollView scroll=new ScrollView(this);content=ui.column();scroll.addView(content);
         if(getResources().getConfiguration().fontScale>=1.3f)content.addView(top);else root.addView(top); // large text: the header scrolls away with the screen, leaving room for it
         root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         switch(tab){case"Settings":settingsScreen.settings();break;case"Home":homeScreen.home();break;case"Plan":budgetScreen.plan();break;case"Spending":transactionsScreen.spending();break;case"Accounts":accountsScreen.accounts();break;default:reportsScreen.reflect();}
+        // A new tab fades up into place; another month slides in from the side it came from. A plain re-render (after a save) doesn't move.
+        boolean newTab=!tab.equals(shownTab),newMonth=!newTab&&shownMonth!=null&&!month.equals(shownMonth);
+        if(Ui.motion()&&shownTab!=null&&(newTab||newMonth)){scroll.setAlpha(0f);if(newTab)scroll.setTranslationY(ui.dp(14));
+            else scroll.setTranslationX(ui.dp(month.isAfter(shownMonth)?28:-28));
+            scroll.animate().alpha(1f).translationX(0f).translationY(0f).setDuration(220).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();}
+        boolean tabChanged=shownTab!=null&&newTab;shownTab=tab;shownMonth=month;screenScroll=scroll;
+        if(keepY>0)scroll.post(()->scroll.scrollTo(0,keepY));
         addUndoBar(); // a delete's Undo, above the tabs (gone on another tab)
         if(tab.equals("Settings")){root.addView(ui.button("Back",this::closeSettings));return;}
-        LinearLayout nav=new LinearLayout(this);nav.setPadding(0,ui.dp(6),0,0);String[] names={"Home","Plan","Spending","Accounts","Reflect"};
+        LinearLayout nav=new LinearLayout(this);nav.setPadding(ui.dp(4),ui.dp(4),ui.dp(4),ui.dp(4));nav.setBackground(ui.surface(surface));
+        String[] names={"Home","Plan","Spending","Accounts","Reflect"};
         int[] icons={R.drawable.nav_home,R.drawable.nav_plan,R.drawable.nav_spending,R.drawable.nav_accounts,R.drawable.nav_reflect};
         for(int i=0;i<names.length;i++){String name=names[i];boolean selected=tab.equals(name);
-            Button b=ui.button(tabTitle(name),()->{tab=name;accountFilter="";render();});b.setTextSize(10);b.setMaxLines(1);
+            Button b=ui.button(tabTitle(name),()->{if(!tab.equals(name))Ui.tick(root);tab=name;accountFilter="";render();});b.setTextSize(10);b.setMaxLines(1);
             b.setAutoSizeTextTypeUniformWithConfiguration(ui.dp(7),Math.max(ui.dp(8),Math.round(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP,10,getResources().getDisplayMetrics()))),1,android.util.TypedValue.COMPLEX_UNIT_PX); // large text shrinks to fit the tab
             b.setPadding(ui.dp(2),ui.dp(7),ui.dp(2),ui.dp(5));b.setBackground(ui.bg(selected?primary:Color.TRANSPARENT));
             b.setTextColor(selected?Color.WHITE:muted);b.setSelected(selected);b.setContentDescription(tabTitle(name)+(selected?", selected":""));
             if(selected)b.setTypeface(null,Typeface.BOLD);Drawable icon=getDrawable(icons[i]).mutate();icon.setTint(selected?Color.WHITE:muted);
             icon.setBounds(0,0,ui.dp(20),ui.dp(20));b.setCompoundDrawables(null,icon,null,null);b.setCompoundDrawablePadding(ui.dp(4));
             LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,ui.dp(60),1);p.setMargins(ui.dp(1),0,ui.dp(1),0);
-            nav.addView(b,p);}root.addView(nav);
+            nav.addView(b,p);if(selected&&tabChanged)Ui.pop(b);}
+        LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(-1,-2);np.setMargins(0,ui.dp(6),0,0);root.addView(nav,np);
     }
     // Changes from a menu: the category is looked up again by id, in case the budget was reloaded meanwhile.
     boolean change(Runnable action){try{commit(action);render();return true;}catch(Exception e){ui.toast(e.getMessage());return false;}}
@@ -281,12 +294,12 @@ public class MainActivity extends Activity {
     // Undo for deletes: the saved data from just before the delete and what the delete saved. A bar above the tabs offers
     // Undo for 8 seconds, until the tab changes or another change is saved; it puts [undoBefore] back through commit(),
     // only while the saved data is still [undoAfter] (DataSafety.undoAllowed), so nothing saved since is overwritten.
-    String undoBefore,undoAfter,undoText,undoTab;private long undoUntil;private int undoShown;private View undoBar;
+    static final long UNDO_MILLIS=8000;String undoBefore,undoAfter,undoText,undoTab;private long undoUntil;private int undoShown;private View undoBar;
     /** A delete, as change(), then the Undo bar ([done]: "Transaction deleted"). */
     boolean deleteWithUndo(String done,Runnable action){String[] before={null};
         try{commit(()->{try{before[0]=loaded!=null?loaded:BudgetStore.encode(budget);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}action.run();});} // the budget matches the saved data until the change
         catch(Exception e){ui.toast(e.getMessage());return false;}
-        undoBefore=before[0];undoAfter=loaded;undoText=done;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+8000;render();
+        undoBefore=before[0];undoAfter=loaded;undoText=done;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+UNDO_MILLIS;render();
         root.announceForAccessibility(done+". Undo is available for a few seconds.");return true;}
     private void hideUndo(){undoBefore=null;if(undoBar!=null&&undoBar.getParent()instanceof LinearLayout)((LinearLayout)undoBar.getParent()).removeView(undoBar);undoBar=null;}
     private void addUndoBar(){
@@ -296,6 +309,7 @@ public class MainActivity extends Activity {
         Button undo=ui.button("Undo",this::undo);undo.setTextColor(Color.WHITE);undo.setTypeface(null,Typeface.BOLD);undo.setBackground(ui.bg(Color.TRANSPARENT));
         undo.setContentDescription("Undo: "+undoText);bar.addView(undo,new LinearLayout.LayoutParams(-2,-2));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,ui.dp(6),0,0);root.addView(bar,p);undoBar=bar;
+        if(Ui.motion()&&left>UNDO_MILLIS-400){bar.setAlpha(0f);bar.setTranslationY(ui.dp(16));bar.animate().alpha(1f).translationY(0f).setDuration(220).start();} // slides up when it first shows
         int shown=++undoShown;getWindow().getDecorView().postDelayed(()->{if(shown==undoShown)hideUndo();},left);}
     private void undo(){String before=undoBefore,after=undoAfter,done=undoText;hideUndo();if(before==null)return;
         if(!DataSafety.undoAllowed(prefs().getString("data",null),after,loaded)){

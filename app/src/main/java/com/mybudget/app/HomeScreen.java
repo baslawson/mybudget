@@ -1,6 +1,7 @@
 package com.mybudget.app;
 
 import android.app.AlertDialog;
+import android.graphics.drawable.GradientDrawable;
 import android.widget.*;
 import java.time.*;
 import java.util.*;
@@ -9,45 +10,49 @@ import java.util.*;
 final class HomeScreen extends Ui {
     HomeScreen(MainActivity main){super(main);}
     void home(){
-        main.budgetScreen.readyCard();main.content.addView(button("+ Add transaction",()->main.forms.transaction(null)));
+        main.budgetScreen.readyCard();main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));
         if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(heading("Start with the money you have",21,main.ink));
             c.addView(label("Add your bank, savings or cash account and its current balance. Then assign that money in your plan.",15,main.muted,false));
-            if(main.budget.brandNew())c.addView(button("Set up my budget",this::setup)); // never for a budget in use
+            if(main.budget.brandNew())c.addView(primary("Set up my budget",this::setup)); // never for a budget in use
             c.addView(button("Add your first account",main.accountsScreen::addAccount));}
         // Needs attention: each alert opens where it's dealt with.
         main.content.addView(heading("Needs attention",20,main.ink));int alerts=0;
         for(Budget.Category c:main.budget.categories){long cover=main.budget.toCover(c,main.month);if(cover<=0)continue;alerts++;String id=c.id;
-            LinearLayout a=alert(c.name+" is overspent by "+money(cover),main.red,"Cover it with money from another category or To budget.",()->main.budgetScreen.categoryDetails(main.budget.category(id)));
+            LinearLayout a=alert("!",c.name+" is overspent by "+money(cover),main.red,"Cover it with money from another category or To budget.",()->main.budgetScreen.categoryDetails(main.budget.category(id)));
             a.addView(button("Cover",()->main.budgetScreen.cover(id)));}
         long ready=main.budget.spendable(main.month);
         if(ready>0){alerts++;
-            alert(money(ready)+" in To budget is waiting to be assigned",main.blue,"Give it a job in Budget, or use Fund targets.",()->{main.tab="Plan";main.render();});}
+            alert("\uD83D\uDCB0",money(ready)+" in To budget is waiting to be assigned",main.blue,"Give it a job in Budget, or use Fund targets.",()->{main.tab="Plan";main.render();});}
         else if(ready<0){alerts++;
-            alert("To budget is below zero by "+money(-ready),main.red,"More is assigned than you have. Return money from a category in Budget.",()->{main.tab="Plan";main.render();});}
+            alert("!","To budget is below zero by "+money(-ready),main.red,"More is assigned than you have. Return money from a category in Budget.",()->{main.tab="Plan";main.render();});}
         LocalDate today=LocalDate.now();List<Budget.Scheduled> soon=main.budget.dueWithin(today,7);
         for(Budget.Scheduled s:soon.subList(0,Math.min(5,soon.size()))){alerts++;LocalDate d=LocalDate.parse(s.next);
             boolean planner=main.budget.fromPlanner.contains(s);String id=s.id;
-            alert(s.payee+" · "+(planner&&s.amount==0?"no amount yet":money(s.amount)),d.isBefore(today)?main.amber:main.ink,(d.isBefore(today)?"Overdue since "+pretty(s.next):d.equals(today)?"Due today":"Due "+pretty(s.next))+(planner?" · a bill in Planner":" · tap to enter, skip or edit"),planner?()->{main.clearFilters();
+            alert("\uD83D\uDCC5",s.payee+" · "+(planner&&s.amount==0?"no amount yet":money(s.amount)),d.isBefore(today)?main.amber:main.ink,(d.isBefore(today)?"Overdue since "+pretty(s.next):d.equals(today)?"Due today":"Due "+pretty(s.next))+(planner?" · a bill in Planner":" · tap to enter, skip or edit"),planner?()->{main.clearFilters();
                 main.tab="Spending";main.render();}:()->main.forms.dueActions(id));}
         if(soon.size()>5)main.content.addView(button("All "+soon.size()+" due this week in Transactions",()->{main.clearFilters();
             main.tab="Spending";main.render();}));
         int review=main.budget.toReview().size();
         if(review>0){alerts++;
-            alert(count(review,"imported transaction","imported transactions")+" to review",main.amber,"Check each one's payee and category, then approve it.",main.transactionsScreen::review);}
+            alert("\uD83D\uDCE5",count(review,"imported transaction","imported transactions")+" to review",main.amber,"Check each one's payee and category, then approve it.",main.transactionsScreen::review);}
         // No backup for 14 days (or ever): the budget is only on this phone. "Remind me in a week" snoozes it (device preferences).
         if(main.backupDue()){alerts++;String last=AutoBackup.lastBackup(main);
-            LinearLayout a=alert(last==null?"Your budget has never been backed up":"No backup in "+DataSafety.daysSince(last,today)+" days",main.amber,"It's saved only on this phone: uninstalling MyBudget or clearing its storage deletes it. Tap to back it up in Settings.",()->{main.settingsScreen.showBackup=true;
+            LinearLayout a=alert("\uD83D\uDCBE",last==null?"Your budget has never been backed up":"No backup in "+DataSafety.daysSince(last,today)+" days",main.amber,"It's saved only on this phone: uninstalling MyBudget or clearing its storage deletes it. Tap to back it up in Settings.",()->{main.settingsScreen.showBackup=true;
                 main.openSettings();});
             a.addView(button("Remind me in a week",()->{main.prefs().edit().putString("backup_reminder_until",DataSafety.snoozeUntil(LocalDate.now())).apply();main.render();}));}
-        if(alerts==0)main.content.addView(label("All set: nothing needs your attention.",15,main.green,true));
+        if(alerts==0){TextView t=(TextView)empty("✅","All set: nothing needs your attention.",null,null).getChildAt(1);
+            t.setTextColor(main.green);t.setTypeface(null,android.graphics.Typeface.BOLD);}
         long need=0;for(Budget.Category c:main.budget.categories)if(!c.hidden)need+=main.budget.fundNeed(c,main.month);
-        LinearLayout progress=card();progress.addView(heading("Your funding progress",19,main.ink));
-        progress.addView(label(money(need)+" still needed this month",16,need>0?main.amber:main.green,true));
+        LinearLayout progress=card();LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        top.addView(badge("🎯",need>0?main.amber:main.green));TextView h=heading("Your funding progress",19,main.ink);h.setPadding(dp(12),0,0,0);
+        top.addView(h,new LinearLayout.LayoutParams(0,-2,1));progress.addView(top);
+        progress.addView(label(need>0?money(need)+" still needed this month":"✓ Every target is funded this month",16,need>0?main.amber:main.green,true));
         progress.addView(label("Targets tell you what to fund. They do not create money.",14,main.muted,false));
         // Priority categories: the ones pinned from their menu in Budget.
         main.content.addView(heading("Priority categories",20,main.ink));List<Budget.Category> pinned=main.budget.pinned();
         for(Budget.Category c:pinned)main.budgetScreen.categoryCard(c);
-        if(pinned.isEmpty())main.content.addView(label("Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.",14,main.muted,false));
+        if(pinned.isEmpty()&&!main.budget.categories.isEmpty())empty("📌","Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.","Go to Budget",()->{main.tab="Plan";main.render();});
+        else if(pinned.isEmpty())main.content.addView(label("Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.",14,main.muted,false));
     }
     // First-run setup, offered on the start card of a brand-new budget (Budget.brandNew): the currency, a first account, the
     // starter categories, then what To budget is. Each step saves on Next (a change like any other) or can be skipped; Cancel
@@ -96,7 +101,15 @@ final class HomeScreen extends Ui {
         d.setOnShowListener(v->{d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(save);main.render();}catch(Exception e){toast(e.getMessage());return;}d.dismiss();then.run();});
             if(!large())d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(w->{d.dismiss();then.run();});});d.show();
     }
-    /** A Home alert: a card with a coloured title and a line of detail; tapping it opens where it's dealt with. */
-    private LinearLayout alert(String title,int color,String detail,Runnable open){LinearLayout c=card();c.addView(label(title,16,color,true));
-        c.addView(label(detail,13,main.muted,false));c.setOnClickListener(v->open.run());return c;}
+    /**
+     * A Home alert: a card with a coloured edge, a round [icon] badge, a coloured title and a line of detail; tapping it opens where
+     * it's dealt with. Buttons added to it go under the text.
+     */
+    private LinearLayout alert(String icon,String title,int color,String detail,Runnable open){LinearLayout c=card();
+        GradientDrawable edge=new GradientDrawable();edge.setColor(color);
+        android.graphics.drawable.LayerDrawable look=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{surface(main.surface),edge});
+        look.setLayerGravity(1,android.view.Gravity.START|android.view.Gravity.FILL_VERTICAL);look.setLayerWidth(1,dp(5));c.setBackground(look);c.setClipToOutline(true);
+        LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);top.addView(badge(icon,color));
+        LinearLayout text=column();text.setPadding(dp(12),0,0,0);text.addView(label(title,16,color,true));text.addView(label(detail,13,main.muted,false));
+        top.addView(text,new LinearLayout.LayoutParams(0,-2,1));c.addView(top);c.setOnClickListener(v->open.run());return c;}
 }

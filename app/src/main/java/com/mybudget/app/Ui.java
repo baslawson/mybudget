@@ -27,8 +27,45 @@ class Ui {
     String code(){return main.budget.currency;} // the budget's currency, for labels such as "Amount (AUD)"
     String decimal(long cents){return java.math.BigDecimal.valueOf(cents,2).toPlainString();}
     LinearLayout column(){LinearLayout v=new LinearLayout(main);v.setOrientation(LinearLayout.VERTICAL);return v;}
+    // Digits all the same width ("tnum"), so amounts line up from row to row.
     TextView label(String text,int size,int color,boolean bold){TextView v=new TextView(main);v.setText(text);v.setTextSize(size);
-        v.setTextColor(color);v.setPadding(0,dp(4),0,dp(4));if(bold)v.setTypeface(null,Typeface.BOLD);return v;}
+        v.setTextColor(color);v.setPadding(0,dp(4),0,dp(4));v.setFontFeatureSettings("tnum");if(bold)v.setTypeface(null,Typeface.BOLD);return v;}
+    // Motion and feel. Animations follow the phone's setting (Settings > Accessibility > Remove animations, or the developer scales):
+    // with animations off, nothing moves and every view simply shows its final state.
+    static boolean motion(){return android.animation.ValueAnimator.areAnimatorsEnabled();}
+    static int tint(int color,int alpha){return Color.argb(alpha,Color.red(color),Color.green(color),Color.blue(color));}
+    /** A press ripple over a view (its foreground, so a background set later keeps it), in the shape of a rounded card or button. */
+    void pressable(View v){GradientDrawable mask=new GradientDrawable();mask.setColor(Color.WHITE);mask.setCornerRadius(dp(16));
+        v.setForeground(new android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(tint(main.blue,main.darkTheme?56:36)),null,mask));}
+    /** A light tap under the finger (tabs, toggles); [confirm]: a firmer one for a saved change. Both follow the phone's touch feedback setting. */
+    static void tick(View v){v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);}
+    static void confirm(View v){v.performHapticFeedback(android.os.Build.VERSION.SDK_INT>=30?android.view.HapticFeedbackConstants.CONFIRM:android.view.HapticFeedbackConstants.VIRTUAL_KEY);}
+    /** A card's surface: rounded, with a hairline edge so cards stand off the background in both themes. */
+    GradientDrawable surface(int color){GradientDrawable d=bg(color);d.setStroke(dp(1),tint(main.ink,main.darkTheme?26:18));return d;}
+    /** A round badge with a symbol or letter in it (payees, accounts, alerts), on a soft tint of [color]. */
+    TextView badge(String text,int color){TextView b=new TextView(main);b.setText(text);b.setTextSize(16);b.setGravity(android.view.Gravity.CENTER);
+        b.setTextColor(color);b.setTypeface(null,Typeface.BOLD);GradientDrawable d=new GradientDrawable();d.setShape(GradientDrawable.OVAL);
+        d.setColor(tint(color,main.darkTheme?52:30));b.setBackground(d);b.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        b.setLayoutParams(new LinearLayout.LayoutParams(dp(40),dp(40)));return b;}
+    /** A friendly empty state: a large symbol, a line of text, and optionally a button that gets started. */
+    LinearLayout empty(String symbol,String text,String action,Runnable run){LinearLayout c=card();c.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        c.setPadding(dp(20),dp(18),dp(20),dp(14));TextView s=label(symbol,40,main.ink,false);s.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);c.addView(s);
+        TextView t=label(text,15,main.muted,false);t.setGravity(android.view.Gravity.CENTER);c.addView(t);
+        if(action!=null)c.addView(primary(action,run));return c;}
+    /** An empty state inside a card (a report with nothing to show): a symbol over a line of text, centred. */
+    void quiet(LinearLayout parent,String symbol,String text){TextView s=label(symbol,32,main.ink,false);s.setGravity(android.view.Gravity.CENTER);
+        s.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);parent.addView(s,new LinearLayout.LayoutParams(-1,-2));
+        TextView t=label(text,14,main.muted,false);t.setGravity(android.view.Gravity.CENTER);parent.addView(t,new LinearLayout.LayoutParams(-1,-2));}
+    /** A card's title row: a round [icon] badge, then [title]. */
+    void head(LinearLayout card,String icon,TextView title){LinearLayout row=new LinearLayout(main);row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.addView(badge(icon,main.blue));title.setPadding(dp(12),dp(4),0,dp(4));row.addView(title,new LinearLayout.LayoutParams(0,-2,1));card.addView(row);}
+    /** Two buttons side by side, sharing the width. */
+    void pair(LinearLayout parent,Button a,Button b){LinearLayout row=new LinearLayout(main);
+        LinearLayout.LayoutParams pa=new LinearLayout.LayoutParams(0,-2,1),pb=new LinearLayout.LayoutParams(0,-2,1);pa.setMargins(0,dp(4),dp(4),dp(4));pb.setMargins(dp(4),dp(4),0,dp(4));
+        row.addView(a,pa);row.addView(b,pb);parent.addView(row,new LinearLayout.LayoutParams(-1,-2));}
+    /** A short pop as something appears (a funded target's check mark): it grows past full size and settles. */
+    static void pop(View v){if(!motion())return;v.setScaleX(0.6f);v.setScaleY(0.6f);
+        v.animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(new android.view.animation.OvershootInterpolator(3f)).start();}
     /** A section or card title: a label TalkBack lists as a heading (Android 9+). */
     TextView heading(String text,int size,int color){TextView v=label(text,size,color,true);heading(v);return v;}
     static void heading(View v){if(android.os.Build.VERSION.SDK_INT>=28)v.setAccessibilityHeading(true);}
@@ -40,18 +77,28 @@ class Ui {
     static void sumsHint(EditText e,String name){e.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){
         super.onInitializeAccessibilityNodeInfo(v,info);CharSequence hint=name!=null?name:((EditText)v).getHint();info.setHintText((hint==null?"":hint+". ")+"Takes a sum too, such as 45 + 12.50.");}});}
     GradientDrawable bg(int color){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(16));return d;}
-    LinearLayout card(){LinearLayout v=column();v.setPadding(dp(14),dp(10),dp(14),dp(10));v.setBackground(bg(main.surface));
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));main.content.addView(v,p);return v;}
+    LinearLayout card(){LinearLayout v=column();v.setPadding(dp(16),dp(12),dp(16),dp(12));v.setBackground(surface(main.surface));pressable(v);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(5));main.content.addView(v,p);return v;}
     Button button(String text,Runnable action){Button b=new Button(main);b.setText(text);b.setAllCaps(false);b.setTextSize(13);
         b.setTextColor(main.blue);b.setBackground(bg(main.buttonSurface));b.setStateListAnimator(null);b.setElevation(0);b.setMinHeight(dp(48));
         b.setMinimumHeight(dp(48));b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(12),dp(8),dp(12),dp(8));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));b.setLayoutParams(p);
-        b.setOnClickListener(v->action.run());return b;}
+        pressable(b);b.setOnClickListener(v->action.run());return b;}
+    /** The main action of a screen or card: filled in the brand colour, white bold text. */
+    Button primary(String text,Runnable action){Button b=button(text,action);b.setBackground(bg(main.primary));b.setTextColor(Color.WHITE);
+        b.setTypeface(null,Typeface.BOLD);b.setTextSize(14);return b;}
+    // A rounded bar that fills from the left as the screen opens.
     void progress(LinearLayout parent,long funded,long goal,int color){ProgressBar bar=new ProgressBar(main,null,android.R.attr.progressBarStyleHorizontal);
-        bar.setMax(100);bar.setProgress((int)Math.max(0,Math.min(100,funded*100/Math.max(1,goal))));
-        bar.setProgressTintList(ColorStateList.valueOf(color));bar.setProgressBackgroundTintList(ColorStateList.valueOf(main.buttonSurface));
-        bar.setContentDescription("Target progress: "+money(Math.max(0,funded))+" of "+money(goal)+", "+bar.getProgress()+"%");
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(6));p.setMargins(0,dp(5),0,dp(5));parent.addView(bar,p);}
+        int percent=(int)Math.max(0,Math.min(100,funded*100/Math.max(1,goal)));bar.setMax(1000);
+        GradientDrawable track=new GradientDrawable();track.setColor(main.buttonSurface);track.setCornerRadius(dp(4));
+        GradientDrawable fill=new GradientDrawable();fill.setColor(color);fill.setCornerRadius(dp(4));
+        android.graphics.drawable.LayerDrawable layers=new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{track,
+            new android.graphics.drawable.ClipDrawable(fill,android.view.Gravity.START,android.graphics.drawable.ClipDrawable.HORIZONTAL)});
+        layers.setId(0,android.R.id.background);layers.setId(1,android.R.id.progress);bar.setProgressDrawable(layers);
+        bar.setContentDescription("Target progress: "+money(Math.max(0,funded))+" of "+money(goal)+", "+percent+"%");
+        if(motion()&&percent>0){android.animation.ObjectAnimator grow=android.animation.ObjectAnimator.ofInt(bar,"progress",0,percent*10);grow.setDuration(650);
+            grow.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));grow.start();}else bar.setProgress(percent*10);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(8));p.setMargins(0,dp(6),0,dp(6));parent.addView(bar,p);}
     static String ordinal(int d){return d+(d%100>=11&&d%100<=13?"th":d%10==1?"st":d%10==2?"nd":d%10==3?"rd":"th");}
     static String dayName(int weekday){return DayOfWeek.of(weekday).getDisplayName(java.time.format.TextStyle.FULL,Locale.forLanguageTag("en-AU"));}
     LinearLayout form(){LinearLayout f=column();f.setPadding(dp(20),dp(8),dp(20),dp(8));return f;}
@@ -91,7 +138,7 @@ class Ui {
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
             .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
-        d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(action);main.render();
+        d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(action);confirm(w);main.render();
                 d.dismiss();}catch(Exception e){toast(e.getMessage());}}));d.show();
     }
     void onPick(Spinner s,Runnable changed){s.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){changed.run();}public void onNothingSelected(AdapterView<?> p){}});}
