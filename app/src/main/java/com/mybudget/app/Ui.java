@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.content.res.ColorStateList;
 import android.text.*;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -139,23 +140,43 @@ class Ui {
     }
     Choice choice(LinearLayout f,String[] names,int[] colours,int selected){Choice c=new Choice(names,colours,selected);f.addView(c.view,new LinearLayout.LayoutParams(-1,-2));return c;}
     /**
-     * A row of round-ended chips that scrolls sideways (Today / Yesterday / Pick a date, or categories): the chosen one is
-     * filled. [pick] gets the tapped chip's index; it decides what is chosen (show() redraws).
+     * Round-ended chips (Today / Yesterday / Pick a date, accounts, categories): the chosen one is filled. In a row that scrolls
+     * sideways, or [wrap]ped onto more lines so every chip is in sight. [pick] gets the tapped chip's index; it decides what is
+     * chosen (show() redraws).
      */
     final class Chips {
-        final HorizontalScrollView view=new HorizontalScrollView(main);final LinearLayout row=new LinearLayout(main);
-        Chips(){view.setHorizontalScrollBarEnabled(false);view.addView(row);row.setPadding(0,dp(4),0,dp(4));}
+        final ViewGroup view,row;final boolean wrap;
+        Chips(boolean wrap){this.wrap=wrap;if(wrap){view=row=new Flow(main,dp(8));}
+            else{HorizontalScrollView scroll=new HorizontalScrollView(main);scroll.setHorizontalScrollBarEnabled(false);row=new LinearLayout(main);scroll.addView(row);view=scroll;}
+            row.setPadding(0,dp(4),0,dp(4));}
         void show(List<String> names,int selected,java.util.function.IntConsumer pick){row.removeAllViews();
             for(int i=0;i<names.size();i++){int n=i;boolean on=i==selected;Button b=button(names.get(i),()->{tick(view);pick.accept(n);});
                 b.setTextSize(14);b.setPadding(dp(16),0,dp(16),0);GradientDrawable d=bg(on?main.primary:main.buttonSurface);d.setCornerRadius(dp(24));
                 b.setBackground(d);b.setTextColor(on?Color.WHITE:main.ink);if(on)b.setTypeface(null,Typeface.BOLD);
                 b.setContentDescription(names.get(i)+(on?", selected":""));
-                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,dp(48));p.setMargins(0,0,dp(8),0);row.addView(b,p);}
-            if(selected>=0)view.post(()->{View on=row.getChildAt(selected);if(on==null)return; // the chosen chip in sight (one picked from a list joins at the front)
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,dp(48));p.setMargins(0,0,wrap?0:dp(8),0);row.addView(b,p);}
+            if(selected>=0&&!wrap)view.post(()->{View on=row.getChildAt(selected);if(on==null)return; // the chosen chip in sight
                 int left=on.getLeft(),right=on.getRight(),x=view.getScrollX(),w=view.getWidth();
-                if(left<x||right>x+w)view.smoothScrollTo(Math.max(0,left-dp(8)),0);});}
+                if(left<x||right>x+w)((HorizontalScrollView)view).smoothScrollTo(Math.max(0,left-dp(8)),0);});}
     }
-    Chips chips(LinearLayout f){Chips c=new Chips();f.addView(c.view,new LinearLayout.LayoutParams(-1,-2));return c;}
+    Chips chips(LinearLayout f){return chips(f,false);}
+    Chips chips(LinearLayout f,boolean wrap){Chips c=new Chips(wrap);f.addView(c.view,new LinearLayout.LayoutParams(-1,-2));return c;}
+    /** Lays its children out left to right, [gap] apart, starting a new line when the next one doesn't fit (the category chips). */
+    static final class Flow extends ViewGroup {
+        private final int gap;
+        Flow(android.content.Context context,int gap){super(context);this.gap=gap;}
+        /** Places each child (when [place]) and returns the height the lines take. */
+        private int lines(int width,boolean place){int max=width-getPaddingLeft()-getPaddingRight(),x=0,y=0,line=0;
+            for(int i=0;i<getChildCount();i++){View c=getChildAt(i);if(c.getVisibility()==GONE)continue;int w=c.getMeasuredWidth(),h=c.getMeasuredHeight();
+                if(x>0&&x+w>max){x=0;y+=line+gap;line=0;}
+                if(place)c.layout(getPaddingLeft()+x,getPaddingTop()+y,getPaddingLeft()+x+w,getPaddingTop()+y+h);x+=w+gap;line=Math.max(line,h);}
+            return y+line+getPaddingTop()+getPaddingBottom();}
+        @Override protected void onMeasure(int widthSpec,int heightSpec){int width=MeasureSpec.getSize(widthSpec),max=Math.max(0,width-getPaddingLeft()-getPaddingRight());
+            for(int i=0;i<getChildCount();i++){View c=getChildAt(i);int h=c.getLayoutParams().height;
+                c.measure(MeasureSpec.makeMeasureSpec(max,MeasureSpec.AT_MOST),h>0?MeasureSpec.makeMeasureSpec(h,MeasureSpec.EXACTLY):MeasureSpec.makeMeasureSpec(0,MeasureSpec.UNSPECIFIED));}
+            setMeasuredDimension(width,lines(width,false));}
+        @Override protected void onLayout(boolean changed,int l,int t,int r,int b){lines(r-l,true);}
+    }
     AutoCompleteTextView suggestField(LinearLayout f,String hint,java.util.function.Supplier<List<String>> options){AutoCompleteTextView e=Suggest.box(main,f,hint,options);
         e.setTextColor(main.ink);return e;}
     Spinner spinner(LinearLayout f,String title,String[] names,int selection){TextView t=label(title,12,main.muted,true);f.addView(t);Spinner s=new Spinner(main);names(t,s);

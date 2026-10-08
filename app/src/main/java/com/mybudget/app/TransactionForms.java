@@ -15,6 +15,7 @@ final class TransactionForms extends Ui {
         if(bm==null){toast("The photo isn't on this phone.");return;}ImageView img=new ImageView(main);img.setImageBitmap(bm);
         img.setAdjustViewBounds(true);img.setContentDescription("Photo of this transaction");new AlertDialog.Builder(main).setView(img)
             .setPositiveButton("Close",null).show();}
+    private static final int CATEGORY_CHIPS=6; // the most-used categories shown as chips in Add transaction
     private static final String[] REPEAT_LABELS={"Doesn't repeat","Weekly","Every 2 weeks","Monthly","Every 3 months","Yearly"};
     void transaction(Budget.Entry old){transaction(old,null);}
     /**
@@ -51,13 +52,14 @@ final class TransactionForms extends Ui {
         AutoCompleteTextView payee=suggestField(f,"Payee",()->main.budget.payees());
         TextView lastTime=label("",13,main.blue,true);lastTime.setVisibility(View.GONE);lastTime.setMinHeight(dp(40));pressable(lastTime);f.addView(lastTime);
         LinearLayout categoryFields=column();f.addView(categoryFields);
-        // Category: the ones used most in the last 120 days as chips (and the one this transaction has), "All categories…" for the rest.
+        // Category: the 6 used most in the last 120 days as chips, then "All categories…" for the rest, wrapped onto more lines so
+        // all of them are in sight. A category not among the 6 (picked from the list, or the one being edited) takes the 6th place.
         int[] cat={keepCategory.isEmpty()?-1:categories.indexOf(main.budget.category(keepCategory))};
         Map<String,Integer> uses=new HashMap<>();String since=LocalDate.now().minusDays(120).toString();
         for(Budget.Entry e:main.budget.entries)if(e.date.compareTo(since)>=0&&!e.category.isEmpty())uses.merge(e.category,1,Integer::sum);
         List<Budget.Category> often=new ArrayList<>(categories);often.sort((a,b)->uses.getOrDefault(b.id,0)-uses.getOrDefault(a.id,0));
-        List<Budget.Category> shown=new ArrayList<>(often.subList(0,Math.min(6,often.size())));
-        TextView categoryTitle=label("Category",12,main.muted,true);categoryFields.addView(categoryTitle);Chips categoryChips=chips(categoryFields);
+        List<Budget.Category> top=new ArrayList<>(often.subList(0,Math.min(CATEGORY_CHIPS,often.size()))),shown=new ArrayList<>(top);
+        TextView categoryTitle=label("Category",12,main.muted,true);categoryFields.addView(categoryTitle);Chips categoryChips=chips(categoryFields,true);
         TextView preview=label("",14,main.muted,true);categoryFields.addView(preview);
         // Split: the parts (positive amounts while editing) replace the category; the amount becomes their total.
         List<Budget.Split> parts=new ArrayList<>();
@@ -67,7 +69,8 @@ final class TransactionForms extends Ui {
         Button splitButton=button("Split into categories",()->{});splitButton.setBackground(bg(Color.TRANSPARENT));splitButton.setTextSize(13);categoryFields.addView(splitButton);
         boolean[] categoryChosen={old!=null||sched!=null};
         Runnable[] showPreview={()->{}},showCategories={null};
-        showCategories[0]=()->{if(cat[0]>=0&&!shown.contains(categories.get(cat[0])))shown.add(0,categories.get(cat[0])); // a category picked from the list joins the chips
+        showCategories[0]=()->{shown.clear();shown.addAll(top);
+            if(cat[0]>=0&&!top.contains(categories.get(cat[0]))){if(shown.size()<CATEGORY_CHIPS)shown.add(categories.get(cat[0]));else shown.set(CATEGORY_CHIPS-1,categories.get(cat[0]));}
             List<String> names=new ArrayList<>();for(Budget.Category c:shown)names.add(c.name);names.add("All categories…");
             categoryChips.show(names,cat[0]<0?-1:shown.indexOf(categories.get(cat[0])),n->{
                 if(n<shown.size()){cat[0]=categories.indexOf(shown.get(n));categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();return;}
