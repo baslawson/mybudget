@@ -1,11 +1,32 @@
+<!-- MyBudget's mark: an open envelope with banknotes in it and a coin in front (envelope budgeting: money set aside for a
+     purpose), on the indigo tile. No currency sign: budgets can be in any currency. Used for the launcher icon (inset in
+     ic_launcher_foreground), the app header and the widget. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp" android:height="48dp" android:viewportWidth="64" android:viewportHeight="64">
     <path android:fillColor="#394DA5" android:pathData="M16,0H48Q64,0 64,16V48Q64,64 48,64H16Q0,64 0,48V16Q0,0 16,0Z"/>
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="2.8" android:strokeLineJoin="round"
-        android:pathData="M17,20H47Q50,20 50,23V42Q50,45 47,45H17Q14,45 14,42V23Q14,20 17,20Z"/>
-    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="2.8" android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M15,23L32,34L49,23"/>
-    <path android:fillColor="#91E5C2" android:pathData="M56,45A10,10 0,1 1,36,45A10,10 0,1 1,56,45"/>
-    <path android:fillColor="#00000000" android:strokeColor="#20335B" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round"
-        android:pathData="M41.5,45L44.5,48L50,42.5"/>
+    <!-- The envelope's inside and its flap, folded open and up -->
+    <path android:fillColor="#AEB9F5" android:pathData="M13,31L32,17L51,31Z"/>
+    <path android:fillColor="#C9D2FF" android:pathData="M13,31H51V47H13Z"/>
+    <!-- Two banknotes standing up out of it, fanned -->
+    <group android:rotation="-14" android:pivotX="27" android:pivotY="27">
+        <path android:fillColor="#6CC59E" android:strokeColor="#1F6F52" android:strokeWidth="1.2" android:strokeLineJoin="round"
+            android:pathData="M15,20H39V34H15Z"/>
+        <path android:fillColor="#00000000" android:strokeColor="#1F6F52" android:strokeWidth="1.2"
+            android:pathData="M23.8,27a3.2,3.2 0,1 0,6.4 0a3.2,3.2 0,1 0,-6.4 0"/>
+    </group>
+    <group android:rotation="10" android:pivotX="36" android:pivotY="26">
+        <path android:fillColor="#91E5C2" android:strokeColor="#1F6F52" android:strokeWidth="1.2" android:strokeLineJoin="round"
+            android:pathData="M24,19H48V33H24Z"/>
+        <path android:fillColor="#00000000" android:strokeColor="#1F6F52" android:strokeWidth="1.2"
+            android:pathData="M32.8,26a3.2,3.2 0,1 0,6.4 0a3.2,3.2 0,1 0,-6.4 0"/>
+        <path android:fillColor="#1F6F52" android:pathData="M26.5,22a1.1,1.1 0,1 0,2.2 0a1.1,1.1 0,1 0,-2.2 0"/>
+        <path android:fillColor="#1F6F52" android:pathData="M43.3,30a1.1,1.1 0,1 0,2.2 0a1.1,1.1 0,1 0,-2.2 0"/>
+    </group>
+    <!-- The front pocket: its open mouth dips in the middle, so the notes sit inside it -->
+    <path android:fillColor="#FFFFFF" android:pathData="M13,33Q32,43 51,33V46Q51,50 47,50H17Q13,50 13,46Z"/>
+    <!-- A coin in front -->
+    <path android:fillColor="#F5C66E" android:strokeColor="#8A5A0A" android:strokeWidth="1.6"
+        android:pathData="M41.5,48a7.5,7.5 0,1 0,15 0a7.5,7.5 0,1 0,-15 0"/>
+    <path android:fillColor="#00000000" android:strokeColor="#8A5A0A" android:strokeWidth="1.2"
+        android:pathData="M44.8,48a4.2,4.2 0,1 0,8.4 0a4.2,4.2 0,1 0,-8.4 0"/>
 </vector>
