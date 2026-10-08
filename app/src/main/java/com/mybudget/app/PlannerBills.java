@@ -37,8 +37,9 @@ public class PlannerBills extends BroadcastReceiver {
         JSONArray in=new JSONArray(raw==null?"[]":raw),out=new JSONArray();
         for(int i=0;i<in.length()&&out.length()<MAX;i++){JSONObject b=in.getJSONObject(i);String id=b.getString("id"),key=b.getString("billKey"),payee=b.getString("payee").trim();LocalDate due=LocalDate.parse(b.getString("due"));
             String currency=withCurrency?b.optString("currency","").trim():Budget.DEFAULT_CURRENCY;
-            if(id.isEmpty()||id.length()>100||key.isEmpty()||key.length()>100||payee.isEmpty()||!Budget.knownCurrency(currency))continue;JSONObject o=new JSONObject().put("id",id).put("billKey",key).put("payee",payee.length()>80?payee.substring(0,80):payee).put("due",due.toString()).put("currency",currency);
-            if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0||c>10_000_000_000L)continue;o.put("amountCents",c);}out.put(o);}
+            if(id.isEmpty()||id.length()>100||key.isEmpty()||key.length()>100||payee.isEmpty()||!Budget.storableCurrency(currency))continue;JSONObject o=new JSONObject().put("id",id).put("billKey",key).put("payee",Budget.cut(payee,80)).put("due",due.toString()).put("currency",currency);
+            // Hunt 23: an amount MyBudget can't hold (over 100 million, as IDR bills can be) leaves the bill planned without one; zero or less is no bill.
+            if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0)continue;if(c<=10_000_000_000L)o.put("amountCents",c);}out.put(o);}
         return out.toString();
     }
     /** A list older than this is ignored: Planner sends one each time it opens, so it's out of date (or Planner is gone). */

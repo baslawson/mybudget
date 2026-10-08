@@ -43,12 +43,15 @@ public final class CsvImport {
         Matcher code=CODE.matcher(t);StringBuffer kept=new StringBuffer();
         while(code.find())code.appendReplacement(kept,Budget.knownCurrency(code.group())?"":Matcher.quoteReplacement(code.group()));
         code.appendTail(kept);t=kept.toString().replaceAll("[A-Z]{0,2}\\p{Sc}","").trim(); // a symbol with its letters: $, €, A$, US$, NZ$, R$
-        if(t.endsWith("DR")){negative=true;t=t.substring(0,t.length()-2).trim();}else if(t.endsWith("CR"))t=t.substring(0,t.length()-2).trim();
-        if(t.startsWith("(")&&t.endsWith(")")){negative=!negative;t=t.substring(1,t.length()-1);}
+        // Hunt 23: DR and brackets both mean money out, so "(12.00) DR" is -12.00 (they used to cancel out); CR says money in.
+        boolean credit=false;if(t.endsWith("DR")){negative=true;t=t.substring(0,t.length()-2).trim();}else if(t.endsWith("CR")){credit=true;t=t.substring(0,t.length()-2).trim();}
+        if(t.startsWith("(")&&t.endsWith(")")){negative=!credit;t=t.substring(1,t.length()-1);}
+        t=t.replace('−','-'); // a typographic minus, as some banks write it
         t=t.replace(",","").replace(" ","");if(t.startsWith("+"))t=t.substring(1);
         long v=new BigDecimal(t).movePointRight(2).longValueExact();if(Math.abs(v)>10_000_000_000L)throw new IllegalArgumentException("Over 100 million."); // as typed amounts (Budget.evaluate)
         return negative?-Math.abs(v):v;
     }
+    private static final Pattern TRANSFER=Pattern.compile("(?i)\\b(?:transfer|tfr|trf|xfer)\\b"); // a statement's word for a transfer
     private static final Pattern CODE=Pattern.compile("(?<![A-Z])[A-Z]{3}(?![A-Z])"); // three letters on their own: a currency code when it's a known one
     public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),DateTimeFormatter.ofPattern(format,Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));}
     /** The first format that reads every non-empty value in [column] (after the header row when [header]), or null. */
@@ -68,6 +71,11 @@ public final class CsvImport {
         Result r=new Result();Map<String,Integer> existing=new HashMap<>();
         // An imported row is known by the statement's own payee text (bankPayee), so renaming or merging its payee later doesn't hide it; others by their payee.
         for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
+        // Hunt 23: transfers made in MyBudget, in or out of this account, by date and amount: the statement names them its own way
+        // ("TFR to savings" for MyBudget's "Transfer to Savings"), so a row that says it is a transfer matches one of them.
+        Map<String,Integer> transfers=new HashMap<>();
+        for(Budget.Entry e:budget.entries)if(e.transfer()){if(e.account.equals(account.id))transfers.merge(key(e.date,e.amount,""),1,Integer::sum);
+            if(account.id.equals(e.destination))transfers.merge(key(e.date,-e.amount,""),1,Integer::sum);}
         Budget.Category toCategorize=null;LocalDate today=LocalDate.now();
         for(int i=header?1:0;i<rows.size();i++){List<String> row=rows.get(i);
             LocalDate d;long cents;String payee;
@@ -75,11 +83,12 @@ public final class CsvImport {
                 if(outflowColumn<0)cents=amount(cell(row,amountColumn));
                 else{String in=cell(row,amountColumn),out=cell(row,outflowColumn);cents=(in.isEmpty()?0:Math.abs(amount(in)))-(out.isEmpty()?0:Math.abs(amount(out)));}
             }catch(Exception e){r.unreadable++;continue;}
-            if(cents==0){r.unreadable++;continue;}if(payee.isEmpty())payee="(no payee)";if(payee.length()>80)payee=payee.substring(0,80);
+            if(cents==0){r.unreadable++;continue;}if(payee.isEmpty())payee="(no payee)";payee=Budget.cut(payee,80);
             if(d.isAfter(today)){r.future++;continue;}if(d.toString().compareTo(account.date)<0){r.beforeOpening++;continue;}
             // A rule's new name counts for duplicates too: the row may have been imported (and renamed) before.
             Budget.Rule rule=budget.rule(payee);String named=rule==null||rule.rename.isEmpty()?payee:rule.rename;Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             String k=key(d.toString(),cents,payee),k2=key(d.toString(),cents,named);if(existing.getOrDefault(k,0)<=0)k=k2;if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;continue;}
+            String moved=key(d.toString(),cents,"");if(TRANSFER.matcher(payee).find()&&transfers.getOrDefault(moved,0)>0){transfers.merge(moved,-1,Integer::sum);r.duplicates++;continue;}
             if(rule!=null)r.matchedRules++;String bank=payee;payee=named;
             // A statement payee imported before takes that row's payee as it's named now (a rule's rename comes first), and its category.
             Budget.Entry seen=budget.lastForBankPayee(bank);if(seen!=null&&(rule==null||rule.rename.isEmpty()))payee=seen.payee.trim();

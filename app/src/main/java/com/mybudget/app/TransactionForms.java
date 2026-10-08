@@ -15,6 +15,11 @@ final class TransactionForms extends Ui {
         if(bm==null){toast("The photo isn't on this phone.");return;}ImageView img=new ImageView(main);img.setImageBitmap(bm);
         img.setAdjustViewBounds(true);img.setContentDescription("Photo of this transaction");new AlertDialog.Builder(main).setView(img)
             .setPositiveButton("Close",null).show();}
+    // Hunt 23: an edited transaction keeps its place in the list (the newest first), so it doesn't pass for the newest. False: not there.
+    private boolean put(String id,Budget.Entry e){List<Budget.Entry> all=main.budget.entries;
+        for(int i=0;i<all.size();i++)if(all.get(i).id.equals(id)){all.set(i,e);return true;}return false;}
+    // Hunt 23: [c] as the budget has it now (the data may have been read in again since the form opened).
+    private Budget.Category fresh(Budget.Category c){Budget.Category now=main.budget.category(c.id);return now==null?c:now;}
     private static final int CATEGORY_CHIPS=6; // the most-used categories shown as chips in Add transaction
     private static final String[] REPEAT_LABELS={"Doesn't repeat","Weekly","Every 2 weeks","Monthly","Every 3 months","Yearly"};
     void transaction(Budget.Entry old){transaction(old,null);}
@@ -50,7 +55,7 @@ final class TransactionForms extends Ui {
         // time and offers last time's amount.
         section(f,"Who and what");
         AutoCompleteTextView payee=suggestField(f,"Payee",()->main.budget.payees());
-        TextView lastTime=label("",13,main.blue,true);lastTime.setVisibility(View.GONE);lastTime.setMinHeight(dp(40));pressable(lastTime);f.addView(lastTime);
+        TextView lastTime=label("",13,main.blue,true);lastTime.setVisibility(View.GONE);lastTime.setMinHeight(dp(48));lastTime.setGravity(Gravity.CENTER_VERTICAL);pressable(lastTime);f.addView(lastTime);
         LinearLayout categoryFields=column();f.addView(categoryFields);
         // Category: the 6 used most in the last 120 days as chips, then "All categories…" for the rest, wrapped onto more lines so
         // all of them are in sight. A category not among the 6 (picked from the list, or the one being edited) takes the 6th place.
@@ -74,7 +79,7 @@ final class TransactionForms extends Ui {
             List<String> names=new ArrayList<>();for(Budget.Category c:shown)names.add(c.name);names.add("All categories…");
             categoryChips.show(names,cat[0]<0?-1:shown.indexOf(categories.get(cat[0])),n->{
                 if(n<shown.size()){cat[0]=categories.indexOf(shown.get(n));categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();return;}
-                YearMonth m=YearMonth.now();String[] all=categories.stream().map(c->c.name+"  ·  "+money(main.budget.available(c,m))).toArray(String[]::new);
+                YearMonth m=YearMonth.now();String[] all=categories.stream().map(c->c.name+"  ·  "+money(main.budget.available(fresh(c),m))).toArray(String[]::new);
                 new AlertDialog.Builder(main).setTitle("Choose a category").setItems(all,(d,i)->{cat[0]=i;categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();}).show();});};
         showCategories[0].run();
         Runnable showSplit=()->{boolean on=!parts.isEmpty();categoryChips.view.setVisibility(on?View.GONE:View.VISIBLE);categoryTitle.setVisibility(categoryChips.view.getVisibility());
@@ -90,8 +95,11 @@ final class TransactionForms extends Ui {
                 lastTime.setOnClickListener(w->{amount.setText(decimal(size));amount.setSelection(amount.length());lastTime.setVisibility(View.GONE);});
                 lastTime.setVisibility(amount.getText().toString().trim().isEmpty()?View.VISIBLE:View.GONE);}
             if(old!=null||categoryChosen[0]||last==null)return;
-            if(last.category.isEmpty()){kind.set(1);return;}int i=categories.indexOf(main.budget.category(last.category));if(i<0)return;
-            cat[0]=i;showCategories[0].run();if(kind.selected()==1)kind.set(last.amount<0?0:2);showPreview[0].run();});
+            // Hunt 23 M4: no category is income only for money in, outside a tracking account (a loan's payment has none either),
+            // and never over a kind the user picked (or typed a sign for).
+            if(last.category.isEmpty()){Budget.Account la=main.budget.account(last.account);
+                if(last.amount>0&&(la==null||!la.tracking())&&!kind.picked)kind.set(1);return;}int i=categories.indexOf(main.budget.category(last.category));if(i<0)return;
+            cat[0]=i;showCategories[0].run();if(kind.selected()==1&&!kind.picked)kind.set(last.amount<0?0:2);showPreview[0].run();});
         // 3. When and where: Today, Yesterday or a picked date; the account as chips (a new one starts on the account used last).
         section(f,"When and where");
         LinearLayout hidden=column();EditText day=dateField(hidden,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);
@@ -108,12 +116,12 @@ final class TransactionForms extends Ui {
             accountChips.show(names,acc[0],n->{acc[0]=n;showAccounts[0].run();});};showAccounts[0].run();
         // The category's Available after this transaction, in the month of its date: what's left (green) or overspent by (red).
         showPreview[0]=()->{int k=kind.selected();if(k==1||!parts.isEmpty()||cat[0]<0){preview.setVisibility(View.GONE);return;}
-            Budget.Category c=categories.get(cat[0]);long typed;try{typed=Math.max(0,Budget.evaluate(amount.getText().toString()));}catch(Exception e){typed=0;}
+            Budget.Category c=fresh(categories.get(cat[0]));long typed;try{typed=Math.max(0,Budget.evaluate(amount.getText().toString()));}catch(Exception e){typed=0;}
             YearMonth m=YearMonth.from(LocalDate.parse((String)day.getTag()));long now=main.budget.available(c,m);
             if(old!=null&&old.category.equals(c.id)&&YearMonth.from(LocalDate.parse(old.date)).equals(m))now-=old.amount; // editing: without its old amount
             long after=now+(k==0?-typed:typed);preview.setVisibility(View.VISIBLE);
             if(typed==0){preview.setTextColor(main.muted);preview.setText(tint(c.name+" has "+money(now)+" available",money(now),amountColour(now)));}
-            else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(main.green);}
+            else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(amountColour(after));}
             else{preview.setText(c.name+" will be overspent by "+money(-after));preview.setTextColor(main.red);}};
         // 4. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.
         LinearLayout more=column();Button moreButton=button("",()->{});moreButton.setBackground(bg(Color.TRANSPARENT));
@@ -162,8 +170,8 @@ final class TransactionForms extends Ui {
         adapt.run();kind.changed=adapt;
         amount.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}
             public void afterTextChanged(android.text.Editable s){
-                if(s.length()>0&&(s.charAt(0)=='-'||s.charAt(0)=='−')){kind.set(0);s.delete(0,1);return;} // the change re-runs this
-                if(s.length()>0&&s.charAt(0)=='+'){if(kind.selected()==0)kind.set(1);s.delete(0,1);return;}
+                if(s.length()>0&&(s.charAt(0)=='-'||s.charAt(0)=='−')){kind.picked=true;kind.set(0);s.delete(0,1);return;} // the change re-runs this
+                if(s.length()>0&&s.charAt(0)=='+'){kind.picked=true;if(kind.selected()==0)kind.set(1);s.delete(0,1);return;}
                 if(s.toString().trim().length()>0)lastTime.setVisibility(View.GONE);showPreview[0].run();}});
         Runnable save=()->{int k=kind.selected();
             if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
@@ -177,7 +185,8 @@ final class TransactionForms extends Ui {
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
                 Budget.Scheduled s=new Budget.Scheduled(p,cat2,acc2,when.toString(),cents,rep);s.memo=memoText;
                 if(isSplit)for(Budget.Split part:parts){Budget.Split c=new Budget.Split(part.category,part.amount*(k==0?-1:1));c.memo=part.memo;s.splits.add(c);} // entered later with the same parts
-                if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;}
+                if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;
+                    if(when.toString().equals(sched.next))s.day=sched.day;} // Hunt 23 M1: rent on the 31st, shown as 30 Nov, stays the 31st
                 if(sched==null&&!when.isAfter(LocalDate.now())){main.budget.validate(s);
                     main.budget.enter(s,photo[0],cleared.isChecked()).flag=flag.getSelectedItemPosition();
                     if(!rep.equals("Never"))main.budget.scheduled.add(s);
@@ -188,7 +197,7 @@ final class TransactionForms extends Ui {
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
                 e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
             if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);
-                main.budget.entries.removeIf(t->t.id.equals(old.id));}main.budget.entries.add(0,e);};
+                if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);};
         // After a save: which account to start on next time, and a short "Saved" line.
         Runnable saved=()->{if(adding)main.getSharedPreferences("appearance",0).edit().putString("last_account",accounts.get(acc[0]).id).apply();
             long size;try{size=Budget.cents(amount.getText().toString());}catch(Exception e){size=0;}
@@ -311,7 +320,8 @@ final class TransactionForms extends Ui {
             boolean out=!a.tracking()&&b.tracking();if(out&&cats.isEmpty())throw new IllegalArgumentException("Add a category first.");
             Budget.Entry e=new Budget.Entry("Transfer to "+b.name,out?cats.get(Math.max(0,category.getSelectedItemPosition())).id:"",a.id,date(day),-Budget.cents(amount.getText().toString()));
             e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);}
-            main.budget.validate(e);if(old!=null){e.id=old.id;main.budget.entries.removeIf(t->t.id.equals(old.id));}main.budget.entries.add(0,e);});
+            main.budget.validate(e);if(old!=null)e.id=old.id;if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});
+
     }
     /** Edits a tracking account's transaction: no category (it's off budget). */
     private void trackingEntry(String accountId,Budget.Entry old){
@@ -326,7 +336,6 @@ final class TransactionForms extends Ui {
         dialog("Edit transaction",f,()->{Budget.Entry e=new Budget.Entry(required(payee),"",accountId,date(day),Budget.parse(amount.getText().toString()));
             e.id=old.id;e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();e.photo=old.photo;
             e.bankPayee=Budget.statementPayee(old);main.budget.validate(e);
-            if(!main.budget.entries.removeIf(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile.");
-            main.budget.entries.add(0,e);});
+            if(!put(old.id,e))throw new IllegalArgumentException("This transaction was removed meanwhile.");});
     }
 }

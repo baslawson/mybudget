@@ -34,10 +34,14 @@ public class AddExpenseActivity extends Activity {
         if(id.isEmpty()){fail("MyBudget couldn't read this payment.");return;}
         if(ACTION_UNDONE.equals(intent.getAction()))undone(id);else if(ACTION_ADD.equals(intent.getAction()))add(intent,id);else finish();
     }
-    private String text(Intent intent,String key,int max){String s=intent.getStringExtra(key);return s==null?"":s.trim().substring(0,Math.min(max,s.trim().length()));}
-    private String money(long cents){return Budget.money(cents,Budget.moneyFormat(budget.currency,Locale.getDefault()));} // in the budget's currency, as in MyBudget
+    private String text(Intent intent,String key,int max){String s=intent.getStringExtra(key);return s==null?"":Budget.cut(s.trim(),max);}
+    // In the budget's currency, as in MyBudget; dots with Hide amounts on (hunt 23), as on MyBudget's own screens.
+    private String money(long cents){java.text.NumberFormat format=Budget.moneyFormat(budget.currency,Locale.getDefault());
+        return getSharedPreferences("appearance",0).getBoolean("hideAmounts",false)?format.getCurrency().getSymbol(Locale.getDefault())+"•••":Budget.money(cents,format);}
     private void fail(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();finish();}
-    private void done(String summary){setResult(RESULT_OK,new Intent().putExtra("summary",summary));finish();}
+    private void done(String summary){setResult(RESULT_OK,reply(summary));finish();}
+    // Planner's answer: the line it shows, and (hunt 23) the budget's currency, so Planner stops sending bills in another one.
+    private Intent reply(String summary){return new Intent().putExtra("summary",summary).putExtra("budgetCurrency",budget.currency);}
     private String sender(){ComponentName from=getCallingActivity();if(from==null)return "another app";try{return getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(from.getPackageName(),0)).toString();}catch(Exception e){return "another app";}}
     private boolean save(){budget.changed();try{String raw=BudgetStore.encode(budget);if(!getSharedPreferences("budget",0).edit().putString("data",raw).commit())return false;read=raw;BudgetWidget.refresh(this);return true;}catch(Exception e){return false;}} // the widget shows the new money
     // The budget as saved now: MyBudget may have saved changes while this dialog was open, and saving the copy read at the start would drop them.
@@ -55,9 +59,9 @@ public class AddExpenseActivity extends Activity {
 
     private void add(Intent intent,String id){
         Budget.Entry existing=budget.external(id);
-        if(existing!=null){PlannerBills.dropPaid(this,text(intent,"upcomingId",100),text(intent,"billKey",100),id,-existing.amount);done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
+        if(existing!=null){dropAgain(text(intent,"upcomingId",100),text(intent,"billKey",100),id,-existing.amount);done("Already in MyBudget: "+existing.payee+" "+money(-existing.amount));return;}
         // Only in the budget's currency (amounts aren't converted); a Planner from before currencies sends none: AUD.
-        if(!Budget.sameCurrency(intent.getStringExtra("currency"),budget.currency)){fail("This bill is in "+text(intent,"currency",3)+", but your budget is in "+budget.currency+", so it wasn't added.");return;}
+        if(!Budget.sameCurrency(intent.getStringExtra("currency"),budget.currency)){done("Not added to MyBudget: this bill is in "+text(intent,"currency",3)+", but your budget is in "+budget.currency+".");return;} // Planner shows it (one message, hunt 23)
         // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
         List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
         List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed&&!a.tracking())accounts.add(a); // tracking accounts are off budget: no categories
@@ -79,6 +83,7 @@ public class AddExpenseActivity extends Activity {
             if(v>0)amountField.setTextColor(expenseRed);else amountField.setTextColor(plain);};paint.run();
         amountField.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(android.text.Editable s){paint.run();}});Ui.sumsHint(amountField,"Amount"); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
+        else if(sent>10_000_000_000L)label(f,"This bill's amount is over MyBudget's limit of 100 million. Enter what you paid, in parts if need be.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
         TextView categoryLabel=label(f,"Category",12);Spinner category=new Spinner(this);Ui.names(categoryLabel,category);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
@@ -96,29 +101,33 @@ public class AddExpenseActivity extends Activity {
                 Budget.Category c=categories.get(category.getSelectedItemPosition()-1);Budget.Account a=accounts.get(account.getSelectedItemPosition());
                 long cents=Budget.cents(amountField.getText().toString());String day=LocalDate.parse((String)dateField.getTag()).toString();
                 reload();Budget.Entry already=budget.external(id);
-                if(already!=null){PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey,id,-already.amount);setResult(RESULT_OK,new Intent().putExtra("summary","Already in MyBudget: "+already.payee+" "+money(-already.amount)));dialog.dismiss();return;}
+                if(already!=null){dropAgain(text(getIntent(),"upcomingId",100),billKey,id,-already.amount);setResult(RESULT_OK,reply("Already in MyBudget: "+already.payee+" "+money(-already.amount)));dialog.dismiss();return;}
                 if(budget.category(c.id)==null)throw new IllegalArgumentException("That category no longer exists.");if(budget.account(a.id)==null)throw new IllegalArgumentException("That account no longer exists.");
                 Budget.Entry e=new Budget.Entry(payeeField.getText().toString().trim(),c.id,a.id,day,-cents);e.memo=note;e.externalId=id;e.billKey=billKey;
                 budget.validate(e);budget.entries.add(0,e);
                 if(!save()){budget.entries.remove(e);throw new IllegalStateException("Could not save to device storage.");}
-                PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey,id,cents); /* a part payment leaves the rest planned */setResult(RESULT_OK,new Intent().putExtra("summary","Added to MyBudget: "+c.name+" −"+money(cents)));dialog.dismiss();
+                PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey,id,cents); /* a part payment leaves the rest planned */setResult(RESULT_OK,reply("Added to MyBudget: "+c.name+" −"+money(cents)));dialog.dismiss();
             }catch(java.time.format.DateTimeParseException ex){Toast.makeText(this,"Enter the date as YYYY-MM-DD.",Toast.LENGTH_LONG).show();}
             catch(RuntimeException ex){Toast.makeText(this,ex.getMessage()==null?"Check your entry.":ex.getMessage(),Toast.LENGTH_LONG).show();}
         }));
         dialog.show();
     }
 
+    // A payment sent again: its planned bill went when it was first added. Only by its own entry (an older Planner sends none,
+    // and by billKey alone the next one of that bill would go, hunt 23).
+    private void dropAgain(String upcomingId,String billKey,String id,long cents){if(!upcomingId.isEmpty())PlannerBills.dropPaid(this,upcomingId,billKey,id,cents);}
+
     private void undone(String id){
         Budget.Entry e=budget.external(id);
-        if(e==null){finish();return;} // never added here (or already removed): nothing to ask
+        if(e==null){setResult(RESULT_OK,reply(null));finish();return;} // never added here (or already removed): nothing to ask
         Budget.Category c=budget.category(e.category);
         // Not cancelable (Back, a tap outside): the answer goes back to the sender, which tells the user whether the expense stayed.
         dialog=new AlertDialog.Builder(this).setTitle("Remove this expense?").setCancelable(false)
             .setMessage("You marked "+e.payee+" unpaid in "+sender()+". Remove the "+money(-e.amount)+" expense"+(c==null?"":" from "+c.name)+" too?")
-            .setNegativeButton("Keep it",(d,w)->setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid. MyBudget kept the expense.")))
+            .setNegativeButton("Keep it",(d,w)->setResult(RESULT_OK,reply("Marked unpaid. MyBudget kept the expense.")))
             .setPositiveButton("Remove",(d,w)->{try{reload();}catch(IllegalStateException ex){Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();return;}
-                Budget.Entry now=budget.external(id);if(now==null){setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid. The expense was already gone from MyBudget."));return;}
-                budget.entries.remove(now);if(save())setResult(RESULT_OK,new Intent().putExtra("summary","Marked unpaid and removed from MyBudget."));else Toast.makeText(this,"Could not save to device storage.",Toast.LENGTH_LONG).show();})
+                Budget.Entry now=budget.external(id);if(now==null){setResult(RESULT_OK,reply("Marked unpaid. The expense was already gone from MyBudget."));return;}
+                budget.entries.remove(now);if(save())setResult(RESULT_OK,reply("Marked unpaid and removed from MyBudget."));else Toast.makeText(this,"Could not save to device storage.",Toast.LENGTH_LONG).show();})
             .create();
         dialog.setOnDismissListener(d->finish());dialog.show();
     }

@@ -86,6 +86,11 @@ public class MainActivity extends Activity {
         AutoBackup.schedule(this);BudgetWidget.refresh(this); // the widget may show last month after midnight on the 1st
         if(prefs().getString("auto_backup_tree",null)!=null){boolean asked=backupDue(); // Home's backup reminder goes once this succeeds
             new Thread(()->{AutoBackup.run(getApplicationContext(),false);runOnUiThread(()->{if(asked&&!backupDue()&&tab.equals("Home")&&!isFinishing())render();});}).start();}}
+    // Hunt 23: side by side with Planner (split screen) this screen stays resumed while an expense from Planner is saved, so
+    // onResume doesn't read it in. Coming back to this window does, unless a form is open (its save reads it in: commit).
+    @Override public void onTopResumedActivityChanged(boolean top){super.onTopResumedActivityChanged(top);
+        if(!top||!storageReadable||pickingPhoto||!editors.isEmpty())return;
+        try{if(reloadIfChanged())render();}catch(IllegalStateException e){ui.toast(e.getMessage());}}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);
         state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("categoryFilter",categoryFilter);
         state.putString("fromFilter",fromFilter);state.putString("toFilter",toFilter);state.putInt("flagFilter",flagFilter);
@@ -190,18 +195,20 @@ public class MainActivity extends Activity {
         try{out=getContentResolver().openOutputStream(uri,"wt");}catch(FileNotFoundException|IllegalArgumentException|UnsupportedOperationException e){out=getContentResolver().openOutputStream(uri,"w");}
         if(out==null)throw new IOException();try(OutputStream o=out){o.write(text.getBytes(StandardCharsets.UTF_8));}
     }
+    // Hunt 23 M6: well above what MyBudget writes (a busy year is about 0.75 MB; it was 10 MB, which years of data could pass).
+    static final int MAX_BACKUP=50_000_000;
     private String read(Uri uri)throws IOException{
         try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException();
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;
             while((n=in.read(buffer))>0){out.write(buffer,0,n);
-                if(out.size()>10_000_000)throw new IOException("This file is too large to be a MyBudget backup.");}
-            String text=new String(out.toByteArray(),StandardCharsets.UTF_8);return text.startsWith("﻿")?text.substring(1):text;}
+                if(out.size()>MAX_BACKUP)throw new IOException("This file is too large to be a MyBudget backup.");}
+            String text;try{text=new String(out.toByteArray(),StandardCharsets.UTF_8);}catch(OutOfMemoryError e){throw new IOException("This backup is too large to open on this phone.");}return text.startsWith("﻿")?text.substring(1):text;}
     }
     // Hide amounts (⋮ menu) shows dots instead of money everywhere on screen, for showing the plan to someone.
     boolean hideAmounts,darkTheme;
     // What the screen showed last time, for motion only: the tab and month (to animate a change of either), To budget (to count from the
     // old figure to the new one), and which targets were short (so a target that just became funded gets its check mark pop).
-    String shownTab;YearMonth shownMonth;Long shownReady;private ScrollView screenScroll;final Set<String> shownUnfunded=new HashSet<>();
+    String shownTab;YearMonth shownMonth;Long shownReady;YearMonth shownReadyMonth;private ScrollView screenScroll;final Set<String> shownUnfunded=new HashSet<>();
     /** What a tab is called on screen (MyBudget's own names; the keys stay as saved in older sessions). */
     static String tabTitle(String tab){switch(tab){case"Plan":return "Budget";case"Spending":return "Transactions";case"Reflect":return "Reports";default:return tab;}}
     void render(){

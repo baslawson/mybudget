@@ -63,13 +63,15 @@ final class TransactionsScreen extends Ui {
     /** The month on screen at a glance: money in (green), money out (red) and what's left over. */
     private void monthSummary(){long in=main.budget.income(main.month),out=main.budget.spending(main.month),net=in-out;
         LinearLayout c=card();c.setOrientation(LinearLayout.HORIZONTAL);c.setPadding(dp(8),dp(12),dp(8),dp(12));
-        String[] names={"Money in","Money out",net<0?"Short by":"Left over"};long[] values={in,out,Math.abs(net)};
-        int[] colours={main.green,main.red,amountColour(net)};String[] signs={"+","−",net<0?"−":""};
+        // Hunt 23 M2: signed and coloured by the value: refunds above spending make money out a plus (green), and an uncategorised
+        // outflow above income makes money in a minus (red).
+        String[] names={"Money in","Money out",net<0?"Short by":"Left over"};long[] values={Math.abs(in),Math.abs(out),Math.abs(net)};
+        int[] colours={amountColour(in),outColour(out),amountColour(net)};String[] signs={in<0?"−":"+",out<0?"+":"−",net<0?"−":""};
         for(int i=0;i<3;i++){LinearLayout col=column();col.setGravity(Gravity.CENTER_HORIZONTAL);
             TextView n=label(names[i],11,main.muted,true);n.setGravity(Gravity.CENTER);col.addView(n);
             TextView v=label((values[i]==0?"":signs[i])+money(values[i]),16,values[i]==0?main.muted:colours[i],true);v.setGravity(Gravity.CENTER);v.setMaxLines(1);
             v.setAutoSizeTextTypeUniformWithConfiguration(10,16,1,android.util.TypedValue.COMPLEX_UNIT_SP);col.addView(v,new LinearLayout.LayoutParams(-1,dp(30)));
-            col.setContentDescription(names[i]+" this month: "+money(values[i]));col.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            col.setContentDescription(names[i]+" this month: "+(values[i]==0?"":signs[i])+money(values[i]));col.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
             for(int k=0;k<col.getChildCount();k++)col.getChildAt(k).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             c.addView(col,new LinearLayout.LayoutParams(0,-2,1));}
         c.setForeground(null);} // not tappable
@@ -79,6 +81,8 @@ final class TransactionsScreen extends Ui {
         GradientDrawable mask=new GradientDrawable();mask.setShape(GradientDrawable.OVAL);mask.setColor(Color.WHITE);
         add.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(tint(Color.WHITE,70)),null,mask));
         add.setElevation(dp(6));add.setContentDescription("Add transaction");
+        // Hunt 23 M5: TalkBack reaches it before the list (it is drawn over it, so it would come last).
+        add.setId(View.generateViewId());main.body.getChildAt(0).setAccessibilityTraversalAfter(add.getId());
         android.widget.FrameLayout.LayoutParams p=new android.widget.FrameLayout.LayoutParams(dp(64),dp(64),Gravity.BOTTOM|Gravity.END);p.setMargins(0,0,dp(4),dp(12));
         main.body.addView(add,p);main.content.setPadding(0,0,0,dp(88));
         if(motion()&&main.shownTab!=null&&!main.shownTab.equals("Spending")){add.setScaleX(0f);add.setScaleY(0f); // pops in with the screen

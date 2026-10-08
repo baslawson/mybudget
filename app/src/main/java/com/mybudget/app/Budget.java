@@ -91,6 +91,11 @@ public final class Budget {
     public String currency=DEFAULT_CURRENCY;
     /** A currency MyBudget can use: one of the currencies this phone knows, but not gold, test or "no currency" codes. */
     public static boolean knownCurrency(String code){return code!=null&&code.matches("[A-Z]{3}")&&!NOT_MONEY.contains(code)&&available().contains(code);}
+    /** Hunt 23: a currency a saved budget, a backup or a Planner bill may be in: one this phone knows, or one newer than its
+     *  list (VES, SLE, ZWG on an older Android), so a backup made on a newer phone still restores. */
+    public static boolean storableCurrency(String code){return knownCurrency(code)||NEWER_CURRENCIES.contains(code);}
+    // ISO 4217 codes from 2018 on, which an older phone's list may lack.
+    private static final Set<String> NEWER_CURRENCIES=new HashSet<>(Arrays.asList("MRU","STN","VES","UYW","VED","SLE","ZWG","XCG"));
     private static final Set<String> NOT_MONEY=new HashSet<>(Arrays.asList("XAU","XAG","XPT","XPD","XDR","XBA","XBB","XBC","XBD","XSU","XUA","XTS","XXX"));
     private static Set<String> codes;
     // Android makes up a currency for any three letters (Currency.getInstance("ZZZ") works there), so only the listed ones count.
@@ -110,7 +115,7 @@ public final class Budget {
      * with the two decimals stored, even for a currency without cents (JPY): amounts are cents in every currency.
      */
     public static java.text.NumberFormat moneyFormat(String code,Locale locale){java.text.NumberFormat f=java.text.NumberFormat.getCurrencyInstance(locale);
-        f.setCurrency(Currency.getInstance(knownCurrency(code)?code:DEFAULT_CURRENCY));f.setMinimumFractionDigits(2);f.setMaximumFractionDigits(2);return f;}
+        Currency c;try{c=Currency.getInstance(storableCurrency(code)?code:DEFAULT_CURRENCY);}catch(IllegalArgumentException e){c=Currency.getInstance(DEFAULT_CURRENCY);}f.setCurrency(c);f.setMinimumFractionDigits(2);f.setMaximumFractionDigits(2);return f;}
     public static String money(long cents,java.text.NumberFormat format){return format.format(BigDecimal.valueOf(cents,2));}
     /** The category for a Planner bill: the one chosen here, else its last expense's; "" when not known yet. */
     public String plannerCategory(String billKey){String id=billCategories.get(billKey);Category c=id==null?null:category(id);if(c!=null&&!c.payment())return c.id;Entry last=lastForBill(billKey);c=last==null||last.split()?null:category(last.category);return c==null||c.payment()?"":c.id;}
@@ -166,8 +171,9 @@ public final class Budget {
     public String monthNote(YearMonth m){return monthNotes.getOrDefault(m.toString(),"");}
     public void setMonthNote(YearMonth m,String text){String t=text==null?"":text.trim();if(t.length()>MONTH_NOTE_MAX)throw new IllegalArgumentException("Keep the month's note to "+MONTH_NOTE_MAX+" characters.");if(t.isEmpty())monthNotes.remove(m.toString());else monthNotes.put(m.toString(),t);}
     public Entry external(String id){if(id==null||id.isEmpty())return null;for(Entry e:entries)if(e.externalId.equals(id))return e;return null;}
-    /** The newest expense from [billKey] (entries are kept newest first), or null: its category is suggested next time. */
-    public Entry lastForBill(String billKey){if(billKey==null||billKey.isEmpty())return null;for(Entry e:entries)if(e.billKey.equals(billKey))return e;return null;}
+    /** The newest expense from [billKey] by date, or null: its category is suggested next time. */
+    public Entry lastForBill(String billKey){if(billKey==null||billKey.isEmpty())return null;Entry best=null; // hunt 23: by date, as an edit no longer moves an old one to the front
+        for(Entry e:entries)if(e.billKey.equals(billKey)&&(best==null||e.date.compareTo(best.date)>0))best=e;return best;}
     /** An amount box's text in cents. Quick maths works too: see evaluate. */
     public static long parse(String input) {return evaluate(input);}
     /**
@@ -682,7 +688,9 @@ public final class Budget {
      * [e]'s statement payee text: its bankPayee, else for a row imported before bankPayee was kept (0.0.6; its note is
      * still IMPORTED) its payee, which is what re-imports matched it on; "" for other transactions.
      */
-    public static String statementPayee(Entry e){if(!e.bankPayee.isEmpty())return e.bankPayee;if(e.transfer()||!e.memo.trim().equals(IMPORTED))return "";String p=e.payee.trim();return p.length()>PAYEE_MAX?p.substring(0,PAYEE_MAX):p;}
+    /** [s] at most [max] chars, never cutting an emoji (or other character outside the basic range) in half (hunt 23). */
+    public static String cut(String s,int max){if(s.length()<=max)return s;int end=max;if(end>0&&Character.isHighSurrogate(s.charAt(end-1)))end--;return s.substring(0,end);}
+    public static String statementPayee(Entry e){if(!e.bankPayee.isEmpty())return e.bankPayee;if(e.transfer()||!e.memo.trim().equals(IMPORTED))return "";String p=e.payee.trim();return cut(p,PAYEE_MAX);}
     public List<String> memos(String payee){
         List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));String p=payee==null?"":payee.trim();LinkedHashMap<String,String> seen=new LinkedHashMap<>();
         for(int pass=0;pass<2;pass++)for(Entry e:ordered){String m=e.memo.trim();boolean theirs=!p.isEmpty()&&e.payee.trim().equalsIgnoreCase(p);if(m.isEmpty()||m.equals(IMPORTED)||theirs!=(pass==0))continue;seen.putIfAbsent(m.toLowerCase(Locale.ROOT),m);}

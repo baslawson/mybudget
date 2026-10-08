@@ -119,9 +119,10 @@ class Ui {
     int amountColour(long cents){return cents>0?main.green:cents<0?main.red:main.muted;} // zero: quiet grey
     /** Money going out shown without a minus (Spending, Money out, a card's Owed): red when there is some. */
     int outColour(long cents){return cents>0?main.red:cents<0?main.green:main.muted;}
-    /** [text] with the first [part] in it (an amount inside a line, "Assigned A$40.00") shown in [colour]. */
+    /** [text] with the last [part] in it (an amount inside a line, "Assigned A$40.00") shown in [colour]. The last (hunt 23): the amount
+     *  ends the line, and a payee before it may hold the same text ("REFUND $20.00  A$20.00"). */
     static CharSequence tint(CharSequence text,String part,int colour){android.text.SpannableString s=new android.text.SpannableString(text);
-        int at=part.isEmpty()?-1:text.toString().indexOf(part);
+        int at=part.isEmpty()?-1:text.toString().lastIndexOf(part);
         if(at>=0)s.setSpan(new android.text.style.ForegroundColorSpan(colour),at,at+part.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);return s;}
     /** A quiet grey line of [size] with the [amount] in it coloured ([colour]: amountColour or outColour). */
     TextView greyLine(String text,String amount,int colour,int size){TextView t=label("",size,main.muted,false);t.setText(tint(text,amount,colour));return t;}
@@ -139,10 +140,10 @@ class Ui {
      */
     final class Choice {
         final LinearLayout view=new LinearLayout(main);final List<Button> buttons=new ArrayList<>();final String[] names;final int[] colours;
-        int selected;Runnable changed=()->{};
+        int selected;Runnable changed=()->{};boolean picked; // picked: chosen by the user (a tap), not set by the form
         Choice(String[] names,int[] colours,int selected){this.names=names;this.colours=colours;this.selected=selected;
             float scale=Math.max(1f,Math.min(1.6f,main.getResources().getConfiguration().fontScale)); // large text: taller, and the label shrinks to one line
-            for(int i=0;i<names.length;i++){int n=i;Button b=button(names[i],()->{if(selected()!=n){tick(view);set(n);}});b.setTextSize(15);
+            for(int i=0;i<names.length;i++){int n=i;Button b=button(names[i],()->{picked=true;if(selected()!=n){tick(view);set(n);}});b.setTextSize(15);
                 b.setMaxLines(1);b.setPadding(dp(4),0,dp(4),0);b.setAutoSizeTextTypeUniformWithConfiguration(10,15,1,android.util.TypedValue.COMPLEX_UNIT_SP);
                 LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Math.round(dp(52)*scale),1);p.setMargins(i==0?0:dp(4),dp(6),i==names.length-1?0:dp(4),dp(6));
                 view.addView(b,p);buttons.add(b);}
@@ -170,7 +171,9 @@ class Ui {
                 b.setTextSize(14);b.setPadding(dp(16),0,dp(16),0);GradientDrawable d=bg(on?main.primary:main.buttonSurface);d.setCornerRadius(dp(24));
                 b.setBackground(d);b.setTextColor(on?Color.WHITE:main.ink);if(on)b.setTypeface(null,Typeface.BOLD);
                 b.setContentDescription(names.get(i)+(on?", selected":""));
-                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,dp(48));p.setMargins(0,0,wrap?0:dp(8),0);row.addView(b,p);}
+                // Hunt 23: wrapped, a long name at large text may take two lines: the chip grows to fit (48dp at least).
+                if(wrap){b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(16),dp(6),dp(16),dp(6));}
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,wrap?-2:dp(48));p.setMargins(0,0,wrap?0:dp(8),0);row.addView(b,p);}
             if(selected>=0&&!wrap)view.post(()->{View on=row.getChildAt(selected);if(on==null)return; // the chosen chip in sight
                 int left=on.getLeft(),right=on.getRight(),x=view.getScrollX(),w=view.getWidth();
                 if(left<x||right>x+w)((HorizontalScrollView)view).smoothScrollTo(Math.max(0,left-dp(8)),0);});}

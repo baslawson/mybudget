@@ -58,7 +58,8 @@ final class BudgetScreen extends Ui {
         c.setPadding(dp(18),dp(14),dp(18),dp(16));c.setElevation(main.darkTheme?0:dp(3));
         TextView title=label("TO BUDGET",11,Color.WHITE,true);title.setLetterSpacing(0.12f);title.setAlpha(0.85f);c.addView(title);
         long ready=main.budget.spendable(main.month);TextView figure=label(money(ready),34,Color.WHITE,true);c.addView(figure);
-        Long before=main.shownReady;boolean sameMonth=main.month.equals(main.shownMonth);main.shownReady=ready;
+        // Hunt 23 M3: counted only from the figure this month had (another tab may have changed the month since it was shown).
+        Long before=main.shownReady;boolean sameMonth=main.month.equals(main.shownMonth)&&main.month.equals(main.shownReadyMonth);main.shownReady=ready;main.shownReadyMonth=main.month;
         if(motion()&&sameMonth&&before!=null&&before!=ready&&!main.hideAmounts){figure.setContentDescription(money(ready));
             android.animation.ValueAnimator count=android.animation.ValueAnimator.ofFloat(0f,1f);count.setDuration(700);
             count.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));long from=before;

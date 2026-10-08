@@ -37,7 +37,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes).");
     }
     static void batch1(){
@@ -583,6 +583,24 @@ public class BudgetTest {
         // M13: hidden categories don't show on Home or count toward the pins.
         Budget h=new Budget();for(int i=0;i<6;i++)h.categories.add(new Budget.Category("C"+i));for(int i=0;i<5;i++)h.pin(h.categories.get(i),true);h.categories.get(0).hidden=true;
         equal(h.pinned().size(),4,"Hidden left out");h.pin(h.categories.get(5),true);equal(h.pinned().size(),5,"Room for another");if(h.pinned().contains(h.categories.get(0)))throw new AssertionError("Hidden pinned shown");
+    }
+    // Bug hunt 23: CSV signs, transfers already made here, a bill's newest expense by date, cutting text, newer currency codes.
+    static void hunt23(){
+        equal(CsvImport.amount("(12.00) DR"),-1200,"Brackets and DR both mean money out");equal(CsvImport.amount("(12.00) CR"),1200,"CR says money in");
+        equal(CsvImport.amount("−12.50"),-1250,"A typographic minus");
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000),savings=new Budget.Account("Savings","2025-01-01",0);b.accounts.add(bank);b.accounts.add(savings);
+        Budget.Entry moved=new Budget.Entry("Transfer to Savings","",bank.id,"2025-01-05",-5000);moved.destination=savings.id;b.validate(moved);b.entries.add(moved);
+        java.util.List<java.util.List<String>> out=java.util.Arrays.asList(java.util.Arrays.asList("5/1/2025","TFR TO SAVINGS 1234","-50.00"),java.util.Arrays.asList("5/1/2025","Coffee","-50.00"));
+        CsvImport.Result r=CsvImport.run(b,out,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.duplicates,1,"The transfer made here");equal(r.added,1,"Not a transfer");
+        java.util.List<java.util.List<String>> in=java.util.Arrays.asList(java.util.Arrays.asList("5/1/2025","Transfer from Bank","50.00"));
+        equal(CsvImport.run(b,in,false,0,1,2,-1,"d/M/uuuu",savings).duplicates,1,"Its other side");
+        Budget.Category power=new Budget.Category("Power");b.categories.add(power);
+        Budget.Entry may=new Budget.Entry("Electricity",power.id,bank.id,"2025-05-06",-100),march=new Budget.Entry("Electricity",power.id,bank.id,"2025-03-06",-100);
+        may.billKey=march.billKey="planner-series-s9";b.entries.add(0,may);b.entries.add(0,march); // March edited: at the front
+        if(b.lastForBill("planner-series-s9")!=may)throw new AssertionError("A bill's newest expense is by date");
+        if(!Budget.cut("ab😀",3).equals("ab")||!Budget.cut("abc",3).equals("abc")||!Budget.cut("ab😀",4).equals("ab😀"))throw new AssertionError("Cut keeps emoji whole");
+        for(String ok:new String[]{"AUD","VES","SLE","ZWG"})if(!Budget.storableCurrency(ok))throw new AssertionError("Storable: "+ok);
+        for(String bad:new String[]{"aud","XXX","XAU","ZZZ","AU","",null})if(Budget.storableCurrency(bad))throw new AssertionError("Not storable: "+bad);
     }
     static void hunt22(){
         YearMonth jan=YearMonth.of(2025,1);
