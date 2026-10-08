@@ -39,7 +39,10 @@ public class PlannerBills extends BroadcastReceiver {
             String currency=withCurrency?b.optString("currency","").trim():Budget.DEFAULT_CURRENCY;
             if(id.isEmpty()||id.length()>100||key.isEmpty()||key.length()>100||payee.isEmpty()||!Budget.storableCurrency(currency))continue;JSONObject o=new JSONObject().put("id",id).put("billKey",key).put("payee",Budget.cut(payee,80)).put("due",due.toString()).put("currency",currency);
             // Hunt 23: an amount MyBudget can't hold (over 100 million, as IDR bills can be) leaves the bill planned without one; zero or less is no bill.
-            if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0)continue;if(c<=10_000_000_000L)o.put("amountCents",c);}out.put(o);}
+            if(b.has("amountCents")){long c=b.getLong("amountCents");if(c<=0)continue;if(c<=10_000_000_000L)o.put("amountCents",c);}
+            // Hunt 24 E4: the payments Planner already took off what's left, so one still on its way (ADD_EXPENSE) isn't taken off twice.
+            JSONArray paid=b.optJSONArray("paid");if(paid!=null){JSONArray kept=new JSONArray();for(int k=0;k<paid.length()&&kept.length()<20;k++){String p=paid.optString(k,"").trim();if(!p.isEmpty()&&p.length()<=100)kept.put(p);}if(kept.length()>0)o.put("paid",kept);}
+            out.put(o);}
         return out.toString();
     }
     /** A list older than this is ignored: Planner sends one each time it opens, so it's out of date (or Planner is gone). */

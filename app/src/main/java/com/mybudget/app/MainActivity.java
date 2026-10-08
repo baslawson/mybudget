@@ -138,8 +138,8 @@ public class MainActivity extends Activity {
             AutoBackup.schedule(this);String tree=uri.toString();new Thread(()->{String e=AutoBackup.run(this,true);
                 runOnUiThread(()->{ui.toast(e==null?"Automatic backup is on. First backup saved.":e);render();});}).start();return;}
         if(request==IMPORT){List<List<String>> rows;
-            try{rows=CsvImport.parse(read(uri));}catch(Exception e){ui.toast(e instanceof IOException&&e.getMessage()!=null?e.getMessage():"Could not read that file.");
-                return;}if(rows.isEmpty()){ui.toast("That file has no rows.");return;}settingsScreen.importDialog(rows);return;}
+            try{rows=CsvImport.statement(read(uri));}catch(Exception e){ui.toast((e instanceof IOException||e instanceof IllegalArgumentException)&&e.getMessage()!=null?e.getMessage():"Could not read that file.");
+                return;}if(rows.size()<=1&&(rows.isEmpty()||rows.get(0).equals(Arrays.asList("Date","Payee","Amount")))){ui.toast("That file has no transactions MyBudget can read.");return;}settingsScreen.importDialog(rows);return;} // an OFX or QIF file without transactions gives just its header row
         if(request==RESTORE){BudgetStore.Backup backup;try{backup=BudgetStore.readBackup(read(uri));}catch(Exception e){String m=e.getMessage();
                 ui.toast((e instanceof org.json.JSONException||e instanceof IOException)&&m!=null?m:"Could not read that file.");return;}
             settingsScreen.confirmRestore(backup);return;}

@@ -37,7 +37,7 @@ public final class Budget {
         public boolean closed; // only at a zero balance; keeps its transactions
         public Account(String name,String date,long opening) { this.name=name;this.date=date;this.opening=opening; }
     }
-    public static final String SPLIT="split",PAY_BY_TRANSFER="Pay a credit card with a transfer to it, not with its payment category.";
+    public static final String SPLIT="split",PAY_BY_TRANSFER="Pay a credit card with a transfer to it. Its payment category takes only that card's interest and fees.";
     public static final class Split { public String category,memo=""; public long amount; public Split(String category,long amount){this.category=category;this.amount=amount;} }
     public static final class Entry {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
@@ -49,6 +49,7 @@ public final class Budget {
         public int flag; // 0 = none, else a colour in FLAGS
         public boolean approved=true; // false: imported from a statement and still to review
         public String bankPayee=""; // imported rows: the statement's own payee text (before rules or renames), so a re-import still spots them
+        public boolean reconciled; // cleared and part of a balance checked against the bank (Reconcile): editing it asks first
         // A split (category SPLIT) spreads [amount] over parts, each with a category ("" = To budget).
         public final List<Split> splits=new ArrayList<>();
         public Entry(String payee,String category,String account,String date,long amount) {this.payee=payee;this.category=category;this.account=account;this.date=date;this.amount=amount;}
@@ -269,18 +270,58 @@ public final class Budget {
     public long spendable(YearMonth m){return ready(m)-futureAssigned(m);}
     public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
     public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);assignedChanged(from);assignedChanged(to);}
-    public long needed(Category c,YearMonth m){
-        if(c.target<=0||c.snoozed.equals(m.toString()))return 0;
-        if(c.targetType.equals("Monthly")||c.targetType.equals("Debt"))return Math.max(0,c.target-assigned(c,m)); // a debt payment: a fixed amount each month
+    public long needed(Category c,YearMonth m){Long ask=ask(c,m);return ask==null?0:Math.max(0,ask-assigned(c,m));}
+    /** What [c]'s target asks for in [m] before anything is assigned in [m] (needed is this less [m]'s Assigned); 0 without one. */
+    public long targetAsk(Category c,YearMonth m){Long ask=ask(c,m);return ask==null?0:ask;}
+    /** needed() before [m]'s Assigned is taken off; null when the target asks for nothing at all (none, snoozed, or a by-date target that's over). */
+    private Long ask(Category c,YearMonth m){
+        if(c.target<=0||c.snoozed.equals(m.toString()))return null;
+        if(c.targetType.equals("Monthly")||c.targetType.equals("Debt"))return c.target; // a debt payment: a fixed amount each month
         // Weekly: the amount for each chosen weekday in the month; refill counts what's left from last month (not in future months, as Refill).
-        if(c.targetType.equals("Weekly"))return Math.max(0,weeklyGoal(c,m)-(c.weeklyRefill&&!m.isAfter(YearMonth.now())?carried(c,m):0)-assigned(c,m));
+        if(c.targetType.equals("Weekly"))return weeklyGoal(c,m)-(c.weeklyRefill&&!m.isAfter(YearMonth.now())?carried(c,m):0);
         // By date: what's still to save (less what came in from earlier months), spread evenly over the months up to the due month.
-        if(c.targetType.equals("ByDate")){LocalDate due=dueFor(c,m);if(due==null)return 0;long months=ChronoUnit.MONTHS.between(m,YearMonth.from(due))+1,left=Math.max(0,c.target-carried(c,m));return Math.max(0,(left+months-1)/months-assigned(c,m));}
-        // Balance with a due month: like by date, what's still to save (less what came in) over the months left, less this month's Assigned.
-        if(c.targetType.equals("Balance")&&!c.due.isEmpty()){YearMonth due=YearMonth.parse(c.due);long remaining=Math.max(0,c.target-carried(c,m));long months=Math.max(1,ChronoUnit.MONTHS.between(m,due)+1);return Math.max(0,(remaining+months-1)/months-assigned(c,m));}
-        long base=c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1))))+assigned(c,m):available(c,m);
-        return Math.max(0,c.target-base);
+        if(c.targetType.equals("ByDate")){LocalDate due=dueFor(c,m);if(due==null)return null;long months=ChronoUnit.MONTHS.between(m,YearMonth.from(due))+1,left=Math.max(0,c.target-carried(c,m));return (left+months-1)/months;}
+        // Balance with a due month: like by date, what's still to save (less what came in) over the months left.
+        if(c.targetType.equals("Balance")&&!c.due.isEmpty()){YearMonth due=YearMonth.parse(c.due);long remaining=Math.max(0,c.target-carried(c,m));long months=Math.max(1,ChronoUnit.MONTHS.between(m,due)+1);return (remaining+months-1)/months;}
+        // Refill: up to the target, counting what's left from last month; a balance: up to the target, counting everything but this month's Assigned.
+        return c.target-(c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1)))):available(c,m)-assigned(c,m));
     }
+    /**
+     * Getting a month ahead, for [m] (usually next month): {what its targets and upcoming bills ask for before anything is
+     * assigned in [m], what they still need (Fund targets' figure)}. Hidden categories are left out, as on Home.
+     */
+    public long[] monthAhead(YearMonth m){long asked=0,still=0;
+        for(Category c:categories){if(c.hidden)continue;long need=fundNeed(c,m),a=assigned(c,m),bills=upcoming(c,m)-(available(c,m)-a);
+            asked+=Math.max(need,Math.max(0,Math.max(targetAsk(c,m),bills)));still+=need;}
+        return new long[]{asked,still};}
+    /** Money assigned in each month after [m], earliest first (months adding up to nothing left out). */
+    public TreeMap<YearMonth,Long> assignedAfter(YearMonth m){TreeMap<YearMonth,Long> map=new TreeMap<>();
+        for(Category c:categories)for(Map.Entry<String,Long> a:c.assigned.entrySet()){YearMonth k=YearMonth.parse(a.getKey());if(k.isAfter(m))map.merge(k,a.getValue(),Long::sum);}
+        map.values().removeIf(v->v==0);return map;}
+    /** What [c] can give back from its assignment in the later month [future] to cover overspending (Cover overspending). */
+    public long futureCover(Category c,YearMonth future){return c.payment()?0:Math.max(0,Math.min(assigned(c,future),available(c,future)));}
+    /**
+     * Covers [to]'s overspending in [m] (this month or a later one) with [amount] of the money [from] has assigned in the
+     * later month [future]: it goes back to To budget there, then into [to] in [m]. Cash doesn't change.
+     */
+    public void coverFromFuture(Category from,YearMonth future,Category to,YearMonth m,long amount){
+        if(!future.isAfter(m)||m.isBefore(YearMonth.now()))throw new IllegalArgumentException("Cover with a later month's money in this month or a later one.");
+        if(from==to||amount<=0||amount>futureCover(from,future)||amount>toCover(to,m))throw new IllegalArgumentException("Choose an amount that month has assigned and this category needs.");
+        if(spendable(m)<0)throw new IllegalArgumentException("To budget is below zero: return money in Budget first.");
+        assign(from,future,-amount);assign(to,m,amount);
+    }
+    /**
+     * To budget in [m] in parts that add up to it exactly: {money in cash accounts, what categories hold (not card payments),
+     * what's set aside for card payments, what card payment categories are below zero (paid beyond what was set aside, or card
+     * credit), cash overspending in [m], money assigned in later months}. To budget = cash − held − set aside + beyond +
+     * overspent − later. Cash overspending comes off To budget only the month after (ready); card overspending is card debt,
+     * never cash, so it isn't a part.
+     */
+    public long[] readyParts(YearMonth m){long held=0,set=0,beyond=0,over=0;
+        for(Category c:categories){long a=available(c,m);if(c.payment()){if(a>=0)set+=a;else beyond+=-a;}else if(a>=0)held+=a;else over+=-a-creditOverspent(c,m);}
+        return new long[]{cash(m),held,set,beyond,over,futureAssigned(m)};}
+    /** Money assigned in [m], all categories together. */
+    public long assignedIn(YearMonth m){long n=0;for(Category c:categories)n+=assigned(c,m);return n;}
     public long spending(YearMonth m){return sums().spending(m);}
     public long income(YearMonth m){return sums().income(m);}
     /** Fund targets' order in [m]: earliest due day or upcoming bill first (neither = end of month), otherwise as in the plan. */
@@ -416,7 +457,9 @@ public final class Budget {
          * already carried, and its To budget parts in [m]. Below that, more was paid than was set aside: overspending.
          */
         long cardCredit(Category pc,YearMonth m,long start){Account card=accountById.get(pc.cardAccount);if(card==null)return 0;
-            return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,at(freed.get(card),month(m)));}
+            // Hunt 24 C4: and its interest and fees in [m] (the payment category's own row holds only those): they use up card credit
+            // but are more debt, never overspending.
+            return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,at(freed.get(card),month(m)))+Math.max(0,-at(in.get(pc.id),month(m)));}
         long toCover(Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
         long ready(YearMonth m){return ready.computeIfAbsent(month(m),k->{long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;});}
         long creditSpent(Category c,YearMonth m,Account card){long n=0;int k=month(m);for(Map.Entry<Account,Map<String,long[]>> x:onCard.entrySet())if(card==null||x.getKey()==card)n+=at(x.getValue().get(c.id),k);return n;}
@@ -444,7 +487,7 @@ public final class Budget {
         Map<String,Long> spentBy(YearMonth from,YearMonth to){return spentBy.computeIfAbsent(from+" "+to,x->{
             String start=from.atDay(1).toString(),end=to.atEndOfMonth().toString();Map<String,Long> map=new LinkedHashMap<>();
             for(Entry e:between(from,to)){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;Set<String> ids=new LinkedHashSet<>();if(e.split())for(Split p:e.splits)ids.add(p.category);else ids.add(e.category);
-                for(String id:ids){Category c=id.isEmpty()?null:categoryById.get(id);if(c==null||c.payment())continue;long n=-budgetIn(e,id);if(n!=0)map.merge(id,n,Long::sum);}}
+                for(String id:ids){Category c=id.isEmpty()?null:categoryById.get(id);if(c==null)continue;long n=-budgetIn(e,id);if(n!=0)map.merge(id,n,Long::sum);}} // a payment category here is its card's interest and fees
             return map;});}
     }
     // Reports count budget accounts only (tracking accounts are in Net worth only); a transfer within the budget isn't spending
@@ -508,9 +551,9 @@ public final class Budget {
         for(Entry e:sums().between(from,from.plusMonths(months-1))){if(e.date.compareTo(start)<0||e.date.compareTo(end)>0)continue;long n=budgetIn(e,"");if(n==0)continue;int i=(int)ChronoUnit.MONTHS.between(from,YearMonth.from(LocalDate.parse(e.date)));Row r=payees.get(key(e.payee));if(r==null)payees.put(key(e.payee),r=new Row(e.payee.trim(),false,months));r.amounts[i]+=n;} // newest first: a payee's newest spelling
         for(Row r:payees.values())if(!r.empty())t.income.add(r);t.income.sort((a,b)->Long.compare(b.total(),a.total()));
         List<Map<String,Long>> spent=new ArrayList<>();for(YearMonth m:t.months)spent.add(spentBy(m,m));
-        LinkedHashMap<String,List<Category>> groups=new LinkedHashMap<>();for(Category c:categories)if(!c.payment())groups.computeIfAbsent(c.group.trim().toLowerCase(Locale.ROOT),k->new ArrayList<>()).add(c);
+        LinkedHashMap<String,List<Category>> groups=new LinkedHashMap<>();for(Category c:categories)groups.computeIfAbsent(c.group.trim().toLowerCase(Locale.ROOT),k->new ArrayList<>()).add(c);
         for(List<Category> list:groups.values()){Row g=new Row(list.get(0).group.trim(),true,months);List<Row> rows=new ArrayList<>();
-            for(Category c:list){Row r=new Row(c.name,false,months);for(int i=0;i<months;i++){r.amounts[i]=spent.get(i).getOrDefault(c.id,0L);g.amounts[i]+=r.amounts[i];}if(!r.empty())rows.add(r);}
+            for(Category c:list){Row r=new Row(c.payment()?c.name+" interest and fees":c.name,false,months);for(int i=0;i<months;i++){r.amounts[i]=spent.get(i).getOrDefault(c.id,0L);g.amounts[i]+=r.amounts[i];}if(!r.empty())rows.add(r);} // hunt 24 C5: a card's interest counts, as in the other reports
             if(!rows.isEmpty()){t.expenses.add(g);t.expenses.addAll(rows);}}
         for(int i=0;i<months;i++){for(Row r:t.income)t.incomeTotal.amounts[i]+=r.amounts[i];for(Row r:t.expenses)if(r.group)t.expenseTotal.amounts[i]+=r.amounts[i];t.net.amounts[i]=t.incomeTotal.amounts[i]-t.expenseTotal.amounts[i];}
         return t;
@@ -571,6 +614,7 @@ public final class Budget {
         if(into!=null){for(Entry e:entries){if(e.category.equals(c.id))e.category=into.id;for(Split s:e.splits)if(s.category.equals(c.id))s.category=into.id;}for(Scheduled s:scheduled){if(s.category.equals(c.id))s.category=into.id;for(Split p:s.splits)if(p.category.equals(c.id))p.category=into.id;}for(Map.Entry<String,Long>a:c.assigned.entrySet())into.assigned.merge(a.getKey(),a.getValue(),Long::sum);}
         for(Map.Entry<String,String> m:billCategories.entrySet())if(m.getValue().equals(c.id))m.setValue(into==null?"":into.id);billCategories.values().removeIf(String::isEmpty);
         for(Rule r:rules)if(r.category.equals(c.id))r.category=into==null?"":into.id;rules.removeIf(r->r.rename.isEmpty()&&r.category.isEmpty()); // an import rule left with nothing to do goes
+        if(into!=null)for(Map.Entry<String,String> m:payeeCategories.entrySet())if(m.getValue().equals(c.id))m.setValue(into.id);payeeCategories.values().removeIf(id->id.equals(c.id)); // unused: automatic again
         categories.remove(c);changed();
     }
     /** Swaps [c] with the next category of its group up (-1) or down (+1); false at the end of the group. */
@@ -612,8 +656,30 @@ public final class Budget {
         String t=to==null?"":to.trim();if(t.isEmpty())throw new IllegalArgumentException("Enter the payee's new name.");if(t.length()>PAYEE_MAX)throw new IllegalArgumentException("Keep a payee's name to "+PAYEE_MAX+" characters.");
         boolean existing=!key(from).equals(key(t))&&allPayees().stream().anyMatch(p->key(p).equals(key(t)));int n=0;
         for(Entry e:entries)if(!e.transfer()&&key(e.payee).equals(key(from))){if(e.bankPayee.isEmpty())e.bankPayee=statementPayee(e);e.payee=t;n++;}for(Scheduled s:scheduled)if(key(s.payee).equals(key(from))){s.payee=t;n++;}for(Rule r:rules)if(key(r.rename).equals(key(from)))r.rename=t;
-        if(hiddenPayees.remove(key(from))&&!existing)hiddenPayees.add(key(t));return n;
+        if(hiddenPayees.remove(key(from))&&!existing)hiddenPayees.add(key(t));
+        String setting=payeeCategories.remove(key(from));if(setting!=null)payeeCategories.putIfAbsent(key(t),setting);return n; // the payee kept keeps its own setting
     }
+    // A payee's category suggestion (new transactions and imported rows): automatic, always one category, or none.
+    /** Lower-case payee -> the category always suggested for it, or "" for none. Payees not here are automatic (usualCategory). */
+    public final Map<String,String> payeeCategories=new TreeMap<>();
+    /** Sets [payee]'s suggestion: null = automatic, "" = don't suggest, else always that (spending) category. */
+    public void setPayeeCategory(String payee,String category){String k=key(payee);if(k.isEmpty())throw new IllegalArgumentException("Choose a payee.");
+        if(category==null){payeeCategories.remove(k);return;}Category c=category(category);if(!category.isEmpty()&&(c==null||c.payment()))throw new IllegalArgumentException("Choose a spending category.");payeeCategories.put(k,category);}
+    /** The category suggested for [payee]'s next transaction (an id), or null for none: its setting, else usualCategory. */
+    public String suggestedCategory(String payee){String set=payeeCategories.get(key(payee));
+        if(set!=null){if(set.isEmpty())return null;Category c=category(set);if(c!=null&&!c.payment())return c.id;} // a fixed category that's gone: automatic again
+        return usualCategory(payee);}
+    /**
+     * [payee]'s usual category, from its transactions oldest first (splits and transfers left out): the first category, which
+     * changes only when two of the three latest agree on another. One odd purchase doesn't move it; a real change does, on
+     * the second time. Null when none has a (spending) category. Imports' "To categorize" is a placeholder, not a category: left out.
+     */
+    public String usualCategory(String payee){String k=key(payee);List<Entry> list=new ArrayList<>();
+        for(int i=entries.size()-1;i>=0;i--){Entry e=entries.get(i);if(!e.transfer()&&!e.split()&&!e.category.isEmpty()&&key(e.payee).equals(k)){Category c=category(e.category);if(c!=null&&!c.payment()&&!c.name.equalsIgnoreCase(CsvImport.TO_CATEGORIZE))list.add(e);}} // entries are kept newest first: oldest added first here
+        list.sort(Comparator.comparing(e->e.date));String usual=null;Deque<String> latest=new ArrayDeque<>();
+        for(Entry e:list){latest.addLast(e.category);if(latest.size()>3)latest.removeFirst();
+            if(usual==null)usual=e.category;else if(!e.category.equals(usual)&&Collections.frequency(latest,e.category)>=2)usual=e.category;}
+        return usual;}
     /** Merges [payees] into [keep] (spelled as given): each is renamed to it. Returns the transactions changed. */
     public int mergePayees(Collection<String> payees,String keep){int n=0;for(String p:payees)if(!key(p).equals(key(keep)))n+=renamePayee(p,keep);return n;}
     // Import rules: when a statement's payee contains some text, rename it and/or give it a category. The first match wins.
@@ -647,7 +713,22 @@ public final class Budget {
         if(!f.category.isEmpty()&&!e.touches(f.category))return false;
         if(f.flag>=0&&e.flag!=f.flag)return false;if(f.cleared>=0&&e.cleared!=(f.cleared==1))return false;
         if(!f.from.isEmpty()&&e.date.compareTo(f.from)<0)return false;if(!f.to.isEmpty()&&e.date.compareTo(f.to)>0)return false;
-        String t=f.text.trim().toLowerCase(Locale.ROOT);return t.isEmpty()||searchText(e).toLowerCase(Locale.ROOT).contains(t);
+        String t=f.text.trim().toLowerCase(Locale.ROOT);if(t.isEmpty())return true;
+        // An amount: by size (money in or out). With >, >=, <, <= or = only the amount counts; a plain number also finds text.
+        long[] q=amountQuery(t);if(q!=null){long a=Math.abs(e.amount),v=q[1];
+            boolean hit=q[0]==2?a>v:q[0]==3?a>=v:q[0]==4?a<v:q[0]==5?a<=v:a==v;if(hit||q[0]!=0)return hit;}
+        return searchText(e).toLowerCase(Locale.ROOT).contains(t);
+    }
+    private static final java.util.regex.Pattern AMOUNT=java.util.regex.Pattern.compile("(>=|<=|>|<|=)?\\s*[$€£]?\\s*(\\d{1,3}(?:,\\d{3})+|\\d+)(\\.\\d{1,2})?");
+    /**
+     * An amount search ("42.50", ">=100", "< 50", "=$1,200"): {operator, cents}, operator 0 = a plain number, 1 =, 2 >,
+     * 3 >=, 4 <, 5 <=. Null when [text] isn't one (it's searched as text).
+     */
+    public static long[] amountQuery(String text){
+        java.util.regex.Matcher m=AMOUNT.matcher(text.trim());if(!m.matches())return null;String op=m.group(1)==null?"":m.group(1);
+        try{long cents=new BigDecimal(m.group(2).replace(",","")+(m.group(3)==null?"":m.group(3))).movePointRight(2).longValueExact();
+            return new long[]{op.isEmpty()?0:op.equals("=")?1:op.equals(">")?2:op.equals(">=")?3:op.equals("<")?4:5,cents};}
+        catch(ArithmeticException x){return null;}
     }
     /** [f]'s transactions, newest first. */
     public List<Entry> filter(Filter f){List<Entry> list=new ArrayList<>();for(Entry e:entries)if(matches(f,e))list.add(e);list.sort((a,b)->b.date.compareTo(a.date));return list;}
@@ -726,8 +807,20 @@ public final class Budget {
         else if(a.tracking()&&!e.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
         else if(e.split()||e.category.equals(SPLIT))validateParts(e.category,e.splits,e.amount);
         else if(!e.category.isEmpty()&&category(e.category)==null)throw new IllegalArgumentException("Choose a category.");
-        else if(!e.category.isEmpty()&&category(e.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);
+        else if(!e.category.isEmpty()&&category(e.category).payment()&&!category(e.category).cardAccount.equals(e.account))throw new IllegalArgumentException(PAY_BY_TRANSFER);
     }
+    // Card interest and fees: an expense (or its refund) on a card in that card's own payment category. It's more debt, like what
+    // was owed when the card was added: it doesn't take money from a category (nothing to cover, not overspending) or from To
+    // budget, and nothing is set aside for it until money is assigned to the payment category (a payoff target helps).
+    /** Whether [e] is a card's interest or fee (or a refund of one): on the card, in its own payment category. */
+    public boolean cardCharge(Entry e){if(e.transfer()||e.split())return false;Category c=category(e.category);return c!=null&&c.payment()&&c.cardAccount.equals(e.account);}
+    /** Interest and fees on [pc]'s card in [m], less refunds of them. */
+    public long cardCharges(Category pc,YearMonth m){if(!pc.payment())return 0;String start=m.atDay(1).toString(),end=m.atEndOfMonth().toString();long n=0;
+        for(Entry e:entries)if(cardCharge(e)&&e.category.equals(pc.id)&&e.date.compareTo(start)>=0&&e.date.compareTo(end)<=0)n-=e.amount;return n;}
+    // Reconciled transactions: Reconcile locks what's cleared in the account then, so the balance checked against the bank stays
+    // as it was. They can still be changed, after a warning; unticking Cleared unlocks one.
+    /** Marks [a]'s cleared transactions (transfers in or out too) reconciled; returns how many weren't already. */
+    public int lockReconciled(Account a){int n=0;for(Entry e:entries)if(e.cleared&&!e.reconciled&&(e.account.equals(a.id)||e.destination.equals(a.id))){e.reconciled=true;n++;}return n;}
     /** A split's (or an upcoming split's) parts: two or more, none $0, To budget or spending categories, adding up to [amount]. */
     private void validateParts(String category,List<Split> parts,long amount){
         if(!category.equals(SPLIT)||parts.size()<2)throw new IllegalArgumentException("A split needs at least two parts.");long sum=0;

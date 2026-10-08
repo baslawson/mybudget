@@ -12,7 +12,9 @@ public final class BudgetStore {
     // Version 6 adds upcoming splits (a scheduled transaction's category "split" with its "splits"): MyBudget 0.0.7 would
     // refuse or lose them, so it must refuse the data instead. Versions 2 to 5 read as before (no upcoming splits).
     // Version 6 also adds the budget's "currency" (ISO 4217); versions 1 to 5 read as AUD, the only currency before it.
-    public static final int VERSION=6;
+    // Version 7 adds "payeeCategories" (a payee's category suggestion: always one category, or none) and an entry's "reconciled": MyBudget 0.0.8 would drop
+    // it on its next save, so it must refuse the data instead. Versions 2 to 6 read with none (every payee automatic).
+    public static final int VERSION=7;
     private static final java.util.regex.Pattern PHOTO=java.util.regex.Pattern.compile("[0-9a-f-]{0,40}([.]jpg)?"); // a photo is a file name only: never a path
     // Written out directly (years of transactions made building every JSONObject first slow), exactly as JSONObject would
     // write it: the same keys in the same order, JSONObject's escaping, plain whole numbers, a null string left out.
@@ -24,7 +26,7 @@ public final class BudgetStore {
         o.append("],\"accounts\":[");
         for(int i=0;i<b.accounts.size();i++){Budget.Account a=b.accounts.get(i);open(o,i);put(o,"id",a.id);put(o,"name",a.name);put(o,"date",a.date);put(o,"opening",a.opening);put(o,"reconciled",a.reconciled);put(o,"closed",a.closed);put(o,"type",a.type);put(o,"liability",a.liability);put(o,"rate",a.rate);put(o,"payment",a.payment);put(o,"frequency",a.frequency);o.append('}');}
         o.append("],\"entries\":[");
-        for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);
+        for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);put(o,"reconciled",e.reconciled);
             if(e.split())parts(o,e.splits);o.append('}');}
         o.append("],\"scheduled\":[");
         for(int i=0;i<b.scheduled.size();i++){Budget.Scheduled s=b.scheduled.get(i);open(o,i);put(o,"id",s.id);put(o,"payee",s.payee);put(o,"category",s.category);put(o,"account",s.account);put(o,"next",s.next);put(o,"repeat",s.repeat);put(o,"day",s.day);put(o,"amount",s.amount);put(o,"memo",s.memo);put(o,"billKey",s.billKey);
@@ -34,7 +36,8 @@ public final class BudgetStore {
         o.append("},\"flagNames\":[");for(int i=0;i<b.flagNames.length;i++){o.append(i>0?",":"");if(b.flagNames[i]==null)o.append("null");else string(o,b.flagNames[i]);}
         o.append("],\"hiddenPayees\":[");int n=0;for(String p:b.hiddenPayees){o.append(n++>0?",":"");if(p==null)o.append("null");else string(o,p);}
         o.append("],\"rules\":[");for(int i=0;i<b.rules.size();i++){Budget.Rule r=b.rules.get(i);open(o,i);put(o,"contains",r.contains);put(o,"rename",r.rename);put(o,"category",r.category);o.append('}');}
-        o.append(']');put(o,"currency",b.currency);return o.append('}').toString();
+        o.append("],\"payeeCategories\":{");for(Map.Entry<String,String> m:b.payeeCategories.entrySet())put(o,m.getKey(),m.getValue());
+        o.append('}');put(o,"currency",b.currency);return o.append('}').toString();
     }
     private static void open(StringBuilder o,int i){o.append(i>0?",{":"{");}
     /** ,"key":value (no comma straight after an opening brace); a null string is left out, as JSONObject.put(key,null) does. */
@@ -51,7 +54,8 @@ public final class BudgetStore {
     /** A backup file: the saved budget plus what marks it as MyBudget's, and when it was made (local date-time). */
     // Backup version 2: storage version 5 inside (MyBudget 0.0.5 refuses it as newer). Version 1 backups still restore.
     // Backup version 3: storage version 6 (upcoming splits, the currency; MyBudget 0.0.7 refuses it as newer). Versions 1 and 2 still restore.
-    public static final int BACKUP_VERSION=3;
+    // Backup version 4: storage version 7 (payee category suggestions; MyBudget 0.0.8 refuses it as newer). Versions 1 to 3 still restore.
+    public static final int BACKUP_VERSION=4;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
         return new JSONObject(encode(b)).put("app","MyBudget").put("backupVersion",BACKUP_VERSION).put("created",created.withNano(0).toString()).toString(2);
@@ -80,7 +84,7 @@ public final class BudgetStore {
         for(Budget.Category c:b.categories)if(c.payment()&&(b.account(c.cardAccount)==null||!b.account(c.cardAccount).credit()))throw new JSONException("Payment category without its card.");
         // Transactions look their accounts and categories up by id (the first with each id, as Budget.account and category do).
         Map<String,Budget.Account> accountIds=new HashMap<>();for(Budget.Account a:b.accounts)accountIds.putIfAbsent(a.id,a);Map<String,Budget.Category> categoryIds=new HashMap<>();for(Budget.Category c:b.categories)categoryIds.putIfAbsent(c.id,c);
-        for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");e.photo=j.optString("photo","");e.flag=Math.max(0,Math.min(Budget.FLAGS.length-1,j.optInt("flag",0)));e.approved=j.optBoolean("approved",true);e.bankPayee=j.optString("bankPayee","").trim();e.bankPayee=Budget.cut(e.bankPayee,80);if(!PHOTO.matcher(e.photo).matches())throw new JSONException("Invalid photo name."); // a file name only: never a path
+        for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");e.photo=j.optString("photo","");e.flag=Math.max(0,Math.min(Budget.FLAGS.length-1,j.optInt("flag",0)));e.approved=j.optBoolean("approved",true);e.bankPayee=j.optString("bankPayee","").trim();e.bankPayee=Budget.cut(e.bankPayee,80);e.reconciled=j.optBoolean("reconciled",false)&&e.cleared;if(!PHOTO.matcher(e.photo).matches())throw new JSONException("Invalid photo name."); // a file name only: never a path (reconciled: version 7, missing = not reconciled)
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split s=new Budget.Split(p.getString("category"),p.getLong("amount"));s.memo=p.optString("memo","");if(!s.category.isEmpty()&&categoryIds.get(s.category)==null)throw new JSONException("Invalid split.");e.splits.add(s);}
             long parted=0;for(Budget.Split s:e.splits)parted+=s.amount;if(e.category.equals(Budget.SPLIT)!=e.split()||(e.split()&&parted!=e.amount))throw new JSONException("Invalid split."); // the parts add up to the total
             // Rows imported before bankPayee was kept (0.0.6) matched re-imports by payee: keep that text, so renaming them later doesn't import them again.
@@ -93,6 +97,9 @@ public final class BudgetStore {
         JSONArray flagNames=root.optJSONArray("flagNames");if(flagNames!=null)for(int i=1;i<Math.min(flagNames.length(),Budget.FLAGS.length);i++){String n=flagNames.optString(i,"").trim();b.flagNames[i]=Budget.cut(n,30);}
         JSONArray hidden=root.optJSONArray("hiddenPayees");if(hidden!=null)for(int i=0;i<hidden.length();i++){String p=hidden.getString(i).trim().toLowerCase(Locale.ROOT);if(!p.isEmpty())b.hiddenPayees.add(p);}
         JSONArray rules=root.optJSONArray("rules");if(rules!=null)for(int i=0;i<rules.length();i++){JSONObject j=rules.getJSONObject(i);Budget.Rule r=new Budget.Rule(j.getString("contains"),j.optString("rename",""),j.optString("category",""));if(b.category(r.category)==null)r.category="";boolean twice=false;for(Budget.Rule o:b.rules)twice|=o.contains.trim().equalsIgnoreCase(r.contains.trim());if(!twice&&!r.contains.trim().isEmpty()&&(!r.rename.trim().isEmpty()||!r.category.isEmpty()))b.rules.add(r);} // a repeated text never matched (the first wins): dropped
+        // Payee category suggestions (version 7; missing: every payee automatic). A deleted or card payment category is forgotten.
+        JSONObject chosen=root.optJSONObject("payeeCategories");if(chosen!=null){Iterator<String> k=chosen.keys();while(k.hasNext()){String key=k.next(),id=chosen.getString(key),p=key.trim().toLowerCase(Locale.ROOT);
+            Budget.Category c=b.category(id);if(!p.isEmpty()&&p.length()<=Budget.PAYEE_MAX&&(id.isEmpty()||c!=null&&!c.payment()))b.payeeCategories.put(p,id);}}
         // Currency (version 6; missing: AUD). An unknown code is damaged data, refused rather than shown as some other money.
         if(version>=6){String code=root.optString("currency",Budget.DEFAULT_CURRENCY);if(!Budget.storableCurrency(code))throw new JSONException("Unknown currency.");b.currency=code;}
         JSONArray scheduled=root.optJSONArray("scheduled");

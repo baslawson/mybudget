@@ -51,8 +51,8 @@ final class SettingsScreen extends Ui {
                 AutoBackup.schedule(main);main.render();toast("Automatic backup is off. Backups already saved stay in the folder.");}));}
         main.content.addView(heading("Import",18,main.blue));LinearLayout imports=card();
         imports.addView(heading("Import a bank statement",20,main.ink));
-        imports.addView(label("Pick a CSV from your bank and match its columns once. Rows already in the account are skipped; new payees go to "+CsvImport.TO_CATEGORIZE+" until you choose their category.",14,main.muted,false));
-        imports.addView(button("Import transactions (CSV)",()->main.pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),MainActivity.IMPORT)));
+        imports.addView(label("Pick a statement file from your bank: CSV (match its columns once), OFX, QFX or QIF. Rows already in the account are skipped, rows you entered yourself (or from Planner) are matched to them, and new payees go to "+CsvImport.TO_CATEGORIZE+" until you choose their category.",14,main.muted,false));
+        imports.addView(button("Import transactions (CSV, OFX, QIF)",()->main.pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),MainActivity.IMPORT)));
         LinearLayout export=card();export.addView(heading("Export transactions",20,main.ink));
         export.addView(label("A CSV file of every transaction for a spreadsheet. It can't be restored; use a backup for that.",14,main.muted,false));
         export.addView(button("Export transactions (CSV)",()->main.pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("text/csv")
@@ -84,10 +84,23 @@ final class SettingsScreen extends Ui {
             .setNeutralButton("Import rules ("+main.budget.rules.size()+")",(x,w)->rules());
         if(all.isEmpty())d.setMessage("Payees appear here once you have transactions. Import rules can be set up now.");else d.setItems(rows,(x,n)->payeeActions(all.get(n)));d.show();
     }
+    /** What a payee's category suggestion is, in words: "automatic (Groceries)", "always Groceries" or "none". */
+    private String suggestionText(String payee){String set=main.budget.payeeCategories.get(payee.trim().toLowerCase(Locale.ROOT));Budget.Category fixed=set==null||set.isEmpty()?null:main.budget.category(set);
+        if(set!=null&&set.isEmpty())return "none";if(fixed!=null)return "always "+fixed.name;Budget.Category usual=main.budget.category(main.budget.usualCategory(payee));
+        return "automatic"+(usual==null?"":" ("+usual.name+")");}
+    /** A payee's category suggestion: automatic (changes once two of its last three agree), always one category, or none. */
+    private void payeeCategory(String payee){
+        List<Budget.Category> cats=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(!c.payment()&&!c.hidden)cats.add(c);
+        String[] choices=new String[cats.size()+2];choices[0]="Automatic: the category it usually has (one odd purchase doesn't change it; two of its last three do)";choices[1]="Don't suggest a category";
+        for(int i=0;i<cats.size();i++)choices[i+2]="Always "+cats.get(i).name;
+        new AlertDialog.Builder(main).setTitle(payee+": category").setItems(choices,(d,n)->{String id=n==0?null:n==1?"":cats.get(n-2).id;
+            if(main.change(()->main.budget.setPayeeCategory(payee,id)))toast(payee+": category "+suggestionText(payee)+".");}).setNegativeButton("Cancel",null).show();
+    }
     private void payeeActions(String payee){
         boolean hidden=main.budget.hiddenPayee(payee);
         new AlertDialog.Builder(main).setTitle(payee)
-            .setItems(new String[]{"Rename","Merge into another payee",hidden?"Show in suggestions":"Hide from suggestions"},(d,n)->{
+            .setItems(new String[]{"Rename","Merge into another payee",hidden?"Show in suggestions":"Hide from suggestions","Category: "+suggestionText(payee)},(d,n)->{
+            if(n==3){payeeCategory(payee);return;}
             if(n==0){LinearLayout f=form();
                 f.addView(label("Every transaction and upcoming transaction with this payee gets the new name.",13,main.muted,false));
                 EditText name=field(f,"New name",false);name.setText(payee);
@@ -150,7 +163,7 @@ final class SettingsScreen extends Ui {
         CheckBox hasHeader=new CheckBox(main);hasHeader.setText("The first row is column names");hasHeader.setChecked(header);
         hasHeader.setMinHeight(dp(48));f.addView(hasHeader);
         Spinner dateCol=spinner(f,"Date",names,date),payeeCol=spinner(f,"Payee or description",names,payee),amountCol=spinner(f,"Amount (or money in)",names,amount),outCol=spinner(f,"Money out (if it's a separate column)",withNone,out+1),account=spinner(f,"Into account",accounts.stream().map(a->a.name).toArray(String[]::new),0);
-        f.addView(label("Imported rows are marked cleared and wait for you to review them. Import rules (Settings > Payees) apply first. Dates in the future or before the account opened are skipped.",12,main.muted,false));
+        f.addView(label("Imported rows are marked cleared and wait for you to review them. Import rules (Settings > Payees) apply first. A row with the same amount as a transaction already here, dated within a week, is matched to it instead of added. Dates in the future or before the account opened are skipped.",12,main.muted,false));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Import transactions")
             .setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Import",null).create();
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
@@ -166,8 +179,12 @@ final class SettingsScreen extends Ui {
             if(x.unreadable>0)skipped.add(x.unreadable+" unreadable");
             String sorting=null;for(Budget.Entry e:x.entries){Budget.Category c=main.budget.category(e.category);
                 if(c!=null&&c.name.equals(CsvImport.TO_CATEGORIZE))sorting=c.id;}
+            // Matched rows: each was already here (entered by hand, from Planner, or upcoming); listed so a wrong match can be spotted.
+            StringBuilder matched=new StringBuilder();if(x.matched>0){matched.append("\n\n").append(count(x.matched,"row was","rows were")).append(" already here, entered by you, from Planner or upcoming: matched and cleared, dated as on the statement:");
+                for(Budget.Entry e:x.matches.subList(0,Math.min(8,x.matches.size())))matched.append("\n• ").append(e.payee).append(" ").append(money(e.amount)).append(", ").append(pretty(e.date));
+                if(x.matches.size()>8)matched.append("\n• and ").append(x.matches.size()-8).append(" more");}
             new AlertDialog.Builder(main).setTitle(count(x.added,"transaction","transactions")+" imported")
-                .setMessage((skipped.isEmpty()?"Nothing was skipped.":"Skipped: "+String.join(", ",skipped)+".")+(x.matchedRules>0?" "+count(x.matchedRules,"matched rule","matched rules")+".":"")+(x.added>0?"\n\nThey're marked to review: check them in Transactions and approve them.":"")+(sorting!=null?"\n\nSome are in "+CsvImport.TO_CATEGORIZE+": open them in Transactions to choose their category.":""))
+                .setMessage((skipped.isEmpty()?"Nothing was skipped.":"Skipped: "+String.join(", ",skipped)+".")+matched+(x.matchedRules>0?" "+count(x.matchedRules,"matched rule","matched rules")+".":"")+(x.added>0?"\n\nThey're marked to review: check them in Transactions and approve them.":"")+(sorting!=null?"\n\nSome are in "+CsvImport.TO_CATEGORIZE+": open them in Transactions to choose their category.":""))
                 .setPositiveButton("OK",null).show();
             // Transactions shows the statement's dates (not just the month on screen), so the new rows are all there.
             if(x.added>0){String from=null,to=null;for(Budget.Entry e:x.entries){if(from==null||e.date.compareTo(from)<0)from=e.date;

@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes).");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 fixes.");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -547,7 +547,7 @@ public class BudgetTest {
         b.rules.add(new Budget.Rule("WOOL","Woolworths",""));java.util.List<java.util.List<String>> rows=CsvImport.parse("2025-01-03,SHOP 123,-45.00\n2025-01-04,WOOLWORTHS 99,-20.00\n2025-01-05,Cafe,-7.00\n");
         Budget.Entry manual=new Budget.Entry("Cafe",food.id,bank.id,"2025-01-05",-700);b.entries.add(manual);
         CsvImport.Result first=CsvImport.run(b,rows,false,0,1,2,-1,"uuuu-MM-dd",bank);equal(first.added,2,"First import");equal(first.duplicates,1,"A manual entry still matches by payee");
-        same(b.entries.get(1).bankPayee+"|"+b.entries.get(0).bankPayee,"SHOP 123|WOOLWORTHS 99","Statement text kept");same(b.entries.get(0).payee,"Woolworths","Rule renamed it");same(manual.bankPayee,"","Manual entries have none");
+        same(b.entries.get(1).bankPayee+"|"+b.entries.get(0).bankPayee,"SHOP 123|WOOLWORTHS 99","Statement text kept");same(b.entries.get(0).payee,"Woolworths","Rule renamed it");same(manual.bankPayee+"|"+manual.cleared,"Cafe|true","A manual entry the statement duplicates remembers its text and is cleared (hunt 24 B1)");
         b.renamePayee("shop 123","Corner shop");b.mergePayees(java.util.Collections.singletonList("Woolworths"),"Cafe");
         CsvImport.Result again=CsvImport.run(b,rows,false,0,1,2,-1,"uuuu-MM-dd",bank);equal(again.added,0,"Renamed and merged payees still spotted");equal(again.duplicates,3,"All three already there");
         Budget.Entry old=new Budget.Entry("Gym","",bank.id,"2025-01-06",-1000);b.entries.add(old);equal(CsvImport.run(b,CsvImport.parse("2025-01-06,Gym,-10.00\n2025-01-06,Gym,-10.00\n"),false,0,1,2,-1,"uuuu-MM-dd",bank).added,1,"Per-row counting kept");
@@ -725,9 +725,9 @@ public class BudgetTest {
     static void csvCurrencies(){
         String[][] ok={{"€12.50","1250"},{"12.50 EUR","1250"},{"-£3.20","-320"},{"A$1,234.56","123456"},{"NZ$ 5","500"},{"US$-7.25","-725"},{"USD -3","-300"},{"¥1,000","100000"},
             {"12.50 IDR","1250"},{"12.50 DR","-1250"},{"12.50 CR","1250"},{"AUD 12.50 DR","-1250"},{"(€12.50)","-1250"},{"₹1,23,456.78","12345678"},{"1 234.56 €","123456"},{"CHF 99","9900"},
-            {"$1,200.00","120000"},{"aud 4.05","405"},{"+R$ 10","1000"},{"€12,50","125000"}}; // the last: a comma is a thousands separator, as before
+            {"$1,200.00","120000"},{"aud 4.05","405"},{"+R$ 10","1000"},{"€12,50","1250"},{"1.234,56 €","123456"},{"1,250","125000"},{"-12,5","-1250"},{"1,234,567.89","123456789"}}; // a comma before one or two last digits is a decimal comma; otherwise thousands
         for(String[] c:ok)equal(CsvImport.amount(c[0]),Long.parseLong(c[1]),"Amount "+c[0]);
-        for(String bad:new String[]{"12.50 ABC","EUR","€","7 Oct 2026","1.234,56 €","12.5.0","DR"})rejectsAny(()->CsvImport.amount(bad));
+        for(String bad:new String[]{"12.50 ABC","EUR","€","7 Oct 2026","1.23,45","12.5.0","DR"})rejectsAny(()->CsvImport.amount(bad));
         if(CsvImport.looksLikeHeader(java.util.Arrays.asList("7/10/2026","Shop","€12.50"))||!CsvImport.looksLikeHeader(java.util.Arrays.asList("Date","Payee","Amount (EUR)")))throw new AssertionError("Header detection with currencies");
     }
     // First-run setup: the starter categories (added once, unticked groups removed only while untouched), what counts as brand new, the suggested currency.
@@ -753,6 +753,198 @@ public class BudgetTest {
     // Month maths are worked out from one pass over the transactions (Budget.Sums), kept between calls with cache(true). On a
     // generated budget (SampleBudget: two cards, a cash advance, splits, refunds, card credits, tracking accounts), both ways
     // must give exactly the plain sums below (Budget's code before Sums), also after changes made while cached.
+    // Getting a month ahead, covering from a later month, how To budget is worked out, amount search.
+    static void monthAhead(){
+        YearMonth now=YearMonth.now(),next=now.plusMonths(1);String today=LocalDate.now().toString();
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank",now.atDay(1).toString(),200000);b.accounts.add(bank);
+        Budget.Category rent=new Budget.Category("Rent"),food=new Budget.Category("Food"),fun=new Budget.Category("Fun"),spare=new Budget.Category("Spare");
+        rent.targetType="Monthly";rent.target=40000;food.targetType="Refill";food.target=20000;spare.targetType="Monthly";spare.target=10000;spare.hidden=true;
+        for(Budget.Category c:new Budget.Category[]{rent,food,fun,spare})b.categories.add(c);
+        long[] a=b.monthAhead(next);equal(a[0],60000,"Next month asks for its targets (hidden left out)");equal(a[1],60000,"Nothing assigned there yet");
+        b.scheduled.add(new Budget.Scheduled("Gym",fun.id,bank.id,next.atDay(10).toString(),-3000,"Never"));
+        a=b.monthAhead(next);equal(a[0],63000,"And its upcoming bills");equal(a[1],63000,"Still all needed");
+        b.assign(rent,now,40000);b.assign(food,now,20000);a=b.monthAhead(next);equal(a[1],63000,"This month's money doesn't fund next month's set-aside or (future) refill");
+        b.assign(rent,next,40000);b.assign(food,next,25000);a=b.monthAhead(next);equal(a[0],63000,"Over-assigning doesn't raise what it asks");equal(a[1],3000,"Only the bill left");
+        if(!b.assignedAfter(now).equals(new java.util.TreeMap<>(java.util.Map.of(next,65000L)))||!b.assignedAfter(next).isEmpty())throw new AssertionError("Assigned in later months: "+b.assignedAfter(now));
+        long[] p=b.readyParts(now);equal(p[0],200000,"Cash");equal(p[1],60000,"Held");equal(p[5],65000,"Later months");equal(b.spendable(now),75000,"To budget");
+        equal(p[0]-p[1]-p[2]+p[3]+p[4]-p[5],b.spendable(now),"The parts add up");
+        Budget.Entry shop=new Budget.Entry("Shop",fun.id,bank.id,today,-5000);b.validate(shop);b.entries.add(shop);equal(b.toCover(fun,now),5000,"Overspent");
+        p=b.readyParts(now);equal(p[4],5000,"Cash overspending is a part");equal(p[0]-p[1]-p[2]+p[3]+p[4]-p[5],b.spendable(now),"Still adds up");
+        equal(b.futureCover(rent,next),40000,"Rent can give back next month's assignment");equal(b.futureCover(rent,now.plusMonths(2)),0,"Nothing assigned then");
+        rejects(()->b.coverFromFuture(rent,now,fun,now,1000));rejects(()->b.coverFromFuture(rent,next,fun,now,6000));rejects(()->b.coverFromFuture(fun,next,fun,now,1000));
+        rejects(()->b.coverFromFuture(rent,next,fun,now.minusMonths(1),1000));
+        b.coverFromFuture(rent,next,fun,now,5000);equal(b.assigned(rent,next),35000,"Taken from next month");equal(b.toCover(fun,now),0,"Covered");
+        equal(b.cash(now),195000,"Cash unchanged");equal(b.spendable(now),75000,"To budget unchanged");
+        a=b.monthAhead(next);equal(a[1],8000,"Next month needs it back");
+        b.assign(fun,next,1000);a=b.monthAhead(next);equal(a[0],63000,"A bill part-funded still asks for all of it");equal(a[1],7000,"Less what's assigned");
+        // needed() after the split into ask(): the same as before for every kind of target, month and category of a generated year.
+        Budget s=com.mybudget.app.SampleBudget.make(11,LocalDate.now(),12,15,30);int targets=0;
+        for(Budget.Category c:s.categories){if(c.target>0)targets++;for(YearMonth m=now.minusMonths(12);!m.isAfter(now.plusMonths(3));m=m.plusMonths(1))equal(s.needed(c,m),oldNeeded(s,c,m),"needed "+c.name+" "+c.targetType+" "+m);}
+        if(targets<4)throw new AssertionError("Too few targets in the generated budget");
+        for(YearMonth m=now.minusMonths(12);!m.isAfter(now.plusMonths(2));m=m.plusMonths(1)){long[] q=s.readyParts(m);equal(q[0]-q[1]-q[2]+q[3]+q[4]-q[5],s.spendable(m),"Parts add up in "+m);if(q[2]<0||q[3]<0)throw new AssertionError("Card parts have one sign");}
+        // Amount search: by size; with an operator only the amount counts, a plain number finds text too.
+        long[] q=Budget.amountQuery("42.50");equal(q[0],0,"Plain");equal(q[1],4250,"Cents");
+        q=Budget.amountQuery(">=100");equal(q[0],3,">=");equal(q[1],10000,"100");q=Budget.amountQuery("< 50");equal(q[0],4,"<");q=Budget.amountQuery("=$1,200");equal(q[0],1,"=");equal(q[1],120000,"Thousands");
+        for(String text:new String[]{"coles","12.345","1,20",">","",">=-5"})if(Budget.amountQuery(text)!=null)throw new AssertionError("Not an amount: "+text);
+        Budget.Entry coles=new Budget.Entry("Coles",food.id,bank.id,today,-15000),cafe=new Budget.Entry("Cafe 100",food.id,bank.id,today,-500),pay=new Budget.Entry("Pay","",bank.id,today,15000);
+        String[][] cases={{">100","101"},{"100","010"},{"150","101"},{"=5","010"},{"<=5","010"},{">=150","101"},{"cafe","010"}};
+        for(String[] c:cases){Budget.Filter f=new Budget.Filter();f.text=c[0];String got=(b.matches(f,coles)?"1":"0")+(b.matches(f,cafe)?"1":"0")+(b.matches(f,pay)?"1":"0");same(got,c[1],"Search "+c[0]);}
+    }
+    static java.util.List<java.util.List<String>> rows(String... lines){java.util.List<java.util.List<String>> r=new java.util.ArrayList<>();for(String l:lines)r.add(java.util.Arrays.asList(l.split(",",-1)));return r;}
+    // A statement row with the same amount as a transaction entered here (within a week) or an upcoming one is matched, not added.
+    static void importMatching(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000),card=new Budget.Account("Savings","2026-01-01",0);b.accounts.add(bank);b.accounts.add(card);
+        Budget.Category power=new Budget.Category("Power"),food=new Budget.Category("Food");b.categories.add(power);b.categories.add(food);
+        Budget.Entry planner=new Budget.Entry("Electricity",power.id,bank.id,"2026-09-08",-4250);planner.externalId="pay-1";planner.billKey="planner-series-1";planner.memo="From Planner";
+        Budget.Entry coffee=new Budget.Entry("Coffee",food.id,bank.id,"2026-09-10",-450),gym=new Budget.Entry("Gym",food.id,bank.id,"2026-08-01",-3000);
+        Budget.Entry elsewhere=new Budget.Entry("Coffee",food.id,card.id,"2026-09-12",-450);
+        for(Budget.Entry e:new Budget.Entry[]{planner,coffee,gym,elsewhere}){b.validate(e);b.entries.add(0,e);}
+        java.util.List<java.util.List<String>> st=rows("10/9/2026,ORIGIN ENERGY 123,-42.50","10/9/2026,CAFE XYZ,-4.50","15/9/2026,GYM,-30.00","12/9/2026,CAFE XYZ,-4.50");
+        CsvImport.Result r=CsvImport.run(b,st,false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,2,"Planner's bill and the coffee matched");equal(r.added,2,"The gym (45 days away) and a second coffee added");
+        same(planner.date+"|"+planner.payee+"|"+planner.category+"|"+planner.externalId+"|"+planner.memo+"|"+planner.cleared+"|"+planner.approved+"|"+planner.bankPayee,
+            "2026-09-10|Electricity|"+power.id+"|pay-1|From Planner|true|true|ORIGIN ENERGY 123","A match keeps its payee, category, Planner id and note; takes the statement's date; cleared");
+        equal(b.entries.size(),6,"Nothing added for the matches");equal(b.balance(bank,false),100000-4250-450-3000-3000-450,"Balance counts each once");
+        if(!elsewhere.bankPayee.isEmpty())throw new AssertionError("Another account's transaction isn't matched");
+        CsvImport.Result again=CsvImport.run(b,st,false,0,1,2,-1,"d/M/uuuu",bank);equal(again.duplicates,4,"The same statement again: all already there");equal(again.added+again.matched,0,"Nothing new");
+        // The closest date wins; equal amounts entered on two days are two transactions.
+        Budget.Entry first=new Budget.Entry("Shop",food.id,bank.id,"2026-09-01",-1000),fifth=new Budget.Entry("Shop",food.id,bank.id,"2026-09-05",-1000);b.entries.add(0,first);b.entries.add(0,fifth);
+        r=CsvImport.run(b,rows("4/9/2026,SHOP 1,-10.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,1,"One matched");if(fifth.bankPayee.isEmpty()||!first.bankPayee.isEmpty())throw new AssertionError("The closest one");
+        r=CsvImport.run(b,rows("2/9/2026,SHOP 1,-10.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,1,"The other one next");if(first.bankPayee.isEmpty())throw new AssertionError("Then the first");
+        // An imported row is never matched again, and a transfer isn't matched (it has its own check).
+        Budget.Entry moved=new Budget.Entry("Transfer to Savings","",bank.id,"2026-09-14",-2000);moved.destination=card.id;b.validate(moved);b.entries.add(0,moved);
+        r=CsvImport.run(b,rows("14/9/2026,ATM,-20.00","16/9/2026,CAFE ABC,-4.50"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,0,"Neither a transfer nor an imported row");equal(r.added,2,"Both added");
+        // An upcoming transaction due within a week is entered by the row, dated as the statement, and moves to its next date.
+        Budget.Scheduled rent=new Budget.Scheduled("Rent",food.id,bank.id,"2026-09-20",-50000,"Monthly");b.scheduled.add(rent);
+        r=CsvImport.run(b,rows("18/9/2026,RENT PAYMENT,-500.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,1,"Upcoming rent matched");
+        Budget.Entry paid=r.matches.get(0);same(paid.payee+"|"+paid.date+"|"+paid.category+"|"+paid.cleared+"|"+rent.next,"Rent|2026-09-18|"+food.id+"|true|2026-10-20","Entered from upcoming");
+        r=CsvImport.run(b,rows("1/10/2026,RENT PAYMENT,-500.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,0,"October's rent is 19 days away");equal(r.added,1,"Added");
+    }
+    // A payee's category: the usual one (changes when two of the last three agree), always one, or none; imports use it too.
+    static void payeeCategories(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);
+        Budget.Category groceries=new Budget.Category("Groceries"),gifts=new Budget.Category("Gifts"),fun=new Budget.Category("Fun");for(Budget.Category c:new Budget.Category[]{groceries,gifts,fun})b.categories.add(c);
+        Budget.Account visa=b.addCard("Visa","2026-01-01",0);
+        if(b.usualCategory("Woolies")!=null||b.suggestedCategory("Woolies")!=null)throw new AssertionError("No history: none");
+        String[][] history={{"2026-09-01",groceries.id},{"2026-09-08",groceries.id},{"2026-09-15",gifts.id}};
+        for(String[] h:history)b.entries.add(0,new Budget.Entry("Woolies",h[1],bank.id,h[0],-1000));
+        same(b.usualCategory("woolies "),groceries.id,"One odd purchase doesn't change it");
+        b.entries.add(0,new Budget.Entry("Woolies",gifts.id,bank.id,"2026-09-22",-1000));same(b.usualCategory("Woolies"),gifts.id,"Two of the last three do");
+        Budget.Entry olderOne=new Budget.Entry("Woolies",fun.id,bank.id,"2026-08-01",-1000);b.entries.add(0,olderOne); // added last but oldest: dates order it
+        same(b.usualCategory("Woolies"),gifts.id,"By date, not by when it was added");b.entries.remove(olderOne);
+        Budget.Entry split=new Budget.Entry("Woolies",Budget.SPLIT,bank.id,"2026-09-29",-1000);split.splits.add(new Budget.Split(fun.id,-500));split.splits.add(new Budget.Split(fun.id,-500));b.entries.add(0,split);
+        same(b.usualCategory("Woolies"),gifts.id,"Splits left out");
+        b.setPayeeCategory("WOOLIES",groceries.id);same(b.suggestedCategory("Woolies"),groceries.id,"Always Groceries");equal(b.payeeCategories.size(),1,"Kept in lower case");
+        b.setPayeeCategory("Woolies","");if(b.suggestedCategory("Woolies")!=null)throw new AssertionError("Don't suggest");if(!b.usualCategory("Woolies").equals(gifts.id))throw new AssertionError("Usual still known");
+        b.setPayeeCategory("Woolies",null);same(b.suggestedCategory("Woolies"),gifts.id,"Automatic again");
+        rejects(()->b.setPayeeCategory("Woolies",b.paymentCategory(visa).id));rejects(()->b.setPayeeCategory("Woolies","nope"));rejects(()->b.setPayeeCategory(" ",groceries.id));
+        b.setPayeeCategory("Woolies",fun.id);b.renamePayee("Woolies","Woolworths");same(b.suggestedCategory("Woolworths"),fun.id,"A rename keeps the setting");if(b.payeeCategories.containsKey("woolies"))throw new AssertionError("Old name dropped");
+        b.deleteCategory(fun,groceries);same(b.suggestedCategory("Woolworths"),groceries.id,"A deleted category's setting follows its transactions");
+        b.setPayeeCategory("Woolworths",gifts.id);b.entries.removeIf(e->e.category.equals(gifts.id));b.deleteCategory(gifts,null);if(b.payeeCategories.containsKey("woolworths"))throw new AssertionError("Unused deleted category: automatic again");
+        // Imports: a payee set to "don't suggest" goes to To categorize; the usual category ignores To categorize itself.
+        b.entries.add(0,new Budget.Entry("Cafe",groceries.id,bank.id,"2026-09-02",-500));b.setPayeeCategory("Cafe","");
+        CsvImport.Result r=CsvImport.run(b,rows("3/9/2026,Cafe,-6.00","4/9/2026,Woolworths,-7.00"),false,0,1,2,-1,"d/M/uuuu",bank);
+        java.util.Map<String,String> got=new java.util.HashMap<>();for(Budget.Entry e:r.entries)got.put(e.payee,b.category(e.category).name);
+        same(got.get("Cafe")+"|"+got.get("Woolworths"),CsvImport.TO_CATEGORIZE+"|Groceries","Imports follow the payee's suggestion");
+        same(b.usualCategory("Cafe"),groceries.id,"To categorize isn't a usual category");
+    }
+    // Card interest and fees: more debt in the card's payment category, never overspending; Reconcile locks what's cleared.
+    static void cardChargesAndReconciled(){
+        YearMonth sep=YearMonth.of(2026,9);Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);
+        Budget.Category food=new Budget.Category("Food");b.categories.add(food);Budget.Account visa=b.addCard("Visa","2026-01-01",0);Budget.Category pc=b.paymentCategory(visa);
+        b.assign(food,sep,10000);Budget.Entry shop=new Budget.Entry("Shop",food.id,visa.id,"2026-09-05",-5000);b.validate(shop);b.entries.add(0,shop);
+        equal(b.available(pc,sep),5000,"Card spending set aside");long ready=b.spendable(sep),spent=b.spending(sep);
+        Budget.Entry interest=new Budget.Entry("Interest",pc.id,visa.id,"2026-09-20",-1200);b.validate(interest);b.entries.add(0,interest);
+        if(!b.cardCharge(interest)||b.cardCharge(shop))throw new AssertionError("A card charge is one in the card's payment category");
+        equal(b.balance(visa,false),-6200,"More owed");equal(b.available(pc,sep),5000,"Nothing set aside for it");equal(b.toCover(pc,sep),0,"Not overspending");
+        equal(b.spendable(sep),ready,"To budget unchanged");equal(b.cash(sep),100000,"Cash unchanged");equal(b.toPay(visa),5000,"Pay what's set aside");
+        equal(b.spending(sep),spent+1200,"It's spending");equal(b.spentBy(sep,sep).get(pc.id),1200,"In the breakdown, under the card");
+        long total=0;for(long n:b.spentBy(sep,sep).values())total+=n;equal(total,b.spending(sep),"The breakdown adds up to spending");
+        equal(b.cardCharges(pc,sep),1200,"Charges this month");Budget.Entry back=new Budget.Entry("Interest refund",pc.id,visa.id,"2026-09-25",200);b.validate(back);b.entries.add(0,back);
+        equal(b.cardCharges(pc,sep),1000,"Less a refund");equal(b.cardCharges(pc,sep.plusMonths(1)),0,"Only that month");equal(b.cardCharges(food,sep),0,"Only payment categories");
+        rejects(()->b.validate(new Budget.Entry("Interest",pc.id,bank.id,"2026-09-20",-100))); // not from another account
+        Budget.Account mc=b.addCard("Mastercard","2026-01-01",0);rejects(()->b.validate(new Budget.Entry("Interest",pc.id,mc.id,"2026-09-20",-100))); // nor another card
+        Budget.Entry parts=new Budget.Entry("Shop",Budget.SPLIT,visa.id,"2026-09-21",-200);parts.splits.add(new Budget.Split(pc.id,-100));parts.splits.add(new Budget.Split(food.id,-100));rejects(()->b.validate(parts));
+        Budget.Entry payPc=new Budget.Entry("Transfer to Visa",pc.id,bank.id,"2026-09-22",-100);payPc.destination=visa.id;rejects(()->b.validate(payPc));
+        // Paying it off: a payment category takes targets like any other (a monthly debt payment here).
+        pc.targetType="Debt";pc.target=3000;equal(b.needed(pc,sep.plusMonths(1)),3000,"A payoff target on the card");
+        // Reconcile locks what's cleared in the account, transfers in or out too; unticked ones stay open.
+        Budget.Entry cleared=new Budget.Entry("Rent",food.id,bank.id,"2026-09-02",-1000),open=new Budget.Entry("Cafe",food.id,bank.id,"2026-09-03",-500),pay=new Budget.Entry("Transfer to Visa","",bank.id,"2026-09-28",-2000);
+        cleared.cleared=true;pay.cleared=true;pay.destination=visa.id;for(Budget.Entry e:new Budget.Entry[]{cleared,open,pay}){b.validate(e);b.entries.add(0,e);}
+        equal(b.lockReconciled(visa),1,"The card: the payment into it");if(!pay.reconciled||cleared.reconciled)throw new AssertionError("Transfers in count");
+        equal(b.lockReconciled(bank),1,"The bank: rent (the payment was locked already)");if(!cleared.reconciled||open.reconciled)throw new AssertionError("Only cleared ones locked");
+        equal(b.lockReconciled(bank),0,"Already locked");interest.cleared=true;equal(b.lockReconciled(visa),1,"Then the card's own cleared interest");
+        if(shop.reconciled)throw new AssertionError("Uncleared card spending stays open");
+    }
+    // Bug hunt 24: import matching (B1-B3), statement files (B5-B7, B9), card interest (C4, C5).
+    static void hunt24(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        // B1: a hand entry the statement duplicates exactly is that row for good: a later statement's row doesn't take it as well.
+        Budget.Entry gym=new Budget.Entry("Gym",food.id,bank.id,"2026-10-01",-2000);b.entries.add(0,gym);
+        equal(CsvImport.run(b,rows("1/10/2026,Gym,-20.00"),false,0,1,2,-1,"d/M/uuuu",bank).duplicates,1,"Exact duplicate");
+        CsvImport.Result r=CsvImport.run(b,rows("8/10/2026,Gym,-20.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.added,1,"The next week's gym is new");equal(r.matched,0,"Not matched to the first");
+        same(gym.date,"2026-10-01","The first stays on its date");
+        // B2: the closest row wins over the whole file, whatever the order of the rows.
+        Budget.Entry dinner=new Budget.Entry("Dinner",food.id,bank.id,"2026-10-06",-2500);b.entries.add(0,dinner);
+        r=CsvImport.run(b,rows("1/10/2026,PETROL,-25.00","6/10/2026,RESTAURANT,-25.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,1,"One match");equal(r.added,1,"Petrol added");
+        same(dinner.date+"|"+dinner.bankPayee,"2026-10-06|RESTAURANT","The restaurant row, though petrol came first");
+        // B3: a reconciled transaction isn't matched (it's locked); the row is added.
+        Budget.Entry cafe=new Budget.Entry("Cafe",food.id,bank.id,"2026-10-03",-450);cafe.cleared=true;cafe.reconciled=true;b.entries.add(0,cafe);
+        r=CsvImport.run(b,rows("5/10/2026,CAFE 12,-4.50"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,0,"Reconciled left alone");same(cafe.date,"2026-10-03","Its date too");
+        // B5, B6: QIF dates with words, Quicken's one-digit year, unreadable dates; !Clear and !Account headers; several accounts refused.
+        same(CsvImport.statement("!Type:Bank\nD5 Oct 2026\nT-1.00\nPx\n^\n").get(1).get(0),"2026-10-05","Month names keep their spaces");
+        same(CsvImport.statement("!Type:Bank\nD1/ 5' 9\nT-1.00\nPx\n^\n").get(1).get(0),"2009-05-01","Quicken's 1/ 5' 9");
+        same(CsvImport.statement("!Type:Bank\nD10/09/2026\nT-1.00\n^\nDsoon\nT-2.00\n^\n").toString(),"[[Date, Payee, Amount], [2026-09-10, , -1.00], [, , -2.00]]","An unreadable date is left empty, not the whole file");
+        same(CsvImport.statement("!Clear:AutoSwitch\n!Account\nNChecking\nTBank\nDMy account\n^\n!Type:Bank\nD10/09/2026\nT-5.00\nPA\n^\n").toString(),"[[Date, Payee, Amount], [2026-09-10, A, -5.00]]","!Clear and an !Account block");
+        rejectsAny(()->CsvImport.statement("!Account\nNOne\n^\n!Type:Bank\nD1/1/2026\nT-1\n^\n!Account\nNTwo\n^\n!Type:Bank\nD2/1/2026\nT-1\n^\n"));
+        // B7: an OFX file of two accounts is refused; a transfer's other account (ACCTTO) doesn't count.
+        String two="OFXHEADER:100\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKACCTFROM><BANKID>1<ACCTID>111</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260905<TRNAMT>-1.00<NAME>A</STMTTRN></BANKTRANLIST></STMTRS></STMTTRNRS><STMTTRNRS><STMTRS><BANKACCTFROM><BANKID>1<ACCTID>222</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260906<TRNAMT>-2.00<NAME>B</STMTTRN></BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        rejectsAny(()->CsvImport.statement(two));
+        String one="OFXHEADER:100\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKACCTFROM><BANKID>1<ACCTID>111</BANKACCTFROM><BANKTRANLIST><STMTTRN><DTPOSTED>20260905<TRNAMT>-1.00<NAME>To savings<BANKACCTTO><BANKID>1<ACCTID>999</BANKACCTTO></STMTTRN></BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        equal(CsvImport.statement(one).size(),2,"One account, with a transfer's other account named");
+        // B9: a trailing minus.
+        equal(CsvImport.amount("1.234,56-"),-123456,"Trailing minus, decimal comma");equal(CsvImport.amount("12.50-"),-1250,"Trailing minus");equal(CsvImport.amount("-12.50"),-1250,"Leading minus as before");
+        // C4: interest on a card in credit is more debt, not overspending.
+        YearMonth sep=YearMonth.of(2026,9);Budget c=new Budget();Budget.Account cash=new Budget.Account("Bank","2026-01-01",100000);c.accounts.add(cash);Budget.Category shop=new Budget.Category("Shop");c.categories.add(shop);
+        Budget.Account visa=c.addCard("Visa","2026-01-01",0);Budget.Category pc=c.paymentCategory(visa);c.assign(shop,sep,5000);
+        Budget.Entry buy=new Budget.Entry("Store",shop.id,visa.id,"2026-09-02",-5000),pay=new Budget.Entry("Transfer to Visa","",cash.id,"2026-09-03",-5000),refund=new Budget.Entry("Store",shop.id,visa.id,"2026-09-04",5000);pay.destination=visa.id;
+        for(Budget.Entry e:new Budget.Entry[]{buy,pay,refund}){c.validate(e);c.entries.add(0,e);}
+        equal(c.balance(visa,false),5000,"Card in credit");equal(c.toCover(pc,sep),0,"Credit: nothing to cover");long ready=c.spendable(sep);
+        Budget.Entry fee=new Budget.Entry("Annual fee",pc.id,visa.id,"2026-09-10",-1000);c.validate(fee);c.entries.add(0,fee);
+        equal(c.toCover(pc,sep),0,"The fee isn't overspending");equal(c.spendable(sep),ready,"Nor does it change To budget");equal(c.spendable(sep.plusMonths(1)),ready,"Not next month either");
+        // C5: the income and expense table counts it, as the other reports do.
+        Budget.Table t=c.incomeExpense(sep,1);boolean row=false;for(Budget.Row x:t.expenses)row|=x.name.equals("Visa interest and fees");if(!row)throw new AssertionError("Interest row");
+        equal(t.expenseTotal.amounts[0],c.spending(sep),"Table total = spending");
+    }
+    // Statement files: CSV separators, OFX (SGML and XML), QIF.
+    static void statementFiles(){
+        java.util.List<java.util.List<String>> semi=CsvImport.statement("Date;Payee;Amount\r\n1/9/2026;\"Shop; Main St\";-12,50\r\n");
+        same(semi.toString(),"[[Date, Payee, Amount], [1/9/2026, Shop; Main St, -12,50]]","Semicolons");equal(CsvImport.amount(semi.get(1).get(2)),-1250,"Its decimal comma");
+        same(CsvImport.parse("a\tb\tc\n1\t2\t3").toString(),"[[a, b, c], [1, 2, 3]]","Tabs");same(CsvImport.parse("a,\"b;c\";d,e\n").toString(),"[[a, b;c;d, e]]","Commas win when there are more");
+        same(CsvImport.parse("\"x;y\",z\n1;2;3").get(0).toString(),"[x;y, z]","Quoted separators don't count");
+        String sgml="OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\n\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST><DTSTART>20260901\n<STMTTRN>\n<TRNTYPE>DEBIT\n<DTPOSTED>20260905120000[+10:AEST]\n<TRNAMT>-42.50\n<FITID>1\n<NAME>ORIGIN ENERGY &amp; GAS\n</STMTTRN>\n<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260906<TRNAMT>1000,00<NAME><MEMO>Salary &#233;\n<STMTTRN><DTPOSTED>bad<TRNAMT>1\n</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+        same(CsvImport.statement(sgml).toString(),"[[Date, Payee, Amount], [2026-09-05, ORIGIN ENERGY & GAS, -42.50], [2026-09-06, Salary é, 1000.00]]","OFX 1");
+        String xml="<?xml version=\"1.0\"?>\n<?OFX OFXHEADER=\"200\" VERSION=\"220\"?>\n<OFX><CREDITCARDMSGSRSV1><CCSTMTTRNRS><CCSTMTRS><BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20260907</DTPOSTED><TRNAMT>-5.00</TRNAMT><NAME>Cafe</NAME></STMTTRN></BANKTRANLIST></CCSTMTRS></CCSTMTTRNRS></CREDITCARDMSGSRSV1></OFX>";
+        same(CsvImport.statement(xml).toString(),"[[Date, Payee, Amount], [2026-09-07, Cafe, -5.00]]","OFX 2 (XML), a card");
+        String qif="!Type:Bank\nD10/09/2026\nT-42.50\nPOrigin\n^\nD11/9/2026\nU1,000.00\nT1,000.00\nMSalary\n^\nD12/9/2026\nT-3.00\nPLast without a caret";
+        same(CsvImport.statement(qif).toString(),"[[Date, Payee, Amount], [2026-09-10, Origin, -42.50], [2026-09-11, Salary, 1,000.00], [2026-09-12, Last without a caret, -3.00]]","QIF");
+        same(CsvImport.statement("!Type:CCard\nD 9/10'26\nT-1.00\nPx\n^\n").get(1).toString(),"[2026-10-09, x, -1.00]","QIF's 9/10'26: day first, as CSV");
+        same(CsvImport.statement("!Type:Bank\nD12/31/2026\nT-1.00\n^\nD1/2/2026\nT-2.00\n^\n").get(2).toString(),"[2026-01-02, , -2.00]","Month first when day first can't read them all");
+        rejectsAny(()->CsvImport.statement("!Type:Invst\nD1/1/2026\nT5\n^\n"));
+        // An OFX file imports with the usual dialog's guesses: Date, Payee, Amount, ISO dates.
+        java.util.List<java.util.List<String>> o=CsvImport.statement(sgml);same(CsvImport.detectDateFormat(o,0,true),"uuuu-MM-dd","ISO dates");if(!CsvImport.looksLikeHeader(o.get(0)))throw new AssertionError("Header row");
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);
+        CsvImport.Result r=CsvImport.run(b,o,true,0,1,2,-1,"uuuu-MM-dd",bank);equal(r.added,2,"Both OFX rows");equal(b.balance(bank,false),100000-4250,"Amounts right");
+    }
+    /** needed() as it was before ask() (0.0.8), kept to compare. */
+    static long oldNeeded(Budget b,Budget.Category c,YearMonth m){
+        if(c.target<=0||c.snoozed.equals(m.toString()))return 0;
+        if(c.targetType.equals("Monthly")||c.targetType.equals("Debt"))return Math.max(0,c.target-b.assigned(c,m));
+        if(c.targetType.equals("Weekly"))return Math.max(0,Budget.weeklyGoal(c,m)-(c.weeklyRefill&&!m.isAfter(YearMonth.now())?b.carried(c,m):0)-b.assigned(c,m));
+        if(c.targetType.equals("ByDate")){LocalDate due=Budget.dueFor(c,m);if(due==null)return 0;long months=java.time.temporal.ChronoUnit.MONTHS.between(m,YearMonth.from(due))+1,left=Math.max(0,c.target-b.carried(c,m));return Math.max(0,(left+months-1)/months-b.assigned(c,m));}
+        if(c.targetType.equals("Balance")&&!c.due.isEmpty()){YearMonth due=YearMonth.parse(c.due);long remaining=Math.max(0,c.target-b.carried(c,m));long months=Math.max(1,java.time.temporal.ChronoUnit.MONTHS.between(m,due)+1);return Math.max(0,(remaining+months-1)/months-b.assigned(c,m));}
+        long base=c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,b.available(c,m.minusMonths(1))))+b.assigned(c,m):b.available(c,m);
+        return Math.max(0,c.target-base);
+    }
     static void cachedSums(){
         Budget b=com.mybudget.app.SampleBudget.make(7,LocalDate.now(),12,12,40);
         if(b.entries.size()<300||b.accounts.stream().filter(Budget.Account::credit).count()<2)throw new AssertionError("Generated budget too small");

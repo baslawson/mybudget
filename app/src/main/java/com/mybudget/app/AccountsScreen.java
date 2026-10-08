@@ -18,7 +18,7 @@ final class AccountsScreen extends Ui {
                 long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
                 TextView debt=label("",28,main.ink,true);debt.setText(owed>0?tint("Owed "+money(owed),money(owed),outColour(owed)):owed<0?tint("In credit "+money(-owed),money(-owed),main.green):"Paid off");c.addView(debt);
                 c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?main.amber:main.green,true));
-                c.addView(button("Make a payment",()->main.forms.payCard(a.id)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
+                pair(c,button("Make a payment",()->main.forms.payCard(a.id)),button("Add interest or fee",()->main.forms.cardCharge(a.id,null)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
             long cleared=main.budget.balance(a,true),uncleared=main.budget.balance(a,false)-cleared;TextView split=label("",13,main.muted,false);
             split.setText(tint2("Cleared "+money(cleared)+" / Uncleared "+money(uncleared),money(cleared),amountColour(cleared),money(uncleared),amountColour(uncleared)));c.addView(split);
             if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,main.green,false));
@@ -69,7 +69,7 @@ final class AccountsScreen extends Ui {
     // A difference can be settled with an adjustment into To budget after the user confirms.
     private void reconcile(Budget.Account a){
         LinearLayout f=form();f.addView(label("Cleared balance: "+money(main.budget.balance(a,true)),18,main.ink,true));
-        f.addView(label("Compare with your bank's cleared balance, excluding pending transactions. Mark transactions cleared in Transactions first.",14,main.muted,false));
+        f.addView(label("Compare with your bank's cleared balance, excluding pending transactions. Mark transactions cleared in Transactions first. Reconciling locks the cleared ones: changing one later asks first.",14,main.muted,false));
         EditText value=field(f,"Bank's cleared balance ("+code()+")",true);
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Reconcile "+a.name)
             .setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Reconcile",null).create();
@@ -77,13 +77,13 @@ final class AccountsScreen extends Ui {
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
             long bank;try{bank=Budget.parse(value.getText().toString());}catch(Exception e){toast(e.getMessage());return;}
             String today=LocalDate.now().toString();Budget.Entry adjust=main.budget.adjustment(main.accountById(a.id),bank,today);
-            if(adjust==null){if(main.change(()->main.accountById(a.id).reconciled=today)){d.dismiss();toast("Reconciled.");}return;}
+            if(adjust==null){int[] n={0};if(main.change(()->{Budget.Account acc=main.accountById(a.id);acc.reconciled=today;n[0]=main.budget.lockReconciled(acc);})){d.dismiss();toast("Reconciled."+(n[0]>0?" "+count(n[0],"cleared transaction is","cleared transactions are")+" locked now.":""));}return;}
             new AlertDialog.Builder(main).setTitle("Balances differ by "+money(adjust.amount))
                 .setMessage("Check for missing or uncleared transactions first. Or add a cleared adjustment of "+money(adjust.amount)+" into To budget so "+a.name+" matches your bank.")
                 .setNegativeButton("Check first",null)
                     .setPositiveButton("Add adjustment",(d2,x)->{if(main.change(()->{Budget.Account acc=main.accountById(a.id);
                         Budget.Entry e=main.budget.adjustment(acc,bank,today);if(e!=null){main.budget.validate(e);main.budget.entries.add(0,e);}
-                        acc.reconciled=today;})){d.dismiss();toast("Adjustment added and reconciled.");}}).show();
+                        acc.reconciled=today;main.budget.lockReconciled(acc);})){d.dismiss();toast("Adjustment added and reconciled. Cleared transactions are locked now.");}}).show();
         }));d.show();
     }
     private void editAccount(String id){

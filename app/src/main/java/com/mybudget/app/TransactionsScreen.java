@@ -99,7 +99,7 @@ final class TransactionsScreen extends Ui {
         Button filters=button(filtered()?"Filters (on)":"Filters",this::filters),payees=button("Payees",main.settingsScreen::payees);
         tools.addView(filters,new LinearLayout.LayoutParams(0,-2,1));LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(0,-2,1);
         pp.setMargins(dp(8),0,0,0);tools.addView(payees,pp);main.content.addView(tools);
-        EditText query=field(main.content,"Search payee, category or memo",false);query.setText(main.search);
+        EditText query=field(main.content,"Search payee, category, memo or amount (>100)",false);query.setText(main.search);
         TextView summary=label("",13,main.blue,true);main.content.addView(summary);
         Button clear=button("Clear filters",()->{main.clearFilters();main.render();});main.content.addView(clear);
         LinearLayout list=column();main.content.addView(list);
@@ -135,11 +135,17 @@ final class TransactionsScreen extends Ui {
         for(int i=0;i<choices.length;i++)flags[i+1]=choices[i];
         LinearLayout f=form();
         Spinner account=spinner(f,"Account",accNames,accs.indexOf(main.budget.account(main.accountFilter))+1),category=spinner(f,"Category",catNames,cats.indexOf(main.budget.category(main.categoryFilter))+1),flag=spinner(f,"Flag",flags,main.flagFilter+1),cleared=spinner(f,"Cleared",new String[]{"Cleared or not","Cleared","Uncleared"},main.clearedFilter<0?0:main.clearedFilter==1?1:2);
-        f.addView(label("Dates (without them, the month on screen)",12,main.muted,true));CheckBox useFrom=new CheckBox(main);useFrom.setText("From");useFrom.setMinHeight(dp(48));
+        f.addView(label("Dates (without them, the month on screen)",12,main.muted,true));LinearLayout quick=new LinearLayout(main);if(large())quick.setOrientation(LinearLayout.VERTICAL);f.addView(quick);CheckBox useFrom=new CheckBox(main);useFrom.setText("From");useFrom.setMinHeight(dp(48));
         useFrom.setChecked(!main.fromFilter.isEmpty());f.addView(useFrom);
         EditText from=dateField(f,main.fromFilter.isEmpty()?main.month.atDay(1).toString():main.fromFilter);
         CheckBox useTo=new CheckBox(main);useTo.setText("To");useTo.setMinHeight(dp(48));useTo.setChecked(!main.toFilter.isEmpty());f.addView(useTo);
         EditText to=dateField(f,main.toFilter.isEmpty()?LocalDate.now().toString():main.toFilter);
+        // Quick ranges fill in both dates (counted from today): this month so far, last month, and this month with the two before.
+        LocalDate today=LocalDate.now();LocalDate[][] ranges={{today.withDayOfMonth(1),today},{today.minusMonths(1).withDayOfMonth(1),today.withDayOfMonth(1).minusDays(1)},{today.minusMonths(2).withDayOfMonth(1),today}};
+        String[] rangeNames={"This month","Last month","Last 3 months"};
+        for(int i=0;i<ranges.length;i++){LocalDate[] r=ranges[i];Button b=button(rangeNames[i],()->{useFrom.setChecked(true);useTo.setChecked(true);setDay(from,r[0].toString());setDay(to,r[1].toString());});
+            if(!large()){b.setMaxLines(1);b.setAutoSizeTextTypeUniformWithConfiguration(9,13,1,android.util.TypedValue.COMPLEX_UNIT_SP);} // side by side: one line each, smaller if need be
+            LinearLayout.LayoutParams bp=large()?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1);bp.setMargins(i==0||large()?0:dp(6),dp(4),0,dp(4));quick.addView(b,bp);}
         AlertDialog[] shown={null};if(large())f.addView(button("Clear all filters",()->{shown[0].dismiss();main.clearFilters();main.render();}));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Filter transactions")
             .setView(scroll).setNegativeButton("Cancel",null).setNeutralButton(large()?null:"Clear all",(x,w)->{main.clearFilters();main.render();})
@@ -151,6 +157,7 @@ final class TransactionsScreen extends Ui {
             main.accountFilter=a==0?"":accs.get(a-1).id;main.categoryFilter=c==0?"":cats.get(c-1).id;main.flagFilter=flag.getSelectedItemPosition()-1;
             main.clearedFilter=cl==0?-1:cl==1?1:0;main.fromFilter=fromDay;main.toFilter=toDay;d.dismiss();main.render();}));d.show();
     }
+    private void setDay(EditText e,String iso){e.setTag(iso);e.setText(pretty(iso));e.setContentDescription("Date, "+pretty(iso)+". Double tap to change.");}
     /** Imported transactions waiting for review: approve each (or edit it, which approves it too), or all at once. */
     void review(){
         List<Budget.Entry> list=main.budget.toReview();if(list.isEmpty()){main.render();return;}LinearLayout f=form();
@@ -180,6 +187,7 @@ final class TransactionsScreen extends Ui {
     private String categoryName(Budget.Entry e){if(e.split())return splitNames(e.splits);
         Budget.Category c=main.budget.category(e.category);
         if(e.transfer())return c!=null?"Transfer · "+c.name:main.budget.crossing(e)?"Transfer · To budget":"Transfer"; // in or out of the budget, to or from a tracking account
+        if(main.budget.cardCharge(e))return "Interest and fees"; // in the card's payment category
         Budget.Account a=main.budget.account(e.account);return a!=null&&a.tracking()?"Tracking account":c==null?"To budget":c.name;}
     private void fillEntries(LinearLayout list){
         list.removeAllViews();int n=0;
@@ -206,7 +214,7 @@ final class TransactionsScreen extends Ui {
             if(!e.photo.isEmpty())middle.addView(label("📎 Photo attached",12,main.blue,false));
             LinearLayout right=column();right.setGravity(android.view.Gravity.END);
             TextView amount=label(money(e.amount),16,amountColour(e.amount),true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
-            TextView cleared=label(e.cleared?"Cleared":"Uncleared",11,e.cleared?main.green:main.muted,false);cleared.setGravity(android.view.Gravity.END);cleared.setPadding(0,dp(2),0,0);right.addView(cleared);
+            TextView cleared=label(e.reconciled?"🔒 Reconciled":e.cleared?"Cleared":"Uncleared",11,e.cleared?main.green:main.muted,false);cleared.setGravity(android.view.Gravity.END);cleared.setPadding(0,dp(2),0,0);right.addView(cleared);
             row.addView(right,new LinearLayout.LayoutParams(-2,-2));row.setOnClickListener(v->main.forms.transaction(e));}
         if(n==0){boolean none=main.budget.entries.isEmpty();list.addView(emptyRow(none?"🧾":"🔍",none?"No transactions yet. Add what you spend or earn and it shows here.":main.fromFilter.isEmpty()&&main.toFilter.isEmpty()?"No matching transactions this month.":"No matching transactions in these dates."));}
     }

@@ -48,12 +48,41 @@ final class HomeScreen extends Ui {
         top.addView(h,new LinearLayout.LayoutParams(0,-2,1));progress.addView(top);
         progress.addView(label(need>0?money(need)+" still needed this month":"✓ Every target is funded this month",16,need>0?main.amber:main.green,true));
         progress.addView(label("Targets tell you what to fund. They do not create money.",14,main.muted,false));
+        monthAheadCard();
         // Priority categories: the ones pinned from their menu in Budget.
         main.content.addView(heading("Priority categories",20,main.ink));List<Budget.Category> pinned=main.budget.pinned();
         for(Budget.Category c:pinned)main.budgetScreen.categoryCard(c);
         if(pinned.isEmpty()&&!main.budget.categories.isEmpty())empty("📌","Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.","Go to Budget",()->{main.tab="Plan";main.render();});
         else if(pinned.isEmpty())main.content.addView(label("Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.",14,main.muted,false));
     }
+    /**
+     * Getting a month ahead: how much of next month's targets and upcoming bills already has money assigned
+     * (Budget.monthAhead). Nothing when next month asks for nothing.
+     */
+    private void monthAheadCard(){YearMonth next=main.month.plusMonths(1);long[] a=main.budget.monthAhead(next);if(a[0]<=0)return;
+        long funded=a[0]-a[1];boolean done=a[1]==0;int percent=done?100:(int)Math.min(99,funded*100/a[0]);
+        String name=next.format(java.time.format.DateTimeFormatter.ofPattern("MMMM"));
+        LinearLayout card=card();LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        top.addView(badge("🗓",done?main.green:main.blue));TextView h=heading("Next month: "+name,19,main.ink);h.setPadding(dp(12),0,0,0);
+        top.addView(h,new LinearLayout.LayoutParams(0,-2,1));card.addView(top);
+        card.addView(label(done?"✓ Fully funded":percent+"% funded",16,done?main.green:main.ink,true));
+        progress(card,funded,a[0],done?main.green:main.primary);
+        card.addView(greyLine(money(funded)+" of "+money(a[0])+" assigned for its targets and bills",money(funded),amountColour(funded),14));
+        card.setOnClickListener(v->monthAheadDetails(next));}
+    /** What's assigned in each later month, what next month still needs, and a way to Budget at next month. */
+    private void monthAheadDetails(YearMonth next){LinearLayout f=form();String name=next.format(java.time.format.DateTimeFormatter.ofPattern("MMMM"));
+        f.addView(label("A month ahead, this month's income pays next month's bills: assign to "+name+" once this month is covered, and then you're spending money that's at least a month old.",13,main.muted,false));
+        TreeMap<YearMonth,Long> later=main.budget.assignedAfter(main.month);section(f,"Assigned in later months");
+        if(later.isEmpty())f.addView(label("Nothing yet.",14,main.muted,false));
+        for(Map.Entry<YearMonth,Long> e:later.entrySet())f.addView(greyLine(e.getKey().format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))+":  "+money(e.getValue()),money(e.getValue()),amountColour(e.getValue()),14));
+        List<Budget.Category> short_=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(!c.hidden&&main.budget.fundNeed(c,next)>0)short_.add(c);
+        short_.sort((x,y)->Long.compare(main.budget.fundNeed(y,next),main.budget.fundNeed(x,next)));
+        section(f,"Still needed in "+name);if(short_.isEmpty())f.addView(label("✓ Nothing: every target and bill has its money.",14,main.green,false));
+        for(Budget.Category c:short_.subList(0,Math.min(10,short_.size()))){long n=main.budget.fundNeed(c,next);f.addView(greyLine(c.name+":  "+money(n),money(n),main.amber,14));}
+        if(short_.size()>10)f.addView(label("And "+(short_.size()-10)+" more.",13,main.muted,false));
+        ScrollView scroll=new ScrollView(main);scroll.addView(f);
+        new AlertDialog.Builder(main).setTitle("Getting a month ahead").setView(scroll).setNegativeButton("Close",null)
+            .setPositiveButton("Go to "+name+" in Budget",(d,w)->{main.month=next;main.tab="Plan";main.render();}).show();}
     // First-run setup, offered on the start card of a brand-new budget (Budget.brandNew): the currency, a first account, the
     // starter categories, then what To budget is. Each step saves on Next (a change like any other) or can be skipped; Cancel
     // or Back stops there and keeps what was saved. It removes nothing but starter categories never touched (Budget.removeStarter).

@@ -87,15 +87,30 @@ public class AddExpenseActivity extends Activity {
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
         TextView categoryLabel=label(f,"Category",12);Spinner category=new Spinner(this);Ui.names(categoryLabel,category);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
-        // Picking a known payee chooses its category from last time, unless a category is already chosen.
-        payeeField.setOnItemClickListener((p,v,position,rowId)->{Budget.Entry before=budget.lastForPayee(payeeField.getText().toString());if(before==null||before.split()||category.getSelectedItemPosition()!=0)return;int i=categories.indexOf(budget.category(before.category));if(i>=0)category.setSelection(i+1);});
+        // Picking a known payee chooses its suggested category (Budget.suggestedCategory), unless a category is already chosen.
+        payeeField.setOnItemClickListener((p,v,position,rowId)->{String usual=budget.suggestedCategory(payeeField.getText().toString());if(usual==null||category.getSelectedItemPosition()!=0)return;int i=categories.indexOf(budget.category(usual));if(i>=0)category.setSelection(i+1);});
         if(suggested!=null)label(f,last!=null?"Suggested from last time for this bill.":"The category you planned this bill from.",12);
         TextView accountLabel=label(f,"Account",12);Spinner account=new Spinner(this);Ui.names(accountLabel,account);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
         if(!note.isEmpty())label(f,"Note: "+note,12);
+        // Hunt 24 E2: the bank statement may have been imported first: a row with this amount within a week, not linked to
+        // Planner yet, is offered instead of a second expense ("Use imported" links it to this payment).
+        Budget.Entry imported=sent>0?importedFor(-sent,date):null;String importedId=imported==null?null:imported.id;
+        if(imported!=null)label(f,"Imported from your bank: "+imported.payee+" "+money(-imported.amount)+" on "+Ui.pretty(imported.date)+". If that's this payment, tap Use imported instead of saving another.",13);
         ScrollView scroll=new ScrollView(this);scroll.addView(f);
-        dialog=new AlertDialog.Builder(this).setTitle("Add expense").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
+        AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Add expense").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null);
+        if(imported!=null)builder.setNeutralButton("Use imported",null);
+        dialog=builder.create();
         dialog.setOnDismissListener(d->finish());
-        dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+        Runnable useImported=imported==null?null:()->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+            try{reload();Budget.Entry already=budget.external(id);if(already!=null){setResult(RESULT_OK,reply("Already in MyBudget: "+already.payee+" "+money(-already.amount)));dialog.dismiss();return;}
+                Budget.Entry row=null;for(Budget.Entry x:budget.entries)if(x.id.equals(importedId))row=x;
+                if(row==null||!row.externalId.isEmpty())throw new IllegalArgumentException("That imported transaction changed meanwhile. Save this one instead, or cancel.");
+                row.externalId=id;row.billKey=billKey;Budget.Category chosen=category.getSelectedItemPosition()==0?null:budget.category(categories.get(category.getSelectedItemPosition()-1).id),rc=budget.category(row.category);
+                if(chosen!=null&&!row.split()&&(rc==null||rc.name.equalsIgnoreCase(CsvImport.TO_CATEGORIZE)))row.category=chosen.id; // still to categorize: takes the category chosen here
+                if(!save())throw new IllegalStateException("Could not save to device storage.");
+                PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey,id,-row.amount);setResult(RESULT_OK,reply("Linked to the imported "+row.payee+" "+money(-row.amount)+" in MyBudget."));dialog.dismiss();
+            }catch(RuntimeException ex){Toast.makeText(this,ex.getMessage()==null?"Check your entry.":ex.getMessage(),Toast.LENGTH_LONG).show();}});
+        dialog.setOnShowListener(d->{if(useImported!=null)useImported.run();dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             try{
                 if(category.getSelectedItemPosition()==0)throw new IllegalArgumentException("Choose a category.");
                 Budget.Category c=categories.get(category.getSelectedItemPosition()-1);Budget.Account a=accounts.get(account.getSelectedItemPosition());
@@ -109,10 +124,15 @@ public class AddExpenseActivity extends Activity {
                 PlannerBills.dropPaid(this,text(getIntent(),"upcomingId",100),billKey,id,cents); /* a part payment leaves the rest planned */setResult(RESULT_OK,reply("Added to MyBudget: "+c.name+" −"+money(cents)));dialog.dismiss();
             }catch(java.time.format.DateTimeParseException ex){Toast.makeText(this,"Enter the date as YYYY-MM-DD.",Toast.LENGTH_LONG).show();}
             catch(RuntimeException ex){Toast.makeText(this,ex.getMessage()==null?"Check your entry.":ex.getMessage(),Toast.LENGTH_LONG).show();}
-        }));
+        });});
         dialog.show();
     }
 
+    /** Hunt 24 E2: an imported statement row (not linked to Planner) of [amount] dated within CsvImport.MATCH_DAYS of [date], the closest; or null. */
+    private Budget.Entry importedFor(long amount,String date){Budget.Entry best=null;long gap=Long.MAX_VALUE;LocalDate day=LocalDate.parse(date);
+        for(Budget.Entry e:budget.entries){Budget.Account a=budget.account(e.account);if(e.transfer()||e.amount!=amount||!e.externalId.isEmpty()||Budget.statementPayee(e).isEmpty()||a==null||a.tracking())continue;
+            long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(day,LocalDate.parse(e.date)));if(g<=CsvImport.MATCH_DAYS&&g<gap){best=e;gap=g;}}
+        return best;}
     // A payment sent again: its planned bill went when it was first added. Only by its own entry (an older Planner sends none,
     // and by billKey alone the next one of that bill would go, hunt 23).
     private void dropAgain(String upcomingId,String billKey,String id,long cents){if(!upcomingId.isEmpty())PlannerBills.dropPaid(this,upcomingId,billKey,id,cents);}
@@ -123,7 +143,9 @@ public class AddExpenseActivity extends Activity {
         Budget.Category c=budget.category(e.category);
         // Not cancelable (Back, a tap outside): the answer goes back to the sender, which tells the user whether the expense stayed.
         dialog=new AlertDialog.Builder(this).setTitle("Remove this expense?").setCancelable(false)
-            .setMessage("You marked "+e.payee+" unpaid in "+sender()+". Remove the "+money(-e.amount)+" expense"+(c==null?"":" from "+c.name)+" too?")
+            // Hunt 24 C3/E1: say when the bank has confirmed it (reconciled, or matched to a statement row): removing it changes that.
+            .setMessage("You marked "+e.payee+" unpaid in "+sender()+". Remove the "+money(-e.amount)+" expense"+(c==null?"":" from "+c.name)+" too?"
+                +(e.reconciled?"\n\nIt's reconciled: removing it changes the balance you checked against your bank.":!Budget.statementPayee(e).isEmpty()?"\n\nYour bank statement shows this payment ("+Budget.statementPayee(e)+"): if it was really paid, keep it.":""))
             .setNegativeButton("Keep it",(d,w)->setResult(RESULT_OK,reply("Marked unpaid. MyBudget kept the expense.")))
             .setPositiveButton("Remove",(d,w)->{try{reload();}catch(IllegalStateException ex){Toast.makeText(this,ex.getMessage(),Toast.LENGTH_LONG).show();return;}
                 Budget.Entry now=budget.external(id);if(now==null){setResult(RESULT_OK,reply("Marked unpaid. The expense was already gone from MyBudget."));return;}

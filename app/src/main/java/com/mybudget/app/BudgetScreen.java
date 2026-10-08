@@ -57,7 +57,10 @@ final class BudgetScreen extends Ui {
             new int[]{main.primary,main.darkTheme?Color.rgb(96,66,168):Color.rgb(88,58,166)});g.setCornerRadius(dp(20));c.setBackground(g);
         c.setPadding(dp(18),dp(14),dp(18),dp(16));c.setElevation(main.darkTheme?0:dp(3));
         TextView title=label("TO BUDGET",11,Color.WHITE,true);title.setLetterSpacing(0.12f);title.setAlpha(0.85f);c.addView(title);
-        long ready=main.budget.spendable(main.month);TextView figure=label(money(ready),34,Color.WHITE,true);c.addView(figure);
+        // The figure: green above zero, red below, white at zero (and with Hide amounts, so the colour doesn't tell). The card is
+        // dark indigo in both themes, so it takes the dark theme's brighter green and red, which stay readable on it.
+        long ready=main.budget.spendable(main.month);int tone=main.hideAmounts||ready==0?Color.WHITE:ready>0?Color.rgb(117,219,177):Color.rgb(255,142,150);
+        TextView figure=label(money(ready),34,tone,true);c.addView(figure);
         // Hunt 23 M3: counted only from the figure this month had (another tab may have changed the month since it was shown).
         Long before=main.shownReady;boolean sameMonth=main.month.equals(main.shownMonth)&&main.month.equals(main.shownReadyMonth);main.shownReady=ready;main.shownReadyMonth=main.month;
         if(motion()&&sameMonth&&before!=null&&before!=ready&&!main.hideAmounts){figure.setContentDescription(money(ready));
@@ -69,7 +72,32 @@ final class BudgetScreen extends Ui {
         boolean allAssigned=ready==0&&!main.budget.accounts.isEmpty()&&!main.budget.categories.isEmpty();long future=main.budget.futureAssigned(main.month);
         TextView line=label(allAssigned?"Every dollar has a job 🎉":future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",13,Color.WHITE,allAssigned);
         line.setAlpha(allAssigned?1f:0.9f);c.addView(line);
+        TextView how=label("How it's worked out ›",12,Color.WHITE,false);how.setAlpha(0.75f);how.setPadding(0,dp(4),0,0);c.addView(how);c.setOnClickListener(v->readyBreakdown());
         if(allAssigned&&sameMonth&&before!=null&&before!=0){line.setPivotX(0);pop(line);Burst.over(c,main.darkTheme);confirm(c);}}
+    /** How To budget is worked out (Budget.readyParts): parts that add up to it exactly, then this month's income and Assigned. */
+    void readyBreakdown(){YearMonth m=main.month;long[] p=main.budget.readyParts(m);long ready=main.budget.spendable(m);
+        String name=m.format(DateTimeFormatter.ofPattern("MMMM yyyy"));LinearLayout f=form();
+        f.addView(label("To budget is the money in your accounts that no category holds yet.",13,main.muted,false));
+        partRow(f,"In your cash and bank accounts"+(m.isBefore(YearMonth.now())?" at the end of "+name:""),p[0],false);
+        partRow(f,"Held in categories",-p[1],false);
+        boolean cards=false;for(Budget.Account a:main.budget.accounts)cards|=a.credit();
+        if(cards||p[2]!=0)partRow(f,"Set aside for card payments",-p[2],false);
+        if(p[3]!=0)partRow(f,"Card payments below zero (paid beyond what was set aside, or card credit)",p[3],false); // hunt 24 A1
+        if(p[4]!=0)partRow(f,"Overspent in cash this month (comes off next month's To budget)",p[4],false);
+        if(p[5]!=0)partRow(f,"Assigned in later months",-p[5],false);
+        View rule=new View(main);rule.setBackgroundColor(tint(main.ink,main.darkTheme?60:40));LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(1));rp.setMargins(0,dp(6),0,dp(2));f.addView(rule,rp);
+        partRow(f,"To budget",ready,true);
+        long income=main.budget.income(m),assigned=main.budget.assignedIn(m);
+        TextView month=label("",13,main.muted,false);month.setText(main.hideAmounts?"In "+name+": income "+money(income)+", assigned "+money(assigned)+".":tint2("In "+name+": income "+money(income)+", assigned "+money(assigned)+".",money(income),amountColour(income),money(assigned),amountColour(assigned)));
+        month.setPadding(0,dp(10),0,0);f.addView(month);
+        ScrollView scroll=new ScrollView(main);scroll.addView(f);
+        new AlertDialog.Builder(main).setTitle("How To budget is worked out").setView(scroll).setPositiveButton("OK",null).show();}
+    /** One line of the To budget sum: its name, and the amount at the end (under it with large text). */
+    private void partRow(LinearLayout f,String name,long amount,boolean total){LinearLayout r=new LinearLayout(main);r.setPadding(0,dp(5),0,dp(5));
+        r.setGravity(Gravity.CENTER_VERTICAL);if(large())r.setOrientation(LinearLayout.VERTICAL);
+        TextView n=label(name,total?16:14,main.ink,total),v=label(money(amount),total?18:14,main.hideAmounts?main.ink:amountColour(amount),true); // hunt 24 A2: no sign shown by colour with Hide amounts
+        r.addView(n,large()?new LinearLayout.LayoutParams(-1,-2):new LinearLayout.LayoutParams(0,-2,1));if(!large()){v.setGravity(Gravity.END);v.setPadding(dp(12),0,0,0);}
+        r.addView(v);f.addView(r);}
     private int overspent(){int n=0;for(Budget.Category c:main.budget.categories)if(main.budget.toCover(c,main.month)>0)n++;return n;}
     void categoryCard(Budget.Category c){
         LinearLayout row=card();
@@ -115,7 +143,9 @@ final class BudgetScreen extends Ui {
         else if(available<0)row.addView(label("Below zero by a refund or credit on the card: it carries on, with nothing to cover",12,main.amber,false));
         if(c.payment()){Budget.Account card=main.budget.account(c.cardAccount);
             if(card!=null){long owed=-main.budget.balance(card,false);
-                row.addView(greyLine("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),owed>0?money(owed):"",outColour(owed),12));}}
+                row.addView(greyLine("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),owed>0?money(owed):"",outColour(owed),12));}
+            long charges=main.budget.cardCharges(c,main.month); // more debt, not overspending: assign money here to pay it off
+            if(charges!=0)row.addView(greyLine("Interest and fees this month: "+money(charges),money(charges),outColour(charges),12));}
         row.setOnClickListener(v->categoryDetails(c));
     }
     void plan(){
@@ -212,16 +242,26 @@ final class BudgetScreen extends Ui {
         List<Budget.Category> sources=new ArrayList<>();
         for(Budget.Category o:main.budget.categories)if(o!=c&&main.budget.available(o,main.month)>0)sources.add(o);
         sources.sort((a,b)->Long.compare(main.budget.available(b,main.month),main.budget.available(a,main.month)));
-        long ready=main.budget.spendable(main.month);List<String> labels=new ArrayList<>();if(ready>0)labels.add("To budget ("+money(ready)+")");
-        for(Budget.Category o:sources)labels.add(o.name+" ("+money(main.budget.available(o,main.month))+")");
+        // Each choice: where from (null = To budget), the later month whose assignment it is (null = this month), and how much it has.
+        List<String> labels=new ArrayList<>();List<Budget.Category> froms=new ArrayList<>();List<YearMonth> laters=new ArrayList<>();List<Long> has=new ArrayList<>();
+        long ready=main.budget.spendable(main.month);if(ready>0){labels.add("To budget ("+money(ready)+")");froms.add(null);laters.add(null);has.add(ready);}
+        for(Budget.Category o:sources){long a=main.budget.available(o,main.month);labels.add(o.name+" ("+money(a)+")");froms.add(o);laters.add(null);has.add(a);}
+        // Money already assigned in later months (from this month on, while To budget isn't below zero): Budget.coverFromFuture.
+        if(!main.month.isBefore(YearMonth.now())&&ready>=0)for(YearMonth later:main.budget.assignedAfter(main.month).keySet())
+            for(Budget.Category o:main.budget.categories){long back=o==c?0:main.budget.futureCover(o,later);if(back<=0)continue;
+                labels.add(o.name+" in "+later.format(DateTimeFormatter.ofPattern("MMMM"))+" ("+money(back)+" assigned)");froms.add(o);laters.add(later);has.add(back);}
         if(labels.isEmpty()){toast("No category has money to move. Record income or assign money first.");return;}
         new AlertDialog.Builder(main).setTitle("Cover "+money(missing)+" for "+c.name).setItems(labels.toArray(new String[0]),(d,n)->{
-            boolean fromReady=ready>0&&n==0;Budget.Category from=fromReady?null:sources.get(n-(ready>0?1:0));
-            long amount=Math.min(missing,fromReady?ready:main.budget.available(from,main.month));String fromId=fromReady?null:from.id;
+            Budget.Category from=froms.get(n);YearMonth later=laters.get(n);long amount=Math.min(missing,has.get(n));String fromId=from==null?null:from.id;
+            String laterName=later==null?"":later.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
+            String source=from==null?"To budget":later==null?from.name:from.name+"'s money assigned in "+laterName;
+            String note=later==null?"":"\n\n"+from.name+" will have "+money(main.budget.assigned(from,later)-amount)+" assigned in "+laterName+": assign it again when more money comes in.";
             new AlertDialog.Builder(main).setTitle("Cover overspending")
-                .setMessage("Move "+money(amount)+" from "+(fromReady?"To budget":from.name)+" to "+c.name+"?"+(amount<missing?"\n\nThat covers part of it; "+money(missing-amount)+" stays overspent.":""))
+                .setMessage("Move "+money(amount)+" from "+source+" to "+c.name+"?"+(amount<missing?"\n\nThat covers part of it; "+money(missing-amount)+" stays overspent.":"")+note)
                 .setNegativeButton("Cancel",null)
-                    .setPositiveButton("Cover",(d2,w)->main.change(()->{if(fromId==null)main.budget.assign(main.categoryById(id),main.month,amount);else main.budget.move(main.categoryById(fromId),main.categoryById(id),main.month,amount);})).show();
+                    .setPositiveButton("Cover",(d2,w)->main.change(()->{if(fromId==null)main.budget.assign(main.categoryById(id),main.month,amount);
+                        else if(later==null)main.budget.move(main.categoryById(fromId),main.categoryById(id),main.month,amount);
+                        else main.budget.coverFromFuture(main.categoryById(fromId),later,main.categoryById(id),main.month,amount);})).show();
         }).show();
     }
     private void assign(Budget.Category c){

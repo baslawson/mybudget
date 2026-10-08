@@ -11,7 +11,7 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/budget_widget"/>
         </receiver>
         <!-- Planner's "Send paid bills to MyBudget". Open to any app; nothing is saved without the user's tap. -->
-        <activity android:name=".AddExpenseActivity" android:exported="true" android:theme="@style/AppTheme.Overlay" android:excludeFromRecents="true">
+        <activity android:name=".AddExpenseActivity" android:exported="true" android:theme="@style/AppTheme.Overlay" android:excludeFromRecents="true" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"><!-- hunt 24 E9: rotating or a theme change keeps the open dialog and what was typed -->
             <intent-filter><action android:name="com.mybudget.app.action.ADD_EXPENSE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
             <intent-filter><action android:name="com.mybudget.app.action.PAYMENT_UNDONE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
         </activity>

@@ -11,6 +11,7 @@ import java.util.*;
 /** The transaction, transfer and split forms, upcoming transactions' actions and photo viewing, shared by the screens. */
 final class TransactionForms extends Ui {
     TransactionForms(MainActivity main){super(main);}
+    private boolean reconciledOk; // the reconciled warning was answered: open the form
     private void viewPhoto(String name){android.graphics.Bitmap bm=main.photoBitmap(name,1600);
         if(bm==null){toast("The photo isn't on this phone.");return;}ImageView img=new ImageView(main);img.setImageBitmap(bm);
         img.setAdjustViewBounds(true);img.setContentDescription("Photo of this transaction");new AlertDialog.Builder(main).setView(img)
@@ -28,6 +29,8 @@ final class TransactionForms extends Ui {
      * becomes upcoming: it waits in Transactions until its day, when the user enters or skips it.
      */
     void transaction(Budget.Entry old,Budget.Scheduled sched){
+        if(old!=null&&old.reconciled&&!reconciledOk){reconciledWarning(old,()->{reconciledOk=true;try{transaction(old,sched);}finally{reconciledOk=false;}});return;}
+        if(old!=null&&main.budget.cardCharge(old)){cardCharge(old.account,old);return;}
         if(main.budget.accounts.isEmpty()){toast("Add an account first.");main.accountsScreen.addAccount();return;}
         if(old!=null&&old.transfer()){editTransfer(old);return;}
         if(old!=null&&main.budget.account(old.account)!=null&&main.budget.account(old.account).tracking()){trackingEntry(old.account,old);return;}
@@ -72,6 +75,10 @@ final class TransactionForms extends Ui {
             Budget.Category pc=main.budget.category(p.category);if(pc!=null&&!pc.payment()&&!categories.contains(pc))categories.add(pc);} // a part's hidden category stays choosable
         TextView splitSummary=label("",13,main.ink,false);categoryFields.addView(splitSummary);
         Button splitButton=button("Split into categories",()->{});splitButton.setBackground(bg(Color.TRANSPARENT));splitButton.setTextSize(13);categoryFields.addView(splitButton);
+        // A card transaction that is really the card's interest or a fee (an imported one, say) becomes one (cardCharge).
+        Budget.Account onCard=old==null?null:main.budget.account(old.account);
+        if(onCard!=null&&onCard.credit()&&!old.split()){Button charge=button("It's interest or a fee on "+onCard.name,()->{for(AlertDialog ed:new ArrayList<>(main.editors))ed.dismiss();cardCharge(old.account,old);});
+            charge.setBackground(bg(Color.TRANSPARENT));charge.setTextSize(13);categoryFields.addView(charge);}
         boolean[] categoryChosen={old!=null||sched!=null};
         Runnable[] showPreview={()->{}},showCategories={null};
         showCategories[0]=()->{shown.clear();shown.addAll(top);
@@ -97,9 +104,13 @@ final class TransactionForms extends Ui {
             if(old!=null||categoryChosen[0]||last==null)return;
             // Hunt 23 M4: no category is income only for money in, outside a tracking account (a loan's payment has none either),
             // and never over a kind the user picked (or typed a sign for).
-            if(last.category.isEmpty()){Budget.Account la=main.budget.account(last.account);
-                if(last.amount>0&&(la==null||!la.tracking())&&!kind.picked)kind.set(1);return;}int i=categories.indexOf(main.budget.category(last.category));if(i<0)return;
-            cat[0]=i;showCategories[0].run();if(kind.selected()==1&&!kind.picked)kind.set(last.amount<0?0:2);showPreview[0].run();});
+            // Hunt 24 B8: a payee set to always one category gets it even when its last transaction had none (income).
+            String set=main.budget.payeeCategories.get(payee.getText().toString().trim().toLowerCase(Locale.ROOT));boolean fixed=set!=null&&!set.isEmpty();
+            if(last.category.isEmpty()&&!fixed){Budget.Account la=main.budget.account(last.account);
+                if(last.amount>0&&(la==null||!la.tracking())&&!kind.picked)kind.set(1);return;}
+            // The payee's suggestion: its usual category (one odd purchase doesn't change it), a fixed one, or none (Settings > Payees).
+            String usual=main.budget.suggestedCategory(payee.getText().toString());if(usual==null)return;int i=categories.indexOf(main.budget.category(usual));if(i<0)return;
+            cat[0]=i;showCategories[0].run();if(kind.selected()==1&&!kind.picked)kind.set(last.amount<0||last.category.isEmpty()?0:2);showPreview[0].run();});
         // 3. When and where: Today, Yesterday or a picked date; the account as chips (a new one starts on the account used last).
         section(f,"When and where");
         LinearLayout hidden=column();EditText day=dateField(hidden,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);
@@ -196,7 +207,7 @@ final class TransactionForms extends Ui {
             Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
                 e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
-            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);
+            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
                 if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);};
         // After a save: which account to start on next time, and a short "Saved" line.
         Runnable saved=()->{if(adding)main.getSharedPreferences("appearance",0).edit().putString("last_account",accounts.get(acc[0]).id).apply();
@@ -289,6 +300,32 @@ final class TransactionForms extends Ui {
             .setMessage("Account and category balances will be recalculated.").setNegativeButton("Cancel",null)
             .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo(e.transfer()?"Transfer deleted":"Transaction deleted",()->{if(!main.budget.entries.removeIf(t->t.id.equals(e.id)))throw new IllegalArgumentException("That transaction no longer exists.");}))
                 for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
+    /** A reconciled transaction is part of a balance checked against the bank: ask before opening it. */
+    private void reconciledWarning(Budget.Entry e,Runnable open){Budget.Account a=main.budget.account(e.account);String when=a==null||a.reconciled.isEmpty()?"":" on "+pretty(a.reconciled);
+        AlertDialog warning=new AlertDialog.Builder(main).setTitle("This transaction is reconciled")
+            .setMessage("It's part of the balance you checked against your bank"+when+". Changing its amount, date or account, or deleting it, changes that balance. Untick Cleared to unlock it for good.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Change it",(d,w)->open.run()).create();
+        main.editors.add(warning);warning.setOnDismissListener(v->main.editors.remove(warning));warning.show();} // Hunt 24 C1: a reload closes it with the forms
+    /**
+     * Interest or a fee on card [cardId] (or its refund), in the card's payment category: more debt, nothing overspent (Budget.cardCharge).
+     * [old]: one to edit, or a card transaction to turn into one (it keeps its id, Planner link and statement text).
+     */
+    void cardCharge(String cardId,Budget.Entry old){Budget.Account card=main.budget.account(cardId);Budget.Category pc=card==null?null:main.budget.paymentCategory(card);
+        if(pc==null){toast("Only a credit card has interest and fees.");return;}
+        if(card.closed){toast(card.name+" is closed. Reopen it in Accounts first.");return;} // hunt 24 C7: a closed card's debt would be out of sight
+        LinearLayout f=form();f.addView(label("Interest, an annual fee or a late fee on "+card.name+". It adds to what you owe, like the debt the card started with: no category pays for it and nothing is overspent. Assign money to "+pc.name+" (a payoff target helps) to pay it off.",13,main.muted,false));
+        Choice kind=choice(f,new String[]{"− Interest or fee","↩ Refunded"},new int[]{main.red,main.green},old!=null&&old.amount>0?1:0);
+        EditText amount=field(f,"Amount ("+code()+")",true);if(old!=null)amount.setText(decimal(Math.abs(old.amount)));
+        AutoCompleteTextView payee=suggestField(f,"What it is",()->Arrays.asList("Interest","Annual fee","Late fee","Cash advance fee","Foreign transaction fee"));payee.setText(old!=null?old.payee:"Interest",false);
+        EditText day=dateField(f,old!=null?old.date:LocalDate.now().toString());EditText memo=field(f,"Note (optional)",false);if(old!=null)memo.setText(old.memo);
+        CheckBox cleared=new CheckBox(main);cleared.setText("Cleared");cleared.setMinHeight(dp(48));cleared.setChecked(old!=null&&old.cleared);f.addView(cleared);
+        if(old!=null)f.addView(button("Delete",()->delete(old)));
+        dialog(old==null?"Interest or fee on "+card.name:"Interest or fee",f,()->{
+            if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile.");
+            Budget.Entry e=new Budget.Entry(required(payee),pc.id,card.id,date(day),Budget.cents(amount.getText().toString())*(kind.selected()==0?-1:1));
+            e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();
+            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.flag=old.flag;e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;}
+            main.budget.validate(e);if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});}
     void transfer(){editTransfer(null,null,0);}
     /** A card payment: a transfer from a cash account to the card, for what's set aside (or what's owed, if less). */
     void payCard(String id){Budget.Account card=main.budget.account(id);if(card==null)return;
@@ -316,10 +353,11 @@ final class TransactionForms extends Ui {
         cleared.setText("Cleared in both accounts");f.addView(cleared);if(old!=null){amount.setText(decimal(-old.amount));
             cleared.setChecked(old.cleared);f.addView(button("Delete transfer",()->delete(old)));}
         dialog(old!=null?"Edit transfer":toIndex>=0?"Pay "+main.budget.account(toId).name:"Transfer money",f,()->{
+            if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile."); // hunt 24 C1
             Budget.Account a=accounts.get(from.getSelectedItemPosition()),b=accounts.get(to.getSelectedItemPosition());
             boolean out=!a.tracking()&&b.tracking();if(out&&cats.isEmpty())throw new IllegalArgumentException("Add a category first.");
             Budget.Entry e=new Budget.Entry("Transfer to "+b.name,out?cats.get(Math.max(0,category.getSelectedItemPosition())).id:"",a.id,date(day),-Budget.cents(amount.getText().toString()));
-            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);}
+            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account)&&e.destination.equals(old.destination);}
             main.budget.validate(e);if(old!=null)e.id=old.id;if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});
 
     }
@@ -334,7 +372,7 @@ final class TransactionForms extends Ui {
         payee.setText(old.payee,false);amount.setText(decimal(old.amount));memo.setText(old.memo);cleared.setChecked(old.cleared);
         f.addView(button("Delete transaction",()->delete(old)));
         dialog("Edit transaction",f,()->{Budget.Entry e=new Budget.Entry(required(payee),"",accountId,date(day),Budget.parse(amount.getText().toString()));
-            e.id=old.id;e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();e.photo=old.photo;
+            e.id=old.id;e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;
             e.bankPayee=Budget.statementPayee(old);main.budget.validate(e);
             if(!put(old.id,e))throw new IllegalArgumentException("This transaction was removed meanwhile.");});
     }
