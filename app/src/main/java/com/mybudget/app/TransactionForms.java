@@ -112,7 +112,7 @@ final class TransactionForms extends Ui {
             YearMonth m=YearMonth.from(LocalDate.parse((String)day.getTag()));long now=main.budget.available(c,m);
             if(old!=null&&old.category.equals(c.id)&&YearMonth.from(LocalDate.parse(old.date)).equals(m))now-=old.amount; // editing: without its old amount
             long after=now+(k==0?-typed:typed);preview.setVisibility(View.VISIBLE);
-            if(typed==0){preview.setText(c.name+" has "+money(now)+" available");preview.setTextColor(main.muted);}
+            if(typed==0){preview.setTextColor(main.muted);preview.setText(tint(c.name+" has "+money(now)+" available",money(now),amountColour(now)));}
             else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(main.green);}
             else{preview.setText(c.name+" will be overspent by "+money(-after));preview.setTextColor(main.red);}};
         // 4. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.

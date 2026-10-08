@@ -86,7 +86,7 @@ final class ReportsScreen extends Ui {
         YearMonth[] r={YearMonth.of(year,1),YearMonth.of(year,12)};
         body.addView(heading("Top "+Budget.TOP+" categories",16,main.ink));yearRows(body,y.top,r);
         body.addView(heading("By group",16,main.ink));yearRows(body,y.groups,r);
-        if(y.refunds>0)body.addView(label("Refunds beyond spending (categories that got more back than they spent): "+money(y.refunds)+", taken off the year's spending.",12,main.muted,false));
+        if(y.refunds>0)body.addView(greyLine("Refunds beyond spending (categories that got more back than they spent): "+money(y.refunds)+", taken off the year's spending.",money(y.refunds),amountColour(y.refunds),12));
     }
     private void yearRows(LinearLayout body,List<Budget.Slice> slices,YearMonth[] r){
         if(slices.isEmpty()){quiet(body,"📊","No spending this year.");return;}
@@ -142,7 +142,8 @@ final class ReportsScreen extends Ui {
             row.setOnClickListener(v->sliceTransactions(s,r));body.addView(row);}
         // Both views leave out categories that got back more than they spent: their refunds come off the total here, as in Spending.
         long refunds=main.budget.refunds(r[0],r[1]);
-        if(refunds>0)body.addView(label("Refunds beyond spending (categories that got more back than they spent): "+money(refunds)+". Net spending: "+money(total-refunds)+".",12,main.muted,false));
+        if(refunds>0){TextView note=label("",12,main.muted,false);String text="Refunds beyond spending (categories that got more back than they spent): "+money(refunds)+". Net spending: "+money(total-refunds)+".";
+            note.setText(tint2(text,money(refunds),amountColour(refunds),money(total-refunds),outColour(total-refunds)));body.addView(note);}
         body.addView(label((main.byGroup?"Groups":"Categories")+" beyond the biggest "+Budget.SLICES+" are in Other. Tap a row for its transactions.",11,main.muted,false));
     }
     /** A slice's transactions in the period (Transactions with a category and date filter); a group or Other asks which category first. */

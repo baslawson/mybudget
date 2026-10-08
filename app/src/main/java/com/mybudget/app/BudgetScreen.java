@@ -107,14 +107,14 @@ final class BudgetScreen extends Ui {
         if(pace!=null)row.addView(label("Spending faster than the month: "+pace.spent+"% spent, "+pace.elapsed+"% of the month gone",12,main.amber,false)); // the current month only
         if(!c.note.isEmpty())row.addView(label(c.note,12,main.muted,false));
         long upcoming=main.budget.upcoming(c,main.month);
-        if(upcoming>0)row.addView(label("Upcoming bills this month: "+money(upcoming),12,main.muted,false));
+        if(upcoming>0)row.addView(greyLine("Upcoming bills this month: "+money(upcoming),money(upcoming),outColour(upcoming),12));
         long onCredit=main.budget.creditOverspent(c,main.month);
         if(available<0&&onCredit>=-available)row.addView(label("Overspent on a credit card by "+money(-available)+": it becomes card debt unless you cover it",12,main.amber,true));
         else if(cover>0)row.addView(label("Overspent by "+money(cover)+" - tap to cover",12,main.red,true));
         else if(available<0)row.addView(label("Below zero by a refund or credit on the card: it carries on, with nothing to cover",12,main.amber,false));
         if(c.payment()){Budget.Account card=main.budget.account(c.cardAccount);
             if(card!=null){long owed=-main.budget.balance(card,false);
-                row.addView(label("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),12,main.muted,false));}}
+                row.addView(greyLine("Pays "+card.name+(owed>0?" · owed "+money(owed):" · paid off"),owed>0?money(owed):"",outColour(owed),12));}}
         row.setOnClickListener(v->categoryDetails(c));
     }
     void plan(){
@@ -224,11 +224,11 @@ final class BudgetScreen extends Ui {
         }).show();
     }
     private void assign(Budget.Category c){
-        LinearLayout f=form();f.addView(label(money(main.budget.spendable(main.month))+" to budget",16,main.blue,true));
+        LinearLayout f=form();long spare=main.budget.spendable(main.month);TextView head=label("",16,main.blue,true);head.setText(tint(money(spare)+" to budget",money(spare),amountColour(spare)));f.addView(head);
         long now=main.budget.assigned(c,main.month);
-        f.addView(label("Assigned this month: "+money(now)+". A positive amount adds money; a negative one returns it.",13,main.muted,false));
+        f.addView(greyLine("Assigned this month: "+money(now)+". A positive amount adds money; a negative one returns it.",money(now),amountColour(now),13));
         EditText amount=field(f,"Amount ("+code()+")",true);TextView result=label("",13,main.blue,true);f.addView(result);
-        onText(amount,()->{try{result.setText("Assigned becomes "+money(now+Budget.parse(amount.getText().toString())));}catch(Exception e){result.setText("");}});
+        onText(amount,()->{try{long after=now+Budget.parse(amount.getText().toString());result.setText(tint("Assigned becomes "+money(after),money(after),amountColour(after)));}catch(Exception e){result.setText("");}});
         // Quick amounts: each fills in the change to this month's Assigned.
         f.addView(label("Quick amounts",12,main.muted,true));YearMonth last=main.month.minusMonths(1);
         long lastAssigned=main.budget.assigned(c,last),spentLast=main.budget.spent(c,last),average=main.budget.averageSpent(c,main.month),averageAssigned=main.budget.averageAssigned(c,main.month);

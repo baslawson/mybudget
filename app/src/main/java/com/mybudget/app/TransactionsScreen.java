@@ -197,7 +197,7 @@ final class TransactionsScreen extends Ui {
                 payee.setContentDescription(e.payee+", "+main.budget.flagLabel(e.flag)+" flag");}middle.addView(payee);
             if(!e.approved)middle.addView(label("To review · imported",12,main.amber,true));
             TextView where=label(categoryName(e)+" · "+main.budget.account(e.account).name,12,main.muted,false);where.setPadding(0,dp(2),0,0);middle.addView(where);
-            if(running!=null&&running.containsKey(e.id))middle.addView(label("Balance "+money(running.get(e.id)),12,main.muted,false));
+            if(running!=null&&running.containsKey(e.id)){long bal=running.get(e.id);middle.addView(greyLine("Balance "+money(bal),money(bal),amountColour(bal),12));}
             if(!e.memo.isEmpty())middle.addView(label(e.memo,12,main.muted,false));
             if(!e.photo.isEmpty())middle.addView(label("📎 Photo attached",12,main.blue,false));
             LinearLayout right=column();right.setGravity(android.view.Gravity.END);

@@ -123,6 +123,8 @@ class Ui {
     static CharSequence tint(CharSequence text,String part,int colour){android.text.SpannableString s=new android.text.SpannableString(text);
         int at=part.isEmpty()?-1:text.toString().indexOf(part);
         if(at>=0)s.setSpan(new android.text.style.ForegroundColorSpan(colour),at,at+part.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);return s;}
+    /** A quiet grey line of [size] with the [amount] in it coloured ([colour]: amountColour or outColour). */
+    TextView greyLine(String text,String amount,int colour,int size){TextView t=label("",size,main.muted,false);t.setText(tint(text,amount,colour));return t;}
     /** A line with two amounts, each coloured: [a] in [ca], then [b] (searched after [a], so equal amounts work) in [cb]. */
     static CharSequence tint2(String text,String a,int ca,String b,int cb){int i=text.indexOf(a);int j=i<0?-1:text.indexOf(b,i+a.length());
         android.text.SpannableString s=new android.text.SpannableString(text);

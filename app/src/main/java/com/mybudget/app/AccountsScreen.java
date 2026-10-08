@@ -32,7 +32,7 @@ final class AccountsScreen extends Ui {
             long balance=main.budget.balance(a,false);
             TextView worth=label("",28,main.ink,true);
             worth.setText(a.liability?(balance<0?tint("Owed "+money(-balance),money(-balance),outColour(-balance)):"Paid off"):tint(money(balance),money(balance),amountColour(balance)));c.addView(worth);
-            if(a.liability&&(a.rate>0||a.payment>0))c.addView(label(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),13,main.muted,false));
+            if(a.liability&&(a.rate>0||a.payment>0))c.addView(greyLine(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),money(a.payment),outColour(a.payment),13));
             String id=a.id;c.addView(button("Update balance",()->updateBalance(id)));
             if(a.liability)c.addView(button("Payoff planner",()->payoffPlanner(id)));
             pair(c,button("View transactions",()->{main.clearFilters();main.accountFilter=id;main.tab="Spending";main.render();}),button("Edit account",()->editAccount(id)));}
@@ -89,13 +89,13 @@ final class AccountsScreen extends Ui {
     private void editAccount(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;LinearLayout f=form();f.addView(label("Name",12,main.muted,true));
         EditText name=field(f,"Account name",false);name.setText(a.name);
-        f.addView(label("Opened "+pretty(a.date)+" with "+money(a.opening)+". These stay fixed so past months don't change.",13,main.muted,false));
+        f.addView(greyLine("Opened "+pretty(a.date)+" with "+money(a.opening)+". These stay fixed so past months don't change.",money(a.opening),amountColour(a.opening),13));
         long balance=main.budget.balance(a,false);
         if(balance==0)f.addView(button("Close account",()->new AlertDialog.Builder(main).setTitle("Close "+a.name+"?")
             .setMessage("It moves to Closed accounts and isn't offered for new transactions. Its history stays, and you can reopen it.")
             .setNegativeButton("Cancel",null)
             .setPositiveButton("Close account",(d,w)->{if(main.change(()->main.budget.close(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
-        else f.addView(label("To close it, first move its "+money(balance)+" to another account: an account closes at a zero balance.",13,main.muted,false));
+        else f.addView(greyLine("To close it, first move its "+money(balance)+" to another account: an account closes at a zero balance.",money(balance),amountColour(balance),13));
         if(!main.budget.usedAccount(a))f.addView(button("Delete account",()->new AlertDialog.Builder(main).setTitle("Delete "+a.name+"?")
             .setMessage("It has no transactions. Its opening balance of "+money(a.opening)+" leaves your plan.").setNegativeButton("Cancel",null)
             .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Account deleted",()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
@@ -119,7 +119,7 @@ final class AccountsScreen extends Ui {
     /** A tracking account's value update: the new balance (what's owed, for a debt) as a cleared transaction for the difference. */
     private void updateBalance(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;long now=main.budget.balance(a,false);LinearLayout f=form();
-        f.addView(label((a.liability?"Owed now: "+money(-now):"Balance now: "+money(now))+". Enter the figure from your statement for the date below; the difference from its balance on that date is recorded as a balance update. It doesn't touch your budget.",13,main.muted,false));
+        f.addView(greyLine((a.liability?"Owed now: "+money(-now):"Balance now: "+money(now))+". Enter the figure from your statement for the date below; the difference from its balance on that date is recorded as a balance update. It doesn't touch your budget.",a.liability?money(-now):money(now),a.liability?outColour(-now):amountColour(now),13));
         EditText value=field(f,a.liability?"Amount owed ("+code()+")":"What it's worth ("+code()+")",true);f.addView(label("Date",12,main.muted,true));
         EditText day=dateField(f,LocalDate.now().toString());
         dialog("Update "+a.name,f,()->{long v=Budget.parse(value.getText().toString());
