@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="MyBudget" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/AppTheme" android:allowBackup="false" android:supportsRtl="true">
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"><!-- hunt 25 C1: rotating or resizing (split screen) keeps open forms and what was typed; onConfigurationChanged draws the screen again -->
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <!-- App shortcuts: Add transaction, Budget, Transactions (the MainActivity.OPEN extra, as the widget). -->
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>

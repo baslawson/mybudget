@@ -174,9 +174,9 @@ final class TransactionsScreen extends Ui {
             ep.setMargins(dp(8),0,0,0);buttons.addView(edit,ep);row.addView(buttons);f.addView(row);}
         if(list.size()>100)f.addView(label("And "+(list.size()-100)+" more: Approve all includes them.",12,main.muted,false));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);
-        shown[0]=new AlertDialog.Builder(main).setTitle(count(list.size(),"transaction","transactions")+" to review").setView(scroll)
+        shown[0]=tracked(new AlertDialog.Builder(main).setTitle(count(list.size(),"transaction","transactions")+" to review").setView(scroll)
             .setNegativeButton("Close",null).setPositiveButton("Approve all",(x,w)->{int[] n={0};
-            if(main.change(()->n[0]=main.budget.approveAll()))toast(count(n[0],"transaction","transactions")+" approved.");}).show();
+            if(main.change(()->n[0]=main.budget.approveAll()))toast(count(n[0],"transaction","transactions")+" approved.");}));
     }
     private Budget.Entry entryById(String id){for(Budget.Entry e:main.budget.entries)if(e.id.equals(id))return e;
         throw new IllegalArgumentException("That transaction no longer exists.");}

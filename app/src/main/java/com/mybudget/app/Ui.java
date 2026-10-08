@@ -116,9 +116,9 @@ class Ui {
         onText(e,paint);paint.run();}
     // Amounts everywhere: positive in the green Budget uses for Available, negative in red, zero grey. Target figures keep
     // their own colours (amber while a target is short).
-    int amountColour(long cents){return cents>0?main.green:cents<0?main.red:main.muted;} // zero: quiet grey
+    int amountColour(long cents){return main.hideAmounts?main.ink:cents>0?main.green:cents<0?main.red:main.muted;} // zero: quiet grey
     /** Money going out shown without a minus (Spending, Money out, a card's Owed): red when there is some. */
-    int outColour(long cents){return cents>0?main.red:cents<0?main.green:main.muted;}
+    int outColour(long cents){return main.hideAmounts?main.ink:cents>0?main.red:cents<0?main.green:main.muted;}
     /** [text] with the last [part] in it (an amount inside a line, "Assigned A$40.00") shown in [colour]. The last (hunt 23): the amount
      *  ends the line, and a payee before it may hold the same text ("REFUND $20.00  A$20.00"). */
     static CharSequence tint(CharSequence text,String part,int colour){android.text.SpannableString s=new android.text.SpannableString(text);
@@ -221,6 +221,9 @@ class Ui {
         f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;
     }
     void onText(EditText e,Runnable changed){e.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int c,int f){}public void onTextChanged(CharSequence s,int a,int b,int c){changed.run();}public void afterTextChanged(Editable x){}});}
+    /** Hunt 25 C7: shows [b]'s dialog as one of main.editors, so data read in meanwhile (a save from Planner) closes it with the
+     * forms instead of leaving it on old figures (Cover's amounts, a category's or upcoming transaction's actions, Review). */
+    AlertDialog tracked(AlertDialog.Builder b){AlertDialog d=b.create();main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));d.show();return d;}
     void toast(String s){Toast.makeText(main,s,Toast.LENGTH_LONG).show();}
     /** Large text: a dialog's three buttons stack and the last is cut off, so a third action goes into the form as a button. */
     boolean large(){return main.getResources().getConfiguration().fontScale>=1.3f;}

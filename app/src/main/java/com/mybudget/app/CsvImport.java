@@ -33,21 +33,42 @@ public final class CsvImport {
         return parse(text);
     }
     private static final Pattern OFX=Pattern.compile("(?i)<OFX>");
+    /** Hunt 25 B5: a file's text: UTF-8 (what MyBudget writes), UTF-16 with its byte order mark (Excel's "Unicode text"), else
+     * Windows-1252 (an OFX 1 file's CHARSET:1252, a Latin-1 CSV), so "CAFÉ" and "£12.50" stay readable instead of turning into
+     * replacement marks. */
+    public static String decode(byte[] b){
+        if(b.length>=2&&(b[0]==(byte)0xFF&&b[1]==(byte)0xFE||b[0]==(byte)0xFE&&b[1]==(byte)0xFF))return new String(b,java.nio.charset.StandardCharsets.UTF_16);
+        try{return java.nio.charset.StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(b)).toString();}
+        catch(java.nio.charset.CharacterCodingException e){return new String(b,java.nio.charset.Charset.forName("windows-1252"));}}
     /** RFC 4180 rows: quoted fields may hold the separator, quotes ("") and line breaks. A leading BOM is ignored. The separator is a comma, or a semicolon or tab when the first line has more of those. */
     public static List<List<String>> parse(String text){
         if(text.startsWith("﻿"))text=text.substring(1);char sep=separator(text);
         List<List<String>> rows=new ArrayList<>();List<String> row=new ArrayList<>();StringBuilder cell=new StringBuilder();boolean quoted=false;
         for(int i=0;i<text.length();i++){char c=text.charAt(i);
             if(quoted){if(c=='"'){if(i+1<text.length()&&text.charAt(i+1)=='"'){cell.append('"');i++;}else quoted=false;}else cell.append(c);continue;}
-            if(c=='"')quoted=true;else if(c==sep){row.add(cell.toString().trim());cell.setLength(0);}
+            // Hunt 25 B3: a quote opens quoting only at the start of a field (RFC 4180); inside one (BUNNINGS 12" SAW) it's just text.
+            if(c=='"'&&cell.toString().trim().isEmpty()){cell.setLength(0);quoted=true;}else if(c==sep){row.add(cell.toString().trim());cell.setLength(0);}
             else if(c=='\n'||c=='\r'){if(c=='\r'&&i+1<text.length()&&text.charAt(i+1)=='\n')i++;row.add(cell.toString().trim());cell.setLength(0);if(!(row.size()==1&&row.get(0).isEmpty()))rows.add(row);row=new ArrayList<>();}
             else cell.append(c);}
         if(cell.length()>0||!row.isEmpty()){row.add(cell.toString().trim());if(!(row.size()==1&&row.get(0).isEmpty()))rows.add(row);}
         return rows;
     }
-    /** The separator the first line (outside quotes) uses most: comma (also when none is there), semicolon or tab. */
-    static char separator(String text){int commas=0,semis=0,tabs=0;boolean quoted=false;
-        for(int i=0;i<text.length();i++){char c=text.charAt(i);if(c=='"')quoted=!quoted;else if(!quoted){if(c=='\n'||c=='\r'){if(commas+semis+tabs>0)break;continue;}if(c==',')commas++;else if(c==';')semis++;else if(c=='\t')tabs++;}}
+    /**
+     * The separator the first line (outside quotes) uses most: comma (also when none is there), semicolon or tab. Hunt 25 B7: one
+     * the next lines (up to 5) don't all have as often is passed over for one they do (a payee "PAYPAL;EBAY;AU" in a comma file).
+     * Quotes count as parse() reads them (B3: only at the start of a field).
+     */
+    static char separator(String text){List<int[]> lines=new ArrayList<>();int[] n=new int[3];boolean quoted=false,start=true;
+        for(int i=0;i<text.length()&&lines.size()<6;i++){char c=text.charAt(i);
+            if(quoted){if(c=='"'){if(i+1<text.length()&&text.charAt(i+1)=='"')i++;else quoted=false;}continue;}
+            if(c=='"'&&start){quoted=true;continue;}
+            if(c=='\n'||c=='\r'){if(n[0]+n[1]+n[2]>0)lines.add(n);n=new int[3];start=true;continue;}
+            int k=c==','?0:c==';'?1:c=='\t'?2:-1;if(k>=0){n[k]++;start=true;}else if(c!=' ')start=false;}
+        if(n[0]+n[1]+n[2]>0&&lines.size()<6)lines.add(n);if(lines.isEmpty())return ',';
+        int[] first=lines.get(0);boolean[] steady=new boolean[3];boolean any=false;
+        for(int k=0;k<3;k++){steady[k]=first[k]>0;for(int[] l:lines)if(l[k]!=first[k])steady[k]=false;any|=steady[k];}
+        int commas=first[0],semis=first[1],tabs=first[2];
+        if(lines.size()>1&&any){if(!steady[0])commas=0;if(!steady[1])semis=0;if(!steady[2])tabs=0;}
         return semis>commas&&semis>=tabs?';':tabs>commas&&tabs>semis?'\t':',';}
     /**
      * OFX 1 (SGML, closing tags optional) or 2 (XML) bank and card statements, also Quicken's QFX: each STMTTRN's posted date,
@@ -94,7 +115,8 @@ public final class CsvImport {
         // count as unreadable instead of the whole file being refused.
         List<String> formats=new ArrayList<>(Arrays.asList(DATE_FORMATS));formats.add("M/d/uu");String best=null;int most=0;
         for(String f:formats){int n=0;for(int i=1;i<rows.size();i++)try{date(rows.get(i).get(0),f);n++;}catch(Exception e){}if(n>most){most=n;best=f;}if(n==rows.size()-1)break;}
-        if(best!=null)for(int i=1;i<rows.size();i++){List<String> r=rows.get(i);String iso;try{iso=date(r.get(0),best).toString();}catch(Exception e){iso="";}rows.set(i,Arrays.asList(iso,r.get(1),r.get(2)));}
+        // Hunt 25 B6: a two-digit year that would be in the future is last century's (Quicken writes 12/31/98 for 1998).
+        if(best!=null)for(int i=1;i<rows.size();i++){List<String> r=rows.get(i);String iso;try{LocalDate d=date(r.get(0),best);if(best.endsWith("/uu")&&d.isAfter(LocalDate.now()))d=d.minusYears(100);iso=d.toString();}catch(Exception e){iso="";}rows.set(i,Arrays.asList(iso,r.get(1),r.get(2)));}
         return rows;}
     /**
      * Cents from "$1,234.56", "-12", "(12.00)" (negative), "12.00 DR" (negative) or "12.00 CR"; throws when unreadable.
@@ -177,13 +199,17 @@ public final class CsvImport {
         pairs.sort((a,b)->a[0]!=b[0]?Long.compare(a[0],b[0]):!unmatched.get((int)a[2]).date.equals(unmatched.get((int)b[2]).date)?unmatched.get((int)a[2]).date.compareTo(unmatched.get((int)b[2]).date):Long.compare(a[1],b[1]));
         Budget.Entry[] takes=new Budget.Entry[pending.size()];Set<Budget.Entry> taken=Collections.newSetFromMap(new IdentityHashMap<>());
         for(long[] pr:pairs){Budget.Entry e=unmatched.get((int)pr[2]);if(takes[(int)pr[1]]!=null||taken.contains(e))continue;takes[(int)pr[1]]=e;taken.add(e);}
+        // Rows nothing entered here took: an upcoming transaction due then (within MATCH_DAYS) is entered by the row, dated as the row.
+        // Hunt 25 B2: rows in date order (a statement is often newest first), so each takes the date the transaction has reached by
+        // then; B1: entered with the row's date, as its own date can still be ahead.
+        Integer[] byDate=new Integer[pending.size()];for(int p=0;p<byDate.length;p++)byDate[p]=p;Arrays.sort(byDate,(a,b)->((LocalDate)pending.get(a)[0]).compareTo((LocalDate)pending.get(b)[0]));
+        for(int p:byDate){if(takes[p]!=null)continue;LocalDate d=(LocalDate)pending.get(p)[0];long cents=(Long)pending.get(p)[1];Budget.Scheduled due=null;long best=Long.MAX_VALUE;
+            for(Budget.Scheduled s:budget.scheduled){if(!s.account.equals(account.id)||s.amount!=cents)continue;long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(d,LocalDate.parse(s.next)));if(g<=MATCH_DAYS&&g<best){due=s;best=g;}}
+            if(due!=null)takes[p]=budget.enter(due,"",true,d.toString());}
         for(int p=0;p<pending.size();p++){Object[] row=pending.get(p);LocalDate d=(LocalDate)row[0];long cents=(Long)row[1];String payee=(String)row[2];Budget.Rule rule=(Budget.Rule)row[3];String named=(String)row[4];
             Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             Budget.Entry match=takes[p];
-            if(match!=null){String was=key(match.date,match.amount,match.payee);if(existing.getOrDefault(was,0)>0)existing.merge(was,-1,Integer::sum);}
-            else{Budget.Scheduled due=null;long best=Long.MAX_VALUE; // else an upcoming transaction due then is entered by the row
-                for(Budget.Scheduled s:budget.scheduled){if(!s.account.equals(account.id)||s.amount!=cents)continue;long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(d,LocalDate.parse(s.next)));if(g<=MATCH_DAYS&&g<best){due=s;best=g;}}
-                if(due!=null)match=budget.enter(due,"",true);}
+            if(match!=null&&taken.contains(match)){String was=key(match.date,match.amount,match.payee);if(existing.getOrDefault(was,0)>0)existing.merge(was,-1,Integer::sum);}
             if(match!=null){match.date=d.toString();match.cleared=true;match.bankPayee=payee;budget.changed();r.matched++;r.matches.add(match);continue;}
             if(rule!=null)r.matchedRules++;String bank=payee;payee=named;
             // A statement payee imported before takes that row's payee as it's named now (a rule's rename comes first), and its category.

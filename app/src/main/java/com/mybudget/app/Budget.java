@@ -134,15 +134,23 @@ public final class Budget {
     /** Enters [s]'s current date as a transaction and moves it to its next date (or removes it). */
     public Entry enter(Scheduled s){return enter(s,"",false);}
     /** As enter(s), with a photo and the Cleared tick (a new repeating transaction dated today or earlier). */
-    public Entry enter(Scheduled s,String photo,boolean cleared){Entry e=new Entry(s.payee,s.category,s.account,s.next,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);changed();advance(s);return e;}
+    public Entry enter(Scheduled s,String photo,boolean cleared){return enter(s,photo,cleared,s.next);}
+    /** As enter(s,photo,cleared), dated [date] (hunt 25 B1: a statement row paying it a few days early, before its date comes). */
+    public Entry enter(Scheduled s,String photo,boolean cleared,String date){Entry e=new Entry(s.payee,s.category,s.account,date,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);changed();advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
     /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
-    public List<LocalDate> datesIn(Scheduled s,YearMonth m){List<LocalDate> list=new ArrayList<>();LocalDate d=LocalDate.parse(s.next),end=m.atEndOfMonth();boolean now=m.equals(YearMonth.now());for(int i=0;i<400&&d!=null&&!d.isAfter(end);i++){if(now||!d.isBefore(m.atDay(1)))list.add(d);d=s.after(d);}return list;}
+    public List<LocalDate> datesIn(Scheduled s,YearMonth m){List<LocalDate> list=new ArrayList<>();LocalDate d=LocalDate.parse(s.next),end=m.atEndOfMonth();boolean now=m.equals(YearMonth.now());for(int i=0;list.size()<400&&i<100000&&d!=null&&!d.isAfter(end);i++){if(now||!d.isBefore(m.atDay(1)))list.add(d);d=s.after(d);}return list;}
     /** Upcoming outflows from [c] in [m]: what scheduled bills will take (each part of an upcoming split in its own category). */
     public long upcoming(Category c,YearMonth m){long n=0;for(Scheduled s:planned()){long part=s.amountIn(c.id);if(part<0)n+=-part*datesIn(s,m).size();}return n;}
     /** What Fund targets assigns: the target's need, or enough for this month's upcoming bills, whichever is more. */
-    public long fundNeed(Category c,YearMonth m){return Math.max(needed(c,m),Math.max(0,upcoming(c,m)-available(c,m)));}
+    public long fundNeed(Category c,YearMonth m){return Math.max(needed(c,m),Math.max(0,upcoming(c,m)-availableAfterBills(c,m)));}
+    /**
+     * Hunt 25 A3: [c]'s Available in [m] less the carried money that bills due from this month until [m] will still take (in
+     * a later month, this month's unpaid rent isn't money for next month's). This month and earlier: just Available.
+     */
+    public long availableAfterBills(Category c,YearMonth m){long a=available(c,m);YearMonth now=YearMonth.now();if(!m.isAfter(now))return a;
+        long due=0;for(YearMonth k=now;k.isBefore(m);k=k.plusMonths(1))due+=upcoming(c,k);return a-Math.min(due,carried(c,m));}
     /** The first day in [m] money is needed by: the due day or the first upcoming bill (32 = none, 0 = overdue). */
     public int firstDue(Category c,YearMonth m){int first=dueDay(c,m);for(Scheduled s:planned())if(s.amountIn(c.id)<0)for(LocalDate d:datesIn(s,m))first=Math.min(first,d.isBefore(m.atDay(1))?0:d.getDayOfMonth());return first;}
     /** The target's own due day in [m]: a weekly target's first chosen weekday, a by-date target's date when it falls in [m], else the due day (32 = none). */
@@ -268,7 +276,11 @@ public final class Budget {
     public long balanceAt(Account a,YearMonth m){return sums().balanceAt(a,m);}
     public long futureAssigned(YearMonth m){long n=0;for(Category c:categories)for(Map.Entry<String,Long>a:c.assigned.entrySet())if(a.getKey().compareTo(m.toString())>0)n+=a.getValue();return n;}
     public long spendable(YearMonth m){return ready(m)-futureAssigned(m);}
-    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendable(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
+    /** Hunt 25 A2: money assigned in [m] carries into every later month, so it has to be spare in each of them (a later month's
+     * outflow to To budget or overspending can have used [m]'s spare money), up to now or the last month with money assigned. */
+    public long spendableFrom(YearMonth m){long n=spendable(m);YearMonth last=YearMonth.now();for(Category c:categories)for(String k:c.assigned.keySet()){YearMonth a=YearMonth.parse(k);if(a.isAfter(last))last=a;}
+        for(YearMonth k=m.plusMonths(1);!k.isAfter(last);k=k.plusMonths(1))n=Math.min(n,spendable(k));return n;}
+    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendableFrom(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
     public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);assignedChanged(from);assignedChanged(to);}
     public long needed(Category c,YearMonth m){Long ask=ask(c,m);return ask==null?0:Math.max(0,ask-assigned(c,m));}
     /** What [c]'s target asks for in [m] before anything is assigned in [m] (needed is this less [m]'s Assigned); 0 without one. */
@@ -284,14 +296,14 @@ public final class Budget {
         // Balance with a due month: like by date, what's still to save (less what came in) over the months left.
         if(c.targetType.equals("Balance")&&!c.due.isEmpty()){YearMonth due=YearMonth.parse(c.due);long remaining=Math.max(0,c.target-carried(c,m));long months=Math.max(1,ChronoUnit.MONTHS.between(m,due)+1);return (remaining+months-1)/months;}
         // Refill: up to the target, counting what's left from last month; a balance: up to the target, counting everything but this month's Assigned.
-        return c.target-(c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1)))):available(c,m)-assigned(c,m));
+        return c.target-(c.targetType.equals("Refill")?(m.isAfter(YearMonth.now())?0:Math.max(0,available(c,m.minusMonths(1)))):availableAfterBills(c,m)-assigned(c,m));
     }
     /**
      * Getting a month ahead, for [m] (usually next month): {what its targets and upcoming bills ask for before anything is
      * assigned in [m], what they still need (Fund targets' figure)}. Hidden categories are left out, as on Home.
      */
     public long[] monthAhead(YearMonth m){long asked=0,still=0;
-        for(Category c:categories){if(c.hidden)continue;long need=fundNeed(c,m),a=assigned(c,m),bills=upcoming(c,m)-(available(c,m)-a);
+        for(Category c:categories){if(c.hidden)continue;long need=fundNeed(c,m),a=assigned(c,m),bills=upcoming(c,m)-(availableAfterBills(c,m)-a);
             asked+=Math.max(need,Math.max(0,Math.max(targetAsk(c,m),bills)));still+=need;}
         return new long[]{asked,still};}
     /** Money assigned in each month after [m], earliest first (months adding up to nothing left out). */
@@ -459,7 +471,10 @@ public final class Budget {
         long cardCredit(Category pc,YearMonth m,long start){Account card=accountById.get(pc.cardAccount);if(card==null)return 0;
             // Hunt 24 C4: and its interest and fees in [m] (the payment category's own row holds only those): they use up card credit
             // but are more debt, never overspending.
-            return Math.max(0,balanceAt(card,m))+Math.max(0,-start)+Math.max(0,at(freed.get(card),month(m)))+Math.max(0,-at(in.get(pc.id),month(m)));}
+            // Hunt 25 A1: what carried, less the card credit it held at the end of last month (counted again in [m]'s balance, as far
+            // as it's still there): credit spent since is used up, as when the credit and the spending fall in one month. A reward
+            // on a card that still owes (no credit) carries on.
+            return Math.max(0,balanceAt(card,m))+Math.max(0,-start-Math.max(0,balanceAt(card,m.minusMonths(1))))+Math.max(0,at(freed.get(card),month(m)))+Math.max(0,-at(in.get(pc.id),month(m)));}
         long toCover(Category c,YearMonth m){long a=available(c,m);if(a>=0)return 0;if(!c.payment())return -a;long start=a-assigned(c,m)-activity(c,m);return Math.max(0,-a-cardCredit(c,m,start));}
         long ready(YearMonth m){return ready.computeIfAbsent(month(m),k->{long n=cash(m);for(Category c:categories)n-=available(c,m)+creditOverspent(c,m);return n;});}
         long creditSpent(Category c,YearMonth m,Account card){long n=0;int k=month(m);for(Map.Entry<Account,Map<String,long[]>> x:onCard.entrySet())if(card==null||x.getKey()==card)n+=at(x.getValue().get(c.id),k);return n;}

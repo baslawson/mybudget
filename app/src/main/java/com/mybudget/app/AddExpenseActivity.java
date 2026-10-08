@@ -65,7 +65,7 @@ public class AddExpenseActivity extends Activity {
         // Hidden categories, card payment categories and closed accounts aren't offered (as in MyBudget's own forms).
         List<Budget.Category> categories=new ArrayList<>();for(Budget.Category c:budget.categories)if(!c.hidden&&!c.payment())categories.add(c);
         List<Budget.Account> accounts=new ArrayList<>();for(Budget.Account a:budget.accounts)if(!a.closed&&!a.tracking())accounts.add(a); // tracking accounts are off budget: no categories
-        if(accounts.isEmpty()||categories.isEmpty()){fail("Open MyBudget and add an account first, then mark the bill paid again.");return;}
+        if(accounts.isEmpty()||categories.isEmpty()){done("Not added to MyBudget: add an account and a category there first, then mark the bill paid again.");return;} // hunt 25 C5: Planner shows it (one message, as for another currency)
         String billKey=text(intent,"billKey",100),payee=text(intent,"payee",80),note=text(intent,"note",200);
         long sent=intent.getLongExtra("amountCents",0);String date=text(intent,"date",10);
         try{LocalDate.parse(date);}catch(Exception e){date=LocalDate.now().toString();}
@@ -96,12 +96,15 @@ public class AddExpenseActivity extends Activity {
         // Planner yet, is offered instead of a second expense ("Use imported" links it to this payment).
         Budget.Entry imported=sent>0?importedFor(-sent,date):null;String importedId=imported==null?null:imported.id;
         if(imported!=null)label(f,"Imported from your bank: "+imported.payee+" "+money(-imported.amount)+" on "+Ui.pretty(imported.date)+". If that's this payment, tap Use imported instead of saving another.",13);
+        // Hunt 25 C2: at large text a dialog's three buttons stack and the last is cut off (Ui.large), so Use imported goes into the form.
+        boolean large=getResources().getConfiguration().fontScale>=1.3f;Button inForm=null;
+        if(imported!=null&&large){inForm=new Button(this);inForm.setText("Use imported");inForm.setAllCaps(false);f.addView(inForm,new LinearLayout.LayoutParams(-1,-2));}
         ScrollView scroll=new ScrollView(this);scroll.addView(f);
         AlertDialog.Builder builder=new AlertDialog.Builder(this).setTitle("Add expense").setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null);
-        if(imported!=null)builder.setNeutralButton("Use imported",null);
+        if(imported!=null&&!large)builder.setNeutralButton("Use imported",null);Button formButton=inForm;
         dialog=builder.create();
         dialog.setOnDismissListener(d->finish());
-        Runnable useImported=imported==null?null:()->dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+        Runnable useImported=imported==null?null:()->(formButton!=null?formButton:dialog.getButton(AlertDialog.BUTTON_NEUTRAL)).setOnClickListener(v->{
             try{reload();Budget.Entry already=budget.external(id);if(already!=null){setResult(RESULT_OK,reply("Already in MyBudget: "+already.payee+" "+money(-already.amount)));dialog.dismiss();return;}
                 Budget.Entry row=null;for(Budget.Entry x:budget.entries)if(x.id.equals(importedId))row=x;
                 if(row==null||!row.externalId.isEmpty())throw new IllegalArgumentException("That imported transaction changed meanwhile. Save this one instead, or cancel.");

@@ -21,7 +21,10 @@ final class HomeScreen extends Ui {
             LinearLayout a=alert("!",c.name+" is overspent by "+money(cover),main.red,"Cover it with money from another category or To budget.",()->main.budgetScreen.categoryDetails(main.budget.category(id)));
             a.addView(button("Cover",()->main.budgetScreen.cover(id)));}
         long ready=main.budget.spendable(main.month);
-        if(ready>0){alerts++;
+        // Hunt 25 C4: with Hide amounts, one wording for both signs (the To budget card keeps its figure white for the same reason).
+        if(ready!=0&&main.hideAmounts){alerts++;
+            alert("💰","Check To budget",main.blue,"Amounts are hidden. Open Budget to see what's left to assign.",()->{main.tab="Plan";main.render();});}
+        else if(ready>0){alerts++;
             alert("\uD83D\uDCB0",money(ready)+" in To budget is waiting to be assigned",main.blue,"Give it a job in Budget, or use Fund targets.",()->{main.tab="Plan";main.render();});}
         else if(ready<0){alerts++;
             alert("!","To budget is below zero by "+money(-ready),main.red,"More is assigned than you have. Return money from a category in Budget.",()->{main.tab="Plan";main.render();});}

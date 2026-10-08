@@ -91,6 +91,9 @@ public class MainActivity extends Activity {
     @Override public void onTopResumedActivityChanged(boolean top){super.onTopResumedActivityChanged(top);
         if(!top||!storageReadable||pickingPhoto||!editors.isEmpty())return;
         try{if(reloadIfChanged())render();}catch(IllegalStateException e){ui.toast(e.getMessage());}}
+    // Hunt 25 C1: rotated or resized (the manifest's configChanges): the screen is drawn again for the new size; open forms stay.
+    // A theme, font size or language change still starts the screen again (its colours and text come from those).
+    @Override public void onConfigurationChanged(Configuration c){super.onConfigurationChanged(c);if(storageReadable)render();}
     @Override protected void onSaveInstanceState(Bundle state){state.putString("tab",tab);state.putString("previousTab",previousTab);
         state.putString("search",search);state.putString("accountFilter",accountFilter);state.putString("categoryFilter",categoryFilter);
         state.putString("fromFilter",fromFilter);state.putString("toFilter",toFilter);state.putInt("flagFilter",flagFilter);
@@ -202,7 +205,7 @@ public class MainActivity extends Activity {
             ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;
             while((n=in.read(buffer))>0){out.write(buffer,0,n);
                 if(out.size()>MAX_BACKUP)throw new IOException("This file is too large to be a MyBudget backup.");}
-            String text;try{text=new String(out.toByteArray(),StandardCharsets.UTF_8);}catch(OutOfMemoryError e){throw new IOException("This backup is too large to open on this phone.");}return text.startsWith("﻿")?text.substring(1):text;}
+            String text;try{text=CsvImport.decode(out.toByteArray());}catch(OutOfMemoryError e){throw new IOException("This backup is too large to open on this phone.");}return text.startsWith("﻿")?text.substring(1):text;}
     }
     // Hide amounts (⋮ menu) shows dots instead of money everywhere on screen, for showing the plan to someone.
     boolean hideAmounts,darkTheme;

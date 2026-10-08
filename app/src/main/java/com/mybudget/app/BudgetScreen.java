@@ -69,8 +69,8 @@ final class BudgetScreen extends Ui {
             count.addUpdateListener(a->figure.setText(money(from+Math.round((ready-from)*(float)a.getAnimatedValue()))));
             count.addListener(new android.animation.AnimatorListenerAdapter(){@Override public void onAnimationEnd(android.animation.Animator a){figure.setText(money(ready));}});
             figure.setText(money(from));count.start();}
-        boolean allAssigned=ready==0&&!main.budget.accounts.isEmpty()&&!main.budget.categories.isEmpty();long future=main.budget.futureAssigned(main.month);
-        TextView line=label(allAssigned?"Every dollar has a job 🎉":future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",13,Color.WHITE,allAssigned);
+        boolean allAssigned=ready==0&&!main.hideAmounts&&!main.budget.accounts.isEmpty()&&!main.budget.categories.isEmpty();long future=main.budget.futureAssigned(main.month); // hunt 25 C4: not with Hide amounts (it would tell the figure)
+        TextView line=label(allAssigned?"Every dollar has a job 🎉":main.hideAmounts?"Amounts are hidden.":future>0?money(future)+" reserved in future months":"Give the money you have a purpose.",13,Color.WHITE,allAssigned);
         line.setAlpha(allAssigned?1f:0.9f);c.addView(line);
         TextView how=label("How it's worked out ›",12,Color.WHITE,false);how.setAlpha(0.75f);how.setPadding(0,dp(4),0,0);c.addView(how);c.setOnClickListener(v->readyBreakdown());
         if(allAssigned&&sameMonth&&before!=null&&before!=0){line.setPivotX(0);pop(line);Burst.over(c,main.darkTheme);confirm(c);}}
@@ -216,7 +216,7 @@ final class BudgetScreen extends Ui {
         actions.add(()->{if(main.change(()->main.budget.pin(main.categoryById(id),!pinned)))toast(pinned?"Unpinned from Home.":"Pinned to Home: it shows under Priority categories.");});
         names.add(c.hidden?"Unhide":"Hide");actions.add(()->hide(id,!c.hidden));
         if(!c.payment()){names.add("Delete category");actions.add(()->deleteCategory(id));}
-        new AlertDialog.Builder(main).setTitle(c.name).setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()).show();
+        tracked(new AlertDialog.Builder(main).setTitle(c.name).setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()));
     }
     private void reorder(String id,int direction){main.change(()->{if(!main.budget.reorder(main.categoryById(id),direction))throw new IllegalArgumentException(direction<0?"Already first in its group.":"Already last in its group.");});}
     private void hide(String id,boolean hidden){boolean[] unpinned={false};
@@ -244,28 +244,29 @@ final class BudgetScreen extends Ui {
         sources.sort((a,b)->Long.compare(main.budget.available(b,main.month),main.budget.available(a,main.month)));
         // Each choice: where from (null = To budget), the later month whose assignment it is (null = this month), and how much it has.
         List<String> labels=new ArrayList<>();List<Budget.Category> froms=new ArrayList<>();List<YearMonth> laters=new ArrayList<>();List<Long> has=new ArrayList<>();
-        long ready=main.budget.spendable(main.month);if(ready>0){labels.add("To budget ("+money(ready)+")");froms.add(null);laters.add(null);has.add(ready);}
+        long ready=main.budget.spendableFrom(main.month);if(ready>0){labels.add("To budget ("+money(ready)+")");froms.add(null);laters.add(null);has.add(ready);}
         for(Budget.Category o:sources){long a=main.budget.available(o,main.month);labels.add(o.name+" ("+money(a)+")");froms.add(o);laters.add(null);has.add(a);}
         // Money already assigned in later months (from this month on, while To budget isn't below zero): Budget.coverFromFuture.
         if(!main.month.isBefore(YearMonth.now())&&ready>=0)for(YearMonth later:main.budget.assignedAfter(main.month).keySet())
             for(Budget.Category o:main.budget.categories){long back=o==c?0:main.budget.futureCover(o,later);if(back<=0)continue;
                 labels.add(o.name+" in "+later.format(DateTimeFormatter.ofPattern("MMMM"))+" ("+money(back)+" assigned)");froms.add(o);laters.add(later);has.add(back);}
         if(labels.isEmpty()){toast("No category has money to move. Record income or assign money first.");return;}
-        new AlertDialog.Builder(main).setTitle("Cover "+money(missing)+" for "+c.name).setItems(labels.toArray(new String[0]),(d,n)->{
+        tracked(new AlertDialog.Builder(main).setTitle("Cover "+money(missing)+" for "+c.name).setItems(labels.toArray(new String[0]),(d,n)->{
             Budget.Category from=froms.get(n);YearMonth later=laters.get(n);long amount=Math.min(missing,has.get(n));String fromId=from==null?null:from.id;
             String laterName=later==null?"":later.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
             String source=from==null?"To budget":later==null?from.name:from.name+"'s money assigned in "+laterName;
             String note=later==null?"":"\n\n"+from.name+" will have "+money(main.budget.assigned(from,later)-amount)+" assigned in "+laterName+": assign it again when more money comes in.";
-            new AlertDialog.Builder(main).setTitle("Cover overspending")
+            tracked(new AlertDialog.Builder(main).setTitle("Cover overspending")
                 .setMessage("Move "+money(amount)+" from "+source+" to "+c.name+"?"+(amount<missing?"\n\nThat covers part of it; "+money(missing-amount)+" stays overspent.":"")+note)
                 .setNegativeButton("Cancel",null)
                     .setPositiveButton("Cover",(d2,w)->main.change(()->{if(fromId==null)main.budget.assign(main.categoryById(id),main.month,amount);
                         else if(later==null)main.budget.move(main.categoryById(fromId),main.categoryById(id),main.month,amount);
-                        else main.budget.coverFromFuture(main.categoryById(fromId),later,main.categoryById(id),main.month,amount);})).show();
-        }).show();
+                        else main.budget.coverFromFuture(main.categoryById(fromId),later,main.categoryById(id),main.month,amount);})));
+        }));
     }
     private void assign(Budget.Category c){
         LinearLayout f=form();long spare=main.budget.spendable(main.month);TextView head=label("",16,main.blue,true);head.setText(tint(money(spare)+" to budget",money(spare),amountColour(spare)));f.addView(head);
+        long most=main.budget.spendableFrom(main.month);if(most<spare)f.addView(greyLine("Up to "+money(Math.max(0,most))+" can be assigned here: a later month needs the rest.",money(Math.max(0,most)),main.ink,13));
         long now=main.budget.assigned(c,main.month);
         f.addView(greyLine("Assigned this month: "+money(now)+". A positive amount adds money; a negative one returns it.",money(now),amountColour(now),13));
         EditText amount=field(f,"Amount ("+code()+")",true);TextView result=label("",13,main.blue,true);f.addView(result);
@@ -293,11 +294,11 @@ final class BudgetScreen extends Ui {
     private void move(){if(main.budget.categories.size()<2){toast("Create two categories first.");return;}LinearLayout f=form();
         Spinner from=spinner(f,"From",availableNames(),0),to=spinner(f,"To",availableNames(),1);EditText amount=field(f,"Amount ("+code()+")",true);
         dialog("Move money",f,()->main.budget.move(main.budget.categories.get(from.getSelectedItemPosition()),main.budget.categories.get(to.getSelectedItemPosition()),main.month,Budget.cents(amount.getText().toString())));}
-    private void autoAssign(){long remaining=Math.max(0,main.budget.spendable(main.month));long total=0;
+    private void autoAssign(){long remaining=Math.max(0,main.budget.spendableFrom(main.month));long total=0;
         for(Budget.Category c:main.budget.categories)if(!c.hidden)total+=main.budget.fundNeed(c,main.month);long fund=Math.min(remaining,total);
         if(fund==0){toast("No available money or underfunded targets.");return;}new AlertDialog.Builder(main).setTitle("Fund targets")
             .setMessage("Assign "+money(fund)+" to underfunded targets and upcoming bills, earliest due first?").setNegativeButton("Cancel",null)
-            .setPositiveButton("Fund",(d,w)->{try{main.commit(()->{long left=Math.max(0,main.budget.spendable(main.month));
+            .setPositiveButton("Fund",(d,w)->{try{main.commit(()->{long left=Math.max(0,main.budget.spendableFrom(main.month));
                     for(Budget.Category c:main.budget.fundOrder(main.month)){if(c.hidden)continue;
                         long n=Math.min(left,main.budget.fundNeed(c,main.month));if(n>0){main.budget.assign(c,main.month,n);left-=n;}}});
                 main.render();}catch(Exception e){toast(e.getMessage());}}).show();}

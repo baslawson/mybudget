@@ -163,7 +163,7 @@ final class ReportsScreen extends Ui {
         for(String g:main.budget.groups()){keys.add("g:"+g);names.add("Group: "+g);}
         if(keys.isEmpty()){card.addView(label("Add a category to see its spending month by month.",14,main.muted,false));return;}
         if(!keys.contains(main.trendKey)){List<Budget.Slice> top=main.budget.breakdown(main.month,main.month,false);
-            main.trendKey=top.isEmpty()||top.get(0).other?keys.get(0):"c:"+top.get(0).ids.get(0);} // the month's biggest spending first
+            main.trendKey=keys.get(0);for(Budget.Slice s:top)if(!s.other&&keys.contains("c:"+s.ids.get(0))){main.trendKey="c:"+s.ids.get(0);break;}} // the month's biggest spending first (hunt 25 C6: of the categories listed, not a card's interest)
         Spinner what=choice(names.toArray(new String[0]),keys.indexOf(main.trendKey),"Category or group"),span=choice(new String[]{"Last 6 months","Last 12 months"},main.trendMonths==12?1:0,"Months shown");
         card.addView(what);card.addView(span);LinearLayout body=column();card.addView(body);fillTrend(body);
         onPick(what,()->{String k=keys.get(what.getSelectedItemPosition());if(!k.equals(main.trendKey)){main.trendKey=k;fillTrend(body);}});

@@ -37,8 +37,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 fixes.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes.");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -1037,5 +1037,53 @@ public class BudgetTest {
             java.util.List<String> keys=new java.util.ArrayList<>();for(java.util.Map.Entry<String,long[]> r:rows.entrySet()){boolean any=false;for(long v:r.getValue())any|=v!=0;if(any)keys.add(r.getKey());}
             keys.sort((x,y)->Long.compare(java.util.Arrays.stream(rows.get(y)).sum(),java.util.Arrays.stream(rows.get(x)).sum()));
             StringBuilder s=new StringBuilder();for(String k:keys)s.append(names.get(k)).append(java.util.Arrays.toString(rows.get(k)));return s.toString();}
+    }
+    static void hunt25(){
+        YearMonth sep=YearMonth.of(2025,9),oct=sep.plusMonths(1),nov=oct.plusMonths(1),dec=nov.plusMonths(1),jan=dec.plusMonths(1);
+        // A1: card credit spent on card spending nothing was set aside for is used up: To budget comes down, whichever month the spending is in.
+        long[] late=new long[2];
+        for(int sameMonth=0;sameMonth<2;sameMonth++){Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-09-01",100000);b.accounts.add(bank);
+            Budget.Category food=new Budget.Category("Groceries"),dining=new Budget.Category("Dining");b.categories.add(food);b.categories.add(dining);
+            Budget.Account visa=b.addCard("Visa","2025-09-01",0);Budget.Category pay=b.paymentCategory(visa);
+            b.assign(food,sep,10000);b.entries.add(new Budget.Entry("Shop",food.id,visa.id,"2025-09-05",-5000));Budget.Entry paid=new Budget.Entry("Transfer to Visa","",bank.id,"2025-09-20",-5000);paid.destination=visa.id;b.entries.add(paid);
+            b.entries.add(new Budget.Entry("Refund",food.id,visa.id,"2025-10-03",2000));b.entries.add(new Budget.Entry("Cafe",dining.id,visa.id,sameMonth==1?"2025-10-20":"2025-11-10",-2000));
+            equal(b.available(pay,dec),0,"A1: the credit is used up ("+sameMonth+")");late[sameMonth]=b.ready(dec);balanced(b,sep,jan,"A1 balanced "+sameMonth);}
+        equal(late[0],88000,"A1: Dec To budget");equal(late[1],late[0],"A1: the same either way");
+        // A1: a reward on a card that still owes isn't card credit: later card spending nothing was set aside for (more debt) leaves it.
+        {Budget r=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-09-01",100000);r.accounts.add(bank);Budget.Category food=new Budget.Category("Groceries");r.categories.add(food);
+            Budget.Account visa=r.addCard("Visa","2025-09-01",50000);r.entries.add(new Budget.Entry("Cashback","",visa.id,"2025-10-05",1000));r.assign(food,oct,101000);
+            Budget.Category dining=new Budget.Category("Dining");r.categories.add(dining);r.entries.add(new Budget.Entry("Cafe",dining.id,visa.id,"2025-11-10",-2000));
+            equal(r.ready(dec),0,"A1: the reward stays assigned");equal(r.available(r.paymentCategory(visa),dec),-1000,"A1: and carries on");balanced(r,sep,jan,"A1 reward balanced");}
+        // A2: money assigned in a past month must be spare in every later month too.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);Budget.Category save=new Budget.Category("Savings");b.categories.add(save);
+        b.entries.add(new Budget.Entry("Pay","",bank.id,"2026-01-15",10000));b.entries.add(new Budget.Entry("Adjustment","",bank.id,"2026-02-10",-10000));
+        YearMonth jan26=YearMonth.of(2026,1);equal(b.spendable(jan26),10000,"A2: January alone has it");equal(b.spendableFrom(jan26),0,"A2: February doesn't");
+        Budget a2=b;rejects(()->a2.assign(save,jan26,10000));
+        // A3: next month's bill isn't funded by money this month's unpaid bill will take.
+        YearMonth now=YearMonth.now(),next=now.plusMonths(1);b=new Budget();bank=new Budget.Account("Bank","2026-01-01",300000);b.accounts.add(bank);Budget.Category rent=new Budget.Category("Rent");b.categories.add(rent);
+        b.scheduled.add(new Budget.Scheduled("Landlord",rent.id,bank.id,now.atEndOfMonth().toString(),-100000,"Monthly"));b.assign(rent,now,100000);
+        equal(b.fundNeed(rent,now),0,"A3: this month's rent has its money");equal(b.fundNeed(rent,next),100000,"A3: next month's still needs its own");equal(b.monthAhead(next)[1],100000,"A3: Month ahead says so");
+        // A4: a weekly bill still shows years ahead.
+        Budget.Scheduled weekly=new Budget.Scheduled("Gym",rent.id,bank.id,LocalDate.now().toString(),-1000,"Weekly");if(b.datesIn(weekly,now.plusYears(9)).size()<4)throw new AssertionError("A4: weekly bill 9 years ahead");
+        // B1: a statement row a few days before an upcoming transaction's date enters it, dated as the row (it was refused, failing the import).
+        LocalDate today=LocalDate.now();b=new Budget();bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);Budget.Category home=new Budget.Category("Home");b.categories.add(home);
+        Budget.Scheduled due=new Budget.Scheduled("Rent",home.id,bank.id,today.plusDays(3).toString(),-50000,"Monthly");b.scheduled.add(due);
+        CsvImport.Result r=CsvImport.run(b,rows(today.minusDays(1)+",RENT,-500.00"),false,0,1,2,-1,"uuuu-MM-dd",bank);equal(r.matched,1,"B1: matched");equal(r.added,0,"B1: not added");
+        same(b.entries.get(0).date,today.minusDays(1).toString(),"B1: the row's date");same(due.next,today.plusDays(3).plusMonths(1).toString(),"B1: next month's next");
+        // B2: a statement listed newest first matches each month's bill (rows in date order).
+        b=new Budget();bank=new Budget.Account("Bank","2026-01-01",100000);b.accounts.add(bank);b.categories.add(home);
+        Budget.Scheduled phone=new Budget.Scheduled("Phone",home.id,bank.id,"2026-09-01",-8000,"Monthly");b.scheduled.add(phone);
+        r=CsvImport.run(b,rows("2/10/2026,TELCO,-80.00","2/9/2026,TELCO,-80.00"),false,0,1,2,-1,"d/M/uuuu",bank);equal(r.matched,2,"B2: both months");equal(r.added,0,"B2: nothing extra");same(phone.next,"2026-11-01","B2: November next");
+        // B3: a quote inside an unquoted field is text; one at a field's start still quotes.
+        java.util.List<java.util.List<String>> p=CsvImport.parse("09/10/2026,BUNNINGS 12\" SAW,-15.00\n08/10/2026,COLES,-20.00\n07/10/2026,\"A, B\",-1.00");
+        equal(p.size(),3,"B3: three rows");same(p.get(0).get(1),"BUNNINGS 12\" SAW","B3: the quote kept");same(p.get(0).get(2),"-15.00","B3: its amount");same(p.get(2).get(1),"A, B","B3: quoted field");
+        // B5: Windows-1252 and UTF-16 files; UTF-8 as before.
+        same(CsvImport.decode(new byte[]{'C','A','F',(byte)0xC9,' ',(byte)0xA3,'1'}),"CAFÉ £1","B5: Windows-1252");same(CsvImport.decode("CAFÉ".getBytes(java.nio.charset.StandardCharsets.UTF_8)),"CAFÉ","B5: UTF-8");
+        same(CsvImport.decode(new byte[]{(byte)0xFF,(byte)0xFE,'A',0,',',0,'B',0}),"A,B","B5: UTF-16 with its mark");
+        // B6: a two-digit year that would be in the future is the 1900s.
+        same(CsvImport.statement("!Type:Bank\nD12/31/98\nT-1.00\nPx\n^\n").get(1).get(0),"1998-12-31","B6: 1998");same(CsvImport.statement("!Type:Bank\nD1/5/26\nT-1.00\nPx\n^\n").get(1).get(0),"2026-05-01","B6: 2026 kept (day first)");
+        // B7: semicolons in an unquoted payee don't make the file a semicolon one; a semicolon file with decimal commas still is.
+        equal(CsvImport.parse("09/10/2026,PAYPAL;EBAY;AU;X,-12.00\n08/10/2026,COLES,-20.00").get(0).size(),3,"B7: comma file");
+        same(CsvImport.parse("Date;Payee;Amount\n01.10.2026;Shop;-12,50\n02.10.2026;Cafe;-3,00").get(1).get(2),"-12,50","B7: semicolon file");
     }
 }

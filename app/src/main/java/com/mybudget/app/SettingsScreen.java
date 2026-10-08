@@ -155,7 +155,10 @@ final class SettingsScreen extends Ui {
             names[i]=(header&&i<first.size()&&!first.get(i).isEmpty()?first.get(i):"Column "+(i+1))+(sample.isEmpty()?"":"  (e.g. "+(sample.length()>24?sample.substring(0,24)+"…":sample)+")");withNone[i+1]=names[i];}
         // Guess from header words, or from what was used last time with the same headers.
         int date=guess(first,header,new String[]{"date"},0),payee=guess(first,header,new String[]{"description","payee","narrative","details","merchant","memo"},Math.min(1,columns-1)),amount=guess(first,header,new String[]{"amount","credit"},Math.min(2,columns-1)),out=-1;
-        if(header){int debit=guess(first,true,new String[]{"debit","out","withdrawal"},-1);if(debit>=0&&debit!=amount)out=debit;}
+        // Hunt 25 B4: with a debit column and a credit column ("Debit Amount", "Credit Amount"), money in is the credit one (not the
+        // first "amount"), so spending isn't read as income.
+        if(header){int debit=guess(first,true,new String[]{"debit","out","withdrawal"},-1),credit=guess(first,true,new String[]{"credit","deposit"},-1);
+            if(debit>=0&&credit>=0&&credit!=debit){amount=credit;out=debit;}else if(debit>=0&&debit!=amount)out=debit;}
         String saved=main.prefs().getString("import_columns",null);if(saved!=null&&header){String[] p=saved.split("\u0001");
             if(p.length==5&&p[0].equals(String.join("\u0002",first))){date=Integer.parseInt(p[1]);payee=Integer.parseInt(p[2]);
                 amount=Integer.parseInt(p[3]);out=Integer.parseInt(p[4]);}}

@@ -292,8 +292,8 @@ final class TransactionForms extends Ui {
             names.add(s.repeat.equals("Never")?"Skip it (delete)":"Skip this one");
             actions.add(()->main.change(()->main.budget.advance(scheduledById(id))));}
         names.add("Edit");actions.add(()->transaction(null,s));
-        new AlertDialog.Builder(main).setTitle(s.payee+" · "+money(s.amount))
-            .setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()).show();
+        tracked(new AlertDialog.Builder(main).setTitle(s.payee+" · "+money(s.amount))
+            .setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()));
     }
     String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
     private void delete(Budget.Entry e){new AlertDialog.Builder(main).setTitle("Delete transaction?")
@@ -312,7 +312,7 @@ final class TransactionForms extends Ui {
      */
     void cardCharge(String cardId,Budget.Entry old){Budget.Account card=main.budget.account(cardId);Budget.Category pc=card==null?null:main.budget.paymentCategory(card);
         if(pc==null){toast("Only a credit card has interest and fees.");return;}
-        if(card.closed){toast(card.name+" is closed. Reopen it in Accounts first.");return;} // hunt 24 C7: a closed card's debt would be out of sight
+        if(card.closed&&old==null){toast(card.name+" is closed. Reopen it in Accounts first.");return;} // hunt 24 C7: a closed card's debt would be out of sight; hunt 25 C3: one already there still opens
         LinearLayout f=form();f.addView(label("Interest, an annual fee or a late fee on "+card.name+". It adds to what you owe, like the debt the card started with: no category pays for it and nothing is overspent. Assign money to "+pc.name+" (a payoff target helps) to pay it off.",13,main.muted,false));
         Choice kind=choice(f,new String[]{"− Interest or fee","↩ Refunded"},new int[]{main.red,main.green},old!=null&&old.amount>0?1:0);
         EditText amount=field(f,"Amount ("+code()+")",true);if(old!=null)amount.setText(decimal(Math.abs(old.amount)));
