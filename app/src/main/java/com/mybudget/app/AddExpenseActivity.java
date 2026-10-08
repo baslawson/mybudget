@@ -20,10 +20,12 @@ public class AddExpenseActivity extends Activity {
     public static final String ACTION_ADD="com.mybudget.app.action.ADD_EXPENSE",ACTION_UNDONE="com.mybudget.app.action.PAYMENT_UNDONE";
     private Budget budget;private String read; // the saved data [budget] matches (reading years of transactions again takes a while)
     AlertDialog dialog; // package-private for BudgetInstrumentation
+    private int expenseRed; // the amount as it's typed: a bill paid is money going out
     @Override public void onCreate(Bundle state){
         String themeMode=getSharedPreferences("appearance",0).getString("theme","Dark");
         boolean dark=themeMode.equals("Dark")||(themeMode.equals("Auto")&&(getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES);
         setTheme(dark?R.style.AppTheme_Overlay:R.style.AppTheme_Light_Overlay);
+        expenseRed=dark?android.graphics.Color.rgb(255,142,150):android.graphics.Color.rgb(178,51,55); // MainActivity's red
         super.onCreate(state);
         setResult(RESULT_CANCELED);
         String raw=getSharedPreferences("budget",0).getString("data",null);
@@ -72,7 +74,10 @@ public class AddExpenseActivity extends Activity {
             label(f,"You already have an expense for this bill this month: "+money(-last.amount)+" on "+Ui.pretty(last.date)+". Save only if this is another payment.",13);
         // Payees used before are suggested (as in MyBudget's own form).
         TextView payeeLabel=label(f,"Payee",12);AutoCompleteTextView payeeField=Suggest.box(this,f,"Payee",()->budget.payees());payeeField.setText(payee,false);Ui.names(payeeLabel,payeeField);
-        TextView amountLabel=label(f,"Amount ("+budget.currency+")",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22);Ui.names(amountLabel,amountField);Ui.sumsHint(amountField,"Amount"); // quick maths too
+        TextView amountLabel=label(f,"Amount ("+budget.currency+")",12);EditText amountField=field(f,"0.00",sent>0&&sent<=10_000_000_000L?BigDecimal.valueOf(sent,2).toPlainString():"",Ui.AMOUNT_INPUT);amountField.setTextSize(22);Ui.names(amountLabel,amountField);
+        android.content.res.ColorStateList plain=amountField.getTextColors();Runnable paint=()->{long v;try{v=Budget.evaluate(amountField.getText().toString());}catch(Exception x){v=0;}
+            if(v>0)amountField.setTextColor(expenseRed);else amountField.setTextColor(plain);};paint.run();
+        amountField.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(android.text.Editable s){paint.run();}});Ui.sumsHint(amountField,"Amount"); // quick maths too
         if(sent<=0)label(f,"This bill has no amount. Enter what you paid.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}

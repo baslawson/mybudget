@@ -1,6 +1,9 @@
 package com.mybudget.app;
 
 import android.app.*;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.view.Gravity;
 import android.text.*;
 import android.view.View;
 import android.widget.*;
@@ -15,31 +18,41 @@ final class TransactionsScreen extends Ui {
     private void upcomingList(){
         if(main.budget.scheduled.isEmpty())return;List<Budget.Scheduled> list=new ArrayList<>(main.budget.scheduled);
         list.sort(Comparator.comparing(s->s.next));
-        main.content.addView(heading("Upcoming",18,main.blue));
-        for(Budget.Scheduled s:list){if(!main.accountFilter.isEmpty()&&!s.account.equals(main.accountFilter))continue;
+        if(!main.accountFilter.isEmpty())list.removeIf(s->!s.account.equals(main.accountFilter));if(list.isEmpty())return;
+        sectionHeading("📅","Coming up",count(list.size(),"upcoming","upcoming"));
+        for(Budget.Scheduled s:list){
             boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=main.budget.category(s.category);
-            Budget.Account a=main.budget.account(s.account);
-            LinearLayout row=card();row.addView(label(s.payee,17,main.ink,true));
-            row.addView(label((s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" / "+(a==null?"":a.name)+" / "+pretty(s.next)+" · "+main.forms.repeatLabel(s),12,main.muted,false));
-            row.addView(label(money(s.amount),17,s.amount>0?main.green:main.ink,true));
-            if(isDue)row.addView(label("Due - tap to enter or skip",12,main.amber,true));String id=s.id;
-            row.setOnClickListener(v->main.forms.dueActions(id));}
+            Budget.Account a=main.budget.account(s.account);String id=s.id;
+            listRow(s.payee,(s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" · "+(a==null?"":a.name)+" · "+pretty(s.next)+" · "+main.forms.repeatLabel(s),
+                money(s.amount),s.amount>0?main.green:main.ink,isDue?"Due - tap to enter or skip":null,main.amber,()->main.forms.dueActions(id));}
     }
+    /** A section of the screen: an icon, its name (a heading for TalkBack) and a quiet count on the right. */
+    private void sectionHeading(String icon,String title,String detail){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(2),dp(18),dp(4),dp(4));TextView i=label(icon,18,main.ink,false);i.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        i.setPadding(0,0,dp(8),0);row.addView(i);TextView t=heading(title,19,main.ink);row.addView(t,new LinearLayout.LayoutParams(0,-2,1));
+        if(detail!=null)row.addView(label(detail,13,main.muted,true));main.content.addView(row,new LinearLayout.LayoutParams(-1,-2));}
+    /** A row in Coming up or Bills from Planner: payee badge, payee and details, the amount on the right; [note] under it in [noteColour]. */
+    private void listRow(String payee,String detail,String amount,int amountColour,String note,int noteColour,Runnable open){
+        LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(12),dp(10),dp(14),dp(10));
+        row.setBackground(surface(main.surface));pressable(row);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(4),0,dp(4));
+        main.content.addView(row,p);row.addView(badge(initial(payee),FLAG_COLORS[1+Math.floorMod(payee.toLowerCase(Locale.ROOT).hashCode(),FLAG_COLORS.length-1)]));
+        LinearLayout middle=column();middle.setPadding(dp(12),0,dp(8),0);row.addView(middle,new LinearLayout.LayoutParams(0,-2,1));
+        TextView name=label(payee,16,main.ink,true);name.setPadding(0,0,0,0);middle.addView(name);
+        TextView d=label(detail,12,main.muted,false);d.setPadding(0,dp(2),0,0);middle.addView(d);
+        if(note!=null)middle.addView(label(note,12,noteColour,true));
+        TextView a=label(amount,16,amountColour,true);a.setPadding(0,0,0,0);row.addView(a);row.setOnClickListener(v->open.run());}
     /** Planner's upcoming bills: what's coming, with the category each is planned from (tap to choose or change it). */
     private void plannerList(){
         if(!main.accountFilter.isEmpty())return;
         if(PlannerBills.stale(main)&&!main.prefs().getString("planner_bills","[]").equals("[]")){main.content.addView(label("Planner's upcoming bills are from "+when(main.prefs().getString("planner_bills_at",""))+", so they aren't planned for. Open Planner to send them again.",12,main.muted,false));return;}
         if(main.budget.fromPlanner.isEmpty())return;
-        main.content.addView(heading("Coming up in Planner",18,main.blue));
+        sectionHeading("🧾","Bills from Planner",count(main.budget.fromPlanner.size(),"bill","bills"));
         String at=main.prefs().getString("planner_bills_at",null);
         main.content.addView(label("Sent by Planner"+(at==null?"":" on "+when(at))+". They're added here when you mark them paid in Planner.",12,main.muted,false));
-        for(Budget.Scheduled s:main.budget.fromPlanner){Budget.Category c=main.budget.category(s.category);LinearLayout row=card();
-            row.addView(label(s.payee,17,main.ink,true));
-            boolean overdue=LocalDate.parse(s.next).isBefore(LocalDate.now());
-            row.addView(label((overdue?"Overdue since ":"Due ")+pretty(s.next)+" · "+(c==null?"no category yet":c.name),12,overdue?main.amber:main.muted,false));
-            row.addView(label(s.amount==0?"No amount in Planner":money(s.amount),17,main.ink,true));
-            if(c==null)row.addView(label("Choose a category to plan for it",12,main.amber,true));
-            String key=s.billKey,payee=s.payee;row.setOnClickListener(v->chooseBillCategory(key,payee));}
+        for(Budget.Scheduled s:main.budget.fromPlanner){Budget.Category c=main.budget.category(s.category);
+            boolean overdue=LocalDate.parse(s.next).isBefore(LocalDate.now());String key=s.billKey,payee=s.payee;
+            listRow(s.payee,(overdue?"Overdue since ":"Due ")+pretty(s.next)+" · "+(c==null?"no category yet":c.name),s.amount==0?"No amount":money(s.amount),main.ink,
+                c==null?"Choose a category to plan for it":null,main.amber,()->chooseBillCategory(key,payee));}
     }
     private void chooseBillCategory(String billKey,String payee){
         List<Budget.Category> cats=main.visibleCategories(null);if(cats.isEmpty()){toast("Add a category first.");return;}
@@ -47,13 +60,37 @@ final class TransactionsScreen extends Ui {
             .setItems(cats.stream().map(c->c.name+" ("+money(main.budget.available(c,main.month))+")").toArray(String[]::new),(d,n)->{String id=cats.get(n).id;
             if(main.change(()->main.budget.billCategories.put(billKey,id)))toast("Planned from "+cats.get(n).name+". MyBudget suggests it when the bill is paid, too.");}).show();
     }
+    /** The month on screen at a glance: money in (Matrix green), money out (red) and what's left over. */
+    private void monthSummary(){long in=main.budget.income(main.month),out=main.budget.spending(main.month),net=in-out;
+        LinearLayout c=card();c.setOrientation(LinearLayout.HORIZONTAL);c.setPadding(dp(8),dp(12),dp(8),dp(12));
+        String[] names={"Money in","Money out",net<0?"Short by":"Left over"};long[] values={in,out,Math.abs(net)};
+        int[] colours={main.matrix,main.red,net<0?main.red:main.ink};String[] signs={"+","−",net<0?"−":""};
+        for(int i=0;i<3;i++){LinearLayout col=column();col.setGravity(Gravity.CENTER_HORIZONTAL);
+            TextView n=label(names[i],11,main.muted,true);n.setGravity(Gravity.CENTER);col.addView(n);
+            TextView v=label((values[i]==0?"":signs[i])+money(values[i]),16,values[i]==0?main.muted:colours[i],true);v.setGravity(Gravity.CENTER);v.setMaxLines(1);
+            v.setAutoSizeTextTypeUniformWithConfiguration(10,16,1,android.util.TypedValue.COMPLEX_UNIT_SP);col.addView(v,new LinearLayout.LayoutParams(-1,dp(30)));
+            col.setContentDescription(names[i]+" this month: "+money(values[i]));col.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            for(int k=0;k<col.getChildCount();k++)col.getChildAt(k).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            c.addView(col,new LinearLayout.LayoutParams(0,-2,1));}
+        c.setForeground(null);} // not tappable
+    /** Add transaction: a round + over the bottom right of the screen, always in reach (the list leaves room under its last row). */
+    private void addButton(){Button add=button("+",()->main.forms.transaction(null));add.setTextSize(30);add.setTextColor(Color.WHITE);add.setPadding(0,0,0,dp(3));
+        GradientDrawable round=new GradientDrawable();round.setShape(GradientDrawable.OVAL);round.setColor(main.primary);add.setBackground(round);
+        GradientDrawable mask=new GradientDrawable();mask.setShape(GradientDrawable.OVAL);mask.setColor(Color.WHITE);
+        add.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(tint(Color.WHITE,70)),null,mask));
+        add.setElevation(dp(6));add.setContentDescription("Add transaction");
+        android.widget.FrameLayout.LayoutParams p=new android.widget.FrameLayout.LayoutParams(dp(64),dp(64),Gravity.BOTTOM|Gravity.END);p.setMargins(0,0,dp(4),dp(12));
+        main.body.addView(add,p);main.content.setPadding(0,0,0,dp(88));
+        if(motion()&&main.shownTab!=null&&!main.shownTab.equals("Spending")){add.setScaleX(0f);add.setScaleY(0f); // pops in with the screen
+            add.animate().scaleX(1f).scaleY(1f).setStartDelay(120).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(2f)).start();}}
     void spending(){
-        main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));
+        monthSummary();addButton();
         int review=main.budget.toReview().size();if(review>0){LinearLayout c=card();
             c.addView(label(count(review,"imported transaction","imported transactions")+" to review",17,main.amber,true));
             c.addView(label("Check each one's payee and category, then approve it.",13,main.muted,false));
             c.addView(button("Review "+review+" imported",this::review));}
         upcomingList();plannerList();
+        sectionHeading("💳","Transactions",null);
         LinearLayout tools=new LinearLayout(main);
         Button filters=button(filtered()?"Filters (on)":"Filters",this::filters),payees=button("Payees",main.settingsScreen::payees);
         tools.addView(filters,new LinearLayout.LayoutParams(0,-2,1));LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(0,-2,1);

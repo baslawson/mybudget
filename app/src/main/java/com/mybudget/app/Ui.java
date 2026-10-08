@@ -105,7 +105,57 @@ class Ui {
     // Amount boxes take quick maths ("45+12.50", see Budget.evaluate): the phone keypad has digits, . + - * / and brackets.
     static final int AMOUNT_INPUT=InputType.TYPE_CLASS_PHONE;
     EditText field(LinearLayout f,String hint,boolean numeric){EditText e=new EditText(main);e.setHint(hint);e.setSingleLine(true);
-        e.setTextColor(main.ink);if(numeric){e.setInputType(AMOUNT_INPUT);sumsHint(e);}f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
+        e.setTextColor(main.ink);if(numeric){e.setInputType(AMOUNT_INPUT);sumsHint(e);signColours(e,1);}f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
+    /**
+     * An amount box's text turns red when what's typed works out negative and Matrix green when positive, as it's typed (sums
+     * too: "45-50" is red). [sign] -1: the box holds money going out (an expense part), so a positive amount shows red.
+     */
+    void signColours(EditText e,int sign){Runnable paint=()->{long v;try{v=Budget.evaluate(e.getText().toString())*sign;}catch(Exception x){v=0;}
+            e.setTextColor(v<0?main.red:v>0?main.matrix:main.ink);};
+        onText(e,paint);paint.run();}
+    /** A form section's title ("WHO AND WHAT"): small, spaced capitals; a heading for TalkBack. */
+    TextView section(LinearLayout f,String title){TextView t=label(title.toUpperCase(Locale.ROOT),12,main.muted,true);t.setLetterSpacing(0.1f);
+        t.setPadding(0,dp(18),0,dp(4));heading(t);t.setContentDescription(title);f.addView(t);return t;}
+    /**
+     * One choice from a few big buttons in a row (Expense / Income / Refund). The chosen one is tinted in its own colour; the
+     * others are plain. [changed] runs after the user (or set) picks another.
+     */
+    final class Choice {
+        final LinearLayout view=new LinearLayout(main);final List<Button> buttons=new ArrayList<>();final String[] names;final int[] colours;
+        int selected;Runnable changed=()->{};
+        Choice(String[] names,int[] colours,int selected){this.names=names;this.colours=colours;this.selected=selected;
+            float scale=Math.max(1f,Math.min(1.6f,main.getResources().getConfiguration().fontScale)); // large text: taller, and the label shrinks to one line
+            for(int i=0;i<names.length;i++){int n=i;Button b=button(names[i],()->{if(selected()!=n){tick(view);set(n);}});b.setTextSize(15);
+                b.setMaxLines(1);b.setPadding(dp(4),0,dp(4),0);b.setAutoSizeTextTypeUniformWithConfiguration(10,15,1,android.util.TypedValue.COMPLEX_UNIT_SP);
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Math.round(dp(52)*scale),1);p.setMargins(i==0?0:dp(4),dp(6),i==names.length-1?0:dp(4),dp(6));
+                view.addView(b,p);buttons.add(b);}
+            style();}
+        int selected(){return selected;}
+        void set(int n){selected=n;style();changed.run();}
+        private void style(){for(int i=0;i<buttons.size();i++){Button b=buttons.get(i);boolean on=i==selected;
+            GradientDrawable d=bg(on?tint(colours[i],main.darkTheme?56:30):main.buttonSurface);if(on)d.setStroke(dp(2),colours[i]);b.setBackground(d);
+            b.setTextColor(on?colours[i]:main.muted);b.setTypeface(null,on?Typeface.BOLD:Typeface.NORMAL);
+            b.setContentDescription(names[i].replaceAll("^[^A-Za-z]+","")+(on?", selected":""));}}
+    }
+    Choice choice(LinearLayout f,String[] names,int[] colours,int selected){Choice c=new Choice(names,colours,selected);f.addView(c.view,new LinearLayout.LayoutParams(-1,-2));return c;}
+    /**
+     * A row of round-ended chips that scrolls sideways (Today / Yesterday / Pick a date, or categories): the chosen one is
+     * filled. [pick] gets the tapped chip's index; it decides what is chosen (show() redraws).
+     */
+    final class Chips {
+        final HorizontalScrollView view=new HorizontalScrollView(main);final LinearLayout row=new LinearLayout(main);
+        Chips(){view.setHorizontalScrollBarEnabled(false);view.addView(row);row.setPadding(0,dp(4),0,dp(4));}
+        void show(List<String> names,int selected,java.util.function.IntConsumer pick){row.removeAllViews();
+            for(int i=0;i<names.size();i++){int n=i;boolean on=i==selected;Button b=button(names.get(i),()->{tick(view);pick.accept(n);});
+                b.setTextSize(14);b.setPadding(dp(16),0,dp(16),0);GradientDrawable d=bg(on?main.primary:main.buttonSurface);d.setCornerRadius(dp(24));
+                b.setBackground(d);b.setTextColor(on?Color.WHITE:main.ink);if(on)b.setTypeface(null,Typeface.BOLD);
+                b.setContentDescription(names.get(i)+(on?", selected":""));
+                LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,dp(48));p.setMargins(0,0,dp(8),0);row.addView(b,p);}
+            if(selected>=0)view.post(()->{View on=row.getChildAt(selected);if(on==null)return; // the chosen chip in sight (one picked from a list joins at the front)
+                int left=on.getLeft(),right=on.getRight(),x=view.getScrollX(),w=view.getWidth();
+                if(left<x||right>x+w)view.smoothScrollTo(Math.max(0,left-dp(8)),0);});}
+    }
+    Chips chips(LinearLayout f){Chips c=new Chips();f.addView(c.view,new LinearLayout.LayoutParams(-1,-2));return c;}
     AutoCompleteTextView suggestField(LinearLayout f,String hint,java.util.function.Supplier<List<String>> options){AutoCompleteTextView e=Suggest.box(main,f,hint,options);
         e.setTextColor(main.ink);return e;}
     Spinner spinner(LinearLayout f,String title,String[] names,int selection){TextView t=label(title,12,main.muted,true);f.addView(t);Spinner s=new Spinner(main);names(t,s);
@@ -140,6 +190,25 @@ class Ui {
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(action);confirm(w);main.render();
                 d.dismiss();}catch(Exception e){toast(e.getMessage());}}));d.show();
+    }
+    /**
+     * A full-screen form (Add transaction): Cancel and Save, and with [again] Save and add another, which saves, clears the form
+     * for the next one (again) and stays open. [saved] runs after each save that worked. [focus]: the box the keyboard opens on.
+     */
+    void sheet(String title,LinearLayout f,Runnable action,Runnable saved,Runnable again,EditText focus){
+        ScrollView scroll=new ScrollView(main);Button inForm=again!=null&&large()?button("Save and add another",()->{}):null; // large text: in the form (see large())
+        if(inForm!=null)f.addView(inForm);scroll.addView(f);
+        AlertDialog.Builder b=new AlertDialog.Builder(main).setTitle(title).setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null);
+        if(again!=null&&inForm==null)b.setNeutralButton("Save and add another",null);
+        AlertDialog d=b.create();main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
+        java.util.function.Predicate<View> save=w->{try{main.commit(action);}catch(Exception e){toast(e.getMessage());return false;}
+            confirm(w);saved.run();main.render();return true;};
+        View.OnClickListener next=w->{if(save.test(w)){again.run();scroll.scrollTo(0,0);}};
+        d.setOnShowListener(v->{d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{if(save.test(w))d.dismiss();});
+            if(again!=null&&inForm==null)d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(next);});
+        if(inForm!=null)inForm.setOnClickListener(next);
+        if(focus!=null){focus.requestFocus();d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE|android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);}
+        d.show();d.getWindow().setLayout(-1,-1);
     }
     void onPick(Spinner s,Runnable changed){s.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){changed.run();}public void onNothingSelected(AdapterView<?> p){}});}
 }

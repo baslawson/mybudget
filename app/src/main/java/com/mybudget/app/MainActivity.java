@@ -32,8 +32,10 @@ public class MainActivity extends Activity {
     final TransactionForms forms=new TransactionForms(this);
     Budget budget=new Budget();
     int ink,blue,muted,red,amber,green,canvas,surface,buttonSurface,primary;
+    // Matrix green: typed amounts that are positive (money in). Classic #00FF41 on dark; on light a deeper shade that reads on white (5:1).
+    int matrix;
     String themeMode;
-    LinearLayout root,content;
+    LinearLayout root,content;FrameLayout body;
     String tab="Home",search="",accountFilter="",categoryFilter="",fromFilter="",toFilter=""; // Transactions filters (see Budget.Filter)
     int flagFilter=-1,clearedFilter=-1;
     private String previousTab="Home";
@@ -50,9 +52,9 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         if(dark){ink=Color.rgb(237,241,250);blue=Color.rgb(179,191,255);muted=Color.rgb(171,181,201);red=Color.rgb(255,142,150);
             amber=Color.rgb(245,198,110);green=Color.rgb(117,219,177);canvas=Color.rgb(17,21,31);surface=Color.rgb(32,38,53);
-            buttonSurface=Color.rgb(43,52,78);primary=Color.rgb(65,80,159);}
+            buttonSurface=Color.rgb(43,52,78);primary=Color.rgb(65,80,159);matrix=Color.rgb(0,255,65);}
         else{ink=Color.rgb(27,39,62);blue=Color.rgb(57,77,165);muted=Color.rgb(111,121,140);red=Color.rgb(178,51,55);amber=Color.rgb(159,104,12);
-            green=Color.rgb(32,115,85);canvas=Color.rgb(243,245,250);surface=Color.WHITE;buttonSurface=Color.rgb(231,235,249);primary=blue;}
+            green=Color.rgb(32,115,85);canvas=Color.rgb(243,245,250);surface=Color.WHITE;buttonSurface=Color.rgb(231,235,249);primary=blue;matrix=Color.rgb(0,122,18);}
         getWindow().getDecorView().setSystemUiVisibility(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         if(state!=null){tab=state.getString("tab","Home");previousTab=state.getString("previousTab","Home");search=state.getString("search","");
             accountFilter=state.getString("accountFilter","");categoryFilter=state.getString("categoryFilter","");
@@ -236,7 +238,7 @@ public class MainActivity extends Activity {
         months.addView(next,new LinearLayout.LayoutParams(ui.dp(48),ui.dp(48)));if(!tab.equals("Settings"))top.addView(months);
         ScrollView scroll=new ScrollView(this);content=ui.column();scroll.addView(content);
         if(getResources().getConfiguration().fontScale>=1.3f)content.addView(top);else root.addView(top); // large text: the header scrolls away with the screen, leaving room for it
-        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        body=new FrameLayout(this);body.addView(scroll,new FrameLayout.LayoutParams(-1,-1));root.addView(body,new LinearLayout.LayoutParams(-1,0,1)); // body: the screen, with room for a floating button over it
         switch(tab){case"Settings":settingsScreen.settings();break;case"Home":homeScreen.home();break;case"Plan":budgetScreen.plan();break;case"Spending":transactionsScreen.spending();break;case"Accounts":accountsScreen.accounts();break;default:reportsScreen.reflect();}
         // A new tab fades up into place; another month slides in from the side it came from. A plain re-render (after a save) doesn't move.
         boolean newTab=!tab.equals(shownTab),newMonth=!newTab&&shownMonth!=null&&!month.equals(shownMonth);
