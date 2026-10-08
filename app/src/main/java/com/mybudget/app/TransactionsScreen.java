@@ -24,7 +24,7 @@ final class TransactionsScreen extends Ui {
             boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=main.budget.category(s.category);
             Budget.Account a=main.budget.account(s.account);String id=s.id;
             listRow(s.payee,(s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" · "+(a==null?"":a.name)+" · "+pretty(s.next)+" · "+main.forms.repeatLabel(s),
-                money(s.amount),s.amount>0?main.green:main.ink,isDue?"Due - tap to enter or skip":null,main.amber,()->main.forms.dueActions(id));}
+                money(s.amount),amountColour(s.amount),isDue?"Due - tap to enter or skip":null,main.amber,()->main.forms.dueActions(id));}
     }
     /** A section of the screen: an icon, its name (a heading for TalkBack) and a quiet count on the right. */
     private void sectionHeading(String icon,String title,String detail){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);
@@ -51,7 +51,7 @@ final class TransactionsScreen extends Ui {
         main.content.addView(label("Sent by Planner"+(at==null?"":" on "+when(at))+". They're added here when you mark them paid in Planner.",12,main.muted,false));
         for(Budget.Scheduled s:main.budget.fromPlanner){Budget.Category c=main.budget.category(s.category);
             boolean overdue=LocalDate.parse(s.next).isBefore(LocalDate.now());String key=s.billKey,payee=s.payee;
-            listRow(s.payee,(overdue?"Overdue since ":"Due ")+pretty(s.next)+" · "+(c==null?"no category yet":c.name),s.amount==0?"No amount":money(s.amount),main.ink,
+            listRow(s.payee,(overdue?"Overdue since ":"Due ")+pretty(s.next)+" · "+(c==null?"no category yet":c.name),s.amount==0?"No amount":money(s.amount),amountColour(s.amount),
                 c==null?"Choose a category to plan for it":null,main.amber,()->chooseBillCategory(key,payee));}
     }
     private void chooseBillCategory(String billKey,String payee){
@@ -60,11 +60,11 @@ final class TransactionsScreen extends Ui {
             .setItems(cats.stream().map(c->c.name+" ("+money(main.budget.available(c,main.month))+")").toArray(String[]::new),(d,n)->{String id=cats.get(n).id;
             if(main.change(()->main.budget.billCategories.put(billKey,id)))toast("Planned from "+cats.get(n).name+". MyBudget suggests it when the bill is paid, too.");}).show();
     }
-    /** The month on screen at a glance: money in (Matrix green), money out (red) and what's left over. */
+    /** The month on screen at a glance: money in (green), money out (red) and what's left over. */
     private void monthSummary(){long in=main.budget.income(main.month),out=main.budget.spending(main.month),net=in-out;
         LinearLayout c=card();c.setOrientation(LinearLayout.HORIZONTAL);c.setPadding(dp(8),dp(12),dp(8),dp(12));
         String[] names={"Money in","Money out",net<0?"Short by":"Left over"};long[] values={in,out,Math.abs(net)};
-        int[] colours={main.matrix,main.red,net<0?main.red:main.ink};String[] signs={"+","−",net<0?"−":""};
+        int[] colours={main.green,main.red,amountColour(net)};String[] signs={"+","−",net<0?"−":""};
         for(int i=0;i<3;i++){LinearLayout col=column();col.setGravity(Gravity.CENTER_HORIZONTAL);
             TextView n=label(names[i],11,main.muted,true);n.setGravity(Gravity.CENTER);col.addView(n);
             TextView v=label((values[i]==0?"":signs[i])+money(values[i]),16,values[i]==0?main.muted:colours[i],true);v.setGravity(Gravity.CENTER);v.setMaxLines(1);
@@ -152,7 +152,7 @@ final class TransactionsScreen extends Ui {
         List<Budget.Entry> list=main.budget.toReview();if(list.isEmpty()){main.render();return;}LinearLayout f=form();
         f.addView(label("Imported from a bank statement. Check the payee and category; editing one approves it.",13,main.muted,false));AlertDialog[] shown={null};
         for(Budget.Entry e:list.subList(0,Math.min(100,list.size()))){LinearLayout row=column();row.setPadding(0,dp(6),0,dp(6));
-            row.addView(label(e.payee+"  "+money(e.amount),15,e.amount>0?main.green:main.ink,true));Budget.Account a=main.budget.account(e.account);
+            TextView what=label("",15,main.ink,true);what.setText(tint(e.payee+"  "+money(e.amount),money(e.amount),amountColour(e.amount)));row.addView(what);Budget.Account a=main.budget.account(e.account);
             row.addView(label(categoryName(e)+" / "+(a==null?"":a.name)+" / "+pretty(e.date),12,main.muted,false));
             LinearLayout buttons=new LinearLayout(main);String id=e.id;
             Button approve=button("Approve",()->{if(main.change(()->main.budget.approve(entryById(id)))){shown[0].dismiss();
@@ -201,7 +201,7 @@ final class TransactionsScreen extends Ui {
             if(!e.memo.isEmpty())middle.addView(label(e.memo,12,main.muted,false));
             if(!e.photo.isEmpty())middle.addView(label("📎 Photo attached",12,main.blue,false));
             LinearLayout right=column();right.setGravity(android.view.Gravity.END);
-            TextView amount=label(money(e.amount),16,e.amount>0?main.green:main.ink,true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
+            TextView amount=label(money(e.amount),16,amountColour(e.amount),true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
             TextView cleared=label(e.cleared?"Cleared":"Uncleared",11,e.cleared?main.green:main.muted,false);cleared.setGravity(android.view.Gravity.END);cleared.setPadding(0,dp(2),0,0);right.addView(cleared);
             row.addView(right,new LinearLayout.LayoutParams(-2,-2));row.setOnClickListener(v->main.forms.transaction(e));}
         if(n==0){boolean none=main.budget.entries.isEmpty();list.addView(emptyRow(none?"🧾":"🔍",none?"No transactions yet. Add what you spend or earn and it shows here.":main.fromFilter.isEmpty()&&main.toFilter.isEmpty()?"No matching transactions this month.":"No matching transactions in these dates."));}

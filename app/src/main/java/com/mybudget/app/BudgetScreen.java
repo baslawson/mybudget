@@ -86,7 +86,9 @@ final class BudgetScreen extends Ui {
         balance.addView(value,new LinearLayout.LayoutParams(-1,Math.round(dp(30)*scale)));
         heading.addView(balance,new LinearLayout.LayoutParams(large?-1:Math.round(dp(128)*scale),-2));row.addView(heading);
         LinearLayout details=new LinearLayout(main);
-        TextView assigned=label("Assigned  "+money(main.budget.assigned(c,main.month)),11,main.muted,false),activity=label("Activity  "+money(main.budget.activity(c,main.month)),11,main.muted,false);
+        long given=main.budget.assigned(c,main.month),moved=main.budget.activity(c,main.month);
+        TextView assigned=label("",11,main.muted,false),activity=label("",11,main.muted,false);
+        assigned.setText(tint("Assigned  "+money(given),money(given),amountColour(given)));activity.setText(tint("Activity  "+money(moved),money(moved),amountColour(moved)));
         details.addView(assigned,new LinearLayout.LayoutParams(0,-2,1));activity.setGravity(Gravity.END);
         details.addView(activity,new LinearLayout.LayoutParams(0,-2,1));row.addView(details);
         // Progress: Set aside and debt payments by this month's Assigned; a balance by Available; by date toward the whole amount; refills (and weekly) toward this month's amount.
@@ -147,7 +149,8 @@ final class BudgetScreen extends Ui {
         TextView arrow=label(shut?"▸":"▾",16,main.blue,true);arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(arrow,new LinearLayout.LayoutParams(dp(22),-2));
         TextView name=label(group,18,main.blue,true);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
-        TextView sum=label((shut?count(n,"category","categories")+" · ":"")+money(total),13,total<0?main.red:main.muted,true);row.addView(sum);
+        String sumText=(shut?count(n,"category","categories")+" · ":"")+money(total);TextView sum=label("",13,main.muted,true);
+        sum.setText(tint(sumText,money(total),amountColour(total)));row.addView(sum);
         heading(row);row.setContentDescription(group+", "+(shut?"collapsed, ":"")+money(total)+" available. Double tap to "+(shut?"show":"hide")+" its categories.");
         row.setOnClickListener(v->{Set<String> now=collapsedGroups();if(!now.remove(group))now.add(group);tick(v);
             main.getSharedPreferences("appearance",0).edit().putStringSet("collapsed_groups",now).apply();main.render();});

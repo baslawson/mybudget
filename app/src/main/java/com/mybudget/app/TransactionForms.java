@@ -35,7 +35,7 @@ final class TransactionForms extends Ui {
             toast(onlyTracking?"Add a bank, cash or card account first. Tracking accounts change with Update balance.":"All your accounts are closed. Reopen one in Accounts first.");return;}
         boolean adding=old==null&&sched==null;
         LinearLayout f=form();
-        // 1. The amount: large, signed and coloured by where the money goes (− red out, + Matrix green in), with the kind under it.
+        // 1. The amount: large, signed and coloured by where the money goes (− red out, + green in), with the kind under it.
         // A - or + typed first picks Expense or Income and is taken off, so the box always holds the size of the amount.
         LinearLayout amountRow=new LinearLayout(main);amountRow.setGravity(Gravity.CENTER_VERTICAL);amountRow.setPadding(0,dp(8),0,0);
         TextView sign=label("−",36,main.red,true);sign.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);sign.setPadding(0,0,dp(6),0);
@@ -43,9 +43,9 @@ final class TransactionForms extends Ui {
         amount.setTextSize(36);amount.setTypeface(null,android.graphics.Typeface.BOLD);amount.setFontFeatureSettings("tnum");sumsHint(amount,"Amount ("+code()+")");
         amountRow.addView(amount,new LinearLayout.LayoutParams(0,-2,1));TextView currency=label(code(),15,main.muted,true);
         currency.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);amountRow.addView(currency);f.addView(amountRow);
-        Choice kind=choice(f,new String[]{"− Expense","+ Income","↩ Refund"},new int[]{main.red,main.matrix,main.matrix},oldAmount<0?0:keepCategory.isEmpty()?1:2);
+        Choice kind=choice(f,new String[]{"− Expense","+ Income","↩ Refund"},new int[]{main.red,main.green,main.green},oldAmount<0?0:keepCategory.isEmpty()?1:2);
         TextView guidance=label("",12,main.muted,false);f.addView(guidance);
-        Runnable paint=()->{boolean out=kind.selected()==0;int c=out?main.red:main.matrix;sign.setText(out?"−":"+");sign.setTextColor(c);amount.setTextColor(c);};
+        Runnable paint=()->{boolean out=kind.selected()==0;int c=out?main.red:main.green;sign.setText(out?"−":"+");sign.setTextColor(c);amount.setTextColor(c);};
         // 2. Who and what. Payees used before are suggested; picking one on a new transaction fills in the category it had last
         // time and offers last time's amount.
         section(f,"Who and what");
@@ -113,7 +113,7 @@ final class TransactionForms extends Ui {
             if(old!=null&&old.category.equals(c.id)&&YearMonth.from(LocalDate.parse(old.date)).equals(m))now-=old.amount; // editing: without its old amount
             long after=now+(k==0?-typed:typed);preview.setVisibility(View.VISIBLE);
             if(typed==0){preview.setText(c.name+" has "+money(now)+" available");preview.setTextColor(main.muted);}
-            else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(main.matrix);}
+            else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(main.green);}
             else{preview.setText(c.name+" will be overspent by "+money(-after));preview.setTextColor(main.red);}};
         // 4. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.
         LinearLayout more=column();Button moreButton=button("",()->{});moreButton.setBackground(bg(Color.TRANSPARENT));

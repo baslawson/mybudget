@@ -108,12 +108,26 @@ class Ui {
     EditText field(LinearLayout f,String hint,boolean numeric){EditText e=new EditText(main);e.setHint(hint);e.setSingleLine(true);
         e.setTextColor(main.ink);if(numeric){e.setInputType(AMOUNT_INPUT);sumsHint(e);signColours(e,1);}f.addView(e,new LinearLayout.LayoutParams(-1,-2));return e;}
     /**
-     * An amount box's text turns red when what's typed works out negative and Matrix green when positive, as it's typed (sums
-     * too: "45-50" is red). [sign] -1: the box holds money going out (an expense part), so a positive amount shows red.
+     * An amount box's text turns red when what's typed works out negative and green when positive, as it's typed (sums too:
+     * "45-50" is red). [sign] -1: the box holds money going out (an expense part), so a positive amount shows red.
      */
     void signColours(EditText e,int sign){Runnable paint=()->{long v;try{v=Budget.evaluate(e.getText().toString())*sign;}catch(Exception x){v=0;}
-            e.setTextColor(v<0?main.red:v>0?main.matrix:main.ink);};
+            e.setTextColor(amountColour(v));};
         onText(e,paint);paint.run();}
+    // Amounts everywhere: positive in the green Budget uses for Available, negative in red, zero grey. Target figures keep
+    // their own colours (amber while a target is short).
+    int amountColour(long cents){return cents>0?main.green:cents<0?main.red:main.muted;} // zero: quiet grey
+    /** Money going out shown without a minus (Spending, Money out, a card's Owed): red when there is some. */
+    int outColour(long cents){return cents>0?main.red:cents<0?main.green:main.muted;}
+    /** [text] with the first [part] in it (an amount inside a line, "Assigned A$40.00") shown in [colour]. */
+    static CharSequence tint(CharSequence text,String part,int colour){android.text.SpannableString s=new android.text.SpannableString(text);
+        int at=part.isEmpty()?-1:text.toString().indexOf(part);
+        if(at>=0)s.setSpan(new android.text.style.ForegroundColorSpan(colour),at,at+part.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);return s;}
+    /** A line with two amounts, each coloured: [a] in [ca], then [b] (searched after [a], so equal amounts work) in [cb]. */
+    static CharSequence tint2(String text,String a,int ca,String b,int cb){int i=text.indexOf(a);int j=i<0?-1:text.indexOf(b,i+a.length());
+        android.text.SpannableString s=new android.text.SpannableString(text);
+        if(i>=0)s.setSpan(new android.text.style.ForegroundColorSpan(ca),i,i+a.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if(j>=0)s.setSpan(new android.text.style.ForegroundColorSpan(cb),j,j+b.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);return s;}
     /** A form section's title ("WHO AND WHAT"): small, spaced capitals; a heading for TalkBack. */
     TextView section(LinearLayout f,String title){TextView t=label(title.toUpperCase(Locale.ROOT),12,main.muted,true);t.setLetterSpacing(0.1f);
         t.setPadding(0,dp(18),0,dp(4));heading(t);t.setContentDescription(title);f.addView(t);return t;}

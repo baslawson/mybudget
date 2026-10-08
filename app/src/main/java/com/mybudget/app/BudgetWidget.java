@@ -58,7 +58,7 @@ public class BudgetWidget extends AppWidgetProvider {
         java.text.NumberFormat format=Budget.moneyFormat(b.currency,Locale.getDefault());
         String dots=format.getCurrency().getSymbol(Locale.getDefault())+"•••"; // as Ui.money with Hide amounts
         long ready=b.spendable(month);v.setTextViewText(R.id.widget_title,"To budget · "+month.format(DateTimeFormatter.ofPattern("MMMM")));
-        v.setTextViewText(R.id.widget_ready,hide?dots:Budget.money(ready,format));color(context,v,R.id.widget_ready,ready<0&&!hide?R.color.widget_red:R.color.widget_ink);
+        v.setTextViewText(R.id.widget_ready,hide?dots:Budget.money(ready,format));color(context,v,R.id.widget_ready,ready<0&&!hide?R.color.widget_red:ready>0&&!hide?R.color.widget_green:R.color.widget_ink);
         v.setContentDescription(R.id.widget_ready,hide?"To budget, amount hidden":"To budget "+Budget.money(ready,format));
         List<Budget.Category> pinned=b.pinned();int shown=Math.max(0,Math.min(Math.min(rows,ROWS),pinned.size()));
         for(int i=0;i<ROWS;i++){if(i>=shown){v.setViewVisibility(ROW[i],View.GONE);continue;}Budget.Category c=pinned.get(i);long available=b.available(c,month);

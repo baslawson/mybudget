@@ -16,9 +16,10 @@ final class ReportsScreen extends Ui {
     ReportsScreen(MainActivity main){super(main);}
     void reflect(){
         LinearLayout totals=card();totals.addView(heading("This month's cash flow",20,main.ink));
-        totals.addView(label("Income "+money(main.budget.income(main.month)),21,main.green,true));
-        totals.addView(label("Spending "+money(main.budget.spending(main.month)),21,main.ink,true));
-        totals.addView(label("Difference "+money(main.budget.income(main.month)-main.budget.spending(main.month)),17,main.blue,true));
+        long monthIn=main.budget.income(main.month),monthOut=main.budget.spending(main.month);
+        totals.addView(label("Income "+money(monthIn),21,amountColour(monthIn),true));
+        totals.addView(label("Spending "+money(monthOut),21,outColour(monthOut),true));
+        totals.addView(label("Difference "+money(monthIn-monthOut),17,amountColour(monthIn-monthOut),true));
         breakdownCard();trendsCard(); // card payments, transfers and tracking accounts aren't spending
         // Income vs spending, six months to this one: one axis from zero; the list below is the table view.
         LinearLayout flow=card();flow.addView(heading("Income and spending",20,main.ink));
@@ -32,7 +33,7 @@ final class ReportsScreen extends Ui {
         for(int i=0;i<6;i++){YearMonth m=main.month.minusMonths(5-i);ms[i]=m;in[i]=main.budget.income(m);out[i]=main.budget.spending(m);
             names[i]=m.format(DateTimeFormatter.ofPattern("MMM"));}
         TextView picked=label("",13,main.ink,true);picked.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);flow.addView(picked);
-        java.util.function.IntConsumer show=i->picked.setText(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in "+money(in[i])+"  ·  out "+money(out[i]));show.accept(5);
+        java.util.function.IntConsumer show=i->picked.setText(inOut(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in ",in[i],"  ·  out ",out[i]));show.accept(5);
         CashFlowChart chart=new CashFlowChart(main,in,out,names,income,spend,main.muted,main.muted,main.buttonSurface,5,show);
         String[] said=new String[6];for(int i=0;i<6;i++)said[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+": income "+money(in[i])+", spending "+money(out[i]);
         chart.setContentDescription("Income and spending chart, last six months. "+String.join(". ",said)+".");chart.spoken(said);
@@ -40,16 +41,19 @@ final class ReportsScreen extends Ui {
         incomeExpenseTable();yearCard();
         // Net worth and Money age.
         LinearLayout worth=card();long now=main.budget.netWorth(main.month),change=now-main.budget.netWorth(main.month.minusMonths(1));
-        worth.addView(heading("Net worth",20,main.ink));worth.addView(label(money(now),26,main.ink,true));
-        worth.addView(label((change>=0?"Up ":"Down ")+money(Math.abs(change))+" since the end of last month",13,main.muted,false));
+        worth.addView(heading("Net worth",20,main.ink));worth.addView(label(money(now),26,amountColour(now),true));
+        TextView moved=label("",13,main.muted,false);moved.setText(tint((change>=0?"Up ":"Down ")+money(Math.abs(change))+" since the end of last month",money(Math.abs(change)),amountColour(change)));worth.addView(moved);
         LinearLayout age=card();LocalDate until=main.month.isBefore(YearMonth.now())?main.month.atEndOfMonth():LocalDate.now();
         int days=main.budget.ageOfMoney(until);age.addView(heading("Money age",20,main.ink));
         age.addView(label(days<0?"Not enough spending yet":count(days,"day","days"),26,days>=30?main.green:main.ink,true));
         age.addView(label("How old your money is when you spend it, over your last 10 outflows. 30 days or more means you're spending last month's income.",13,main.muted,false));
         main.content.addView(heading("Last six months",20,main.ink));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
-            main.content.addView(label(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In "+money(main.budget.income(m))+"   Out "+money(main.budget.spending(m)),13,main.muted,false));}
+            TextView line=label("",13,main.muted,false);line.setText(inOut(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In ",main.budget.income(m),"   Out ",main.budget.spending(m)));main.content.addView(line);}
         main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
     }
+    /** "[before]in-amount[between]out-amount": money in coloured by its sign, money out (spending, shown without a minus) red. */
+    private CharSequence inOut(String before,long in,String between,long out){
+        return tint2(before+money(in)+between+money(out),money(in),amountColour(in),money(out),outColour(out));}
     private int incomeColor(){return main.darkTheme?Color.parseColor("#3987E5"):Color.parseColor("#2A78D6");}
     private int spendColor(){return main.darkTheme?Color.parseColor("#D95926"):Color.parseColor("#EB6834");}
     /** The yearly report (Budget.year): pick a year with transactions; income, spending and net, each month, the top 10 categories and every group. */
@@ -66,18 +70,18 @@ final class ReportsScreen extends Ui {
         TextView title=label(String.valueOf(year),18,main.ink,true);title.setGravity(Gravity.CENTER);
         pick.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));pick.addView(title,new LinearLayout.LayoutParams(0,-2,1));pick.addView(next,new LinearLayout.LayoutParams(dp(48),dp(48)));body.addView(pick);
         Budget.Year y=main.budget.year(year);
-        body.addView(label("Income "+money(y.income()),17,main.green,true));body.addView(label("Spending "+money(y.spending()),17,main.ink,true));
-        body.addView(label("Net (income − spending) "+money(y.net()),15,main.blue,true));
+        body.addView(label("Income "+money(y.income()),17,amountColour(y.income()),true));body.addView(label("Spending "+money(y.spending()),17,outColour(y.spending()),true));
+        body.addView(label("Net (income − spending) "+money(y.net()),15,amountColour(y.net()),true));
         if(y.income()==0&&y.spending()==0&&y.top.isEmpty()){quiet(body,"📊","No income or spending in "+year+".");return;}
         // Month by month: the chart (tap a month for its amounts) and the same as a list.
         String[] names=new String[12];YearMonth[] ms=new YearMonth[12];for(int i=0;i<12;i++){ms[i]=YearMonth.of(year,i+1);names[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMMM"));}
         TextView picked=label("",13,main.ink,true);picked.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(picked);
-        java.util.function.IntConsumer show=i->picked.setText(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in "+money(y.income[i])+"  ·  out "+money(y.spending[i]));
+        java.util.function.IntConsumer show=i->picked.setText(inOut(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  in ",y.income[i],"  ·  out ",y.spending[i]));
         int selected=year==now?LocalDate.now().getMonthValue()-1:11;show.accept(selected);
         CashFlowChart chart=new CashFlowChart(main,y.income,y.spending,names,incomeColor(),spendColor(),main.muted,main.muted,main.buttonSurface,selected,show);
         String[] said=new String[12];for(int i=0;i<12;i++)said[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMM"))+": income "+money(y.income[i])+", spending "+money(y.spending[i]);
         chart.setContentDescription("Income and spending chart for each month of "+year+". "+String.join(". ",said)+".");chart.spoken(said);body.addView(chart,new LinearLayout.LayoutParams(-1,-2));
-        for(int i=0;i<12;i++)body.addView(label(ms[i].format(DateTimeFormatter.ofPattern("MMM"))+"   In "+money(y.income[i])+"   Out "+money(y.spending[i]),13,main.muted,false));
+        for(int i=0;i<12;i++){TextView line=label("",13,main.muted,false);line.setText(inOut(ms[i].format(DateTimeFormatter.ofPattern("MMM"))+"   In ",y.income[i],"   Out ",y.spending[i]));body.addView(line);}
         // The biggest categories and every group, with their share of the year's spending (as the spending breakdown); tap for transactions.
         YearMonth[] r={YearMonth.of(year,1),YearMonth.of(year,12)};
         body.addView(heading("Top "+Budget.TOP+" categories",16,main.ink));yearRows(body,y.top,r);
@@ -87,10 +91,13 @@ final class ReportsScreen extends Ui {
     private void yearRows(LinearLayout body,List<Budget.Slice> slices,YearMonth[] r){
         if(slices.isEmpty()){quiet(body,"📊","No spending this year.");return;}
         for(Budget.Slice s:slices){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));
-            TextView amount=label(money(s.amount)+"  ·  "+percent(s.tenths),14,main.ink,true);amount.setGravity(Gravity.END);nameAndAmount(row,s.name,amount);
+            TextView amount=sliceAmount(s);nameAndAmount(row,s.name,amount);
             row.setContentDescription(s.name+", "+money(s.amount)+", "+percent(s.tenths)+". Double tap for its transactions.");
             row.setOnClickListener(v->sliceTransactions(s,r));body.addView(row);}
     }
+    /** A slice's spending (red: money out) and its share. */
+    private TextView sliceAmount(Budget.Slice s){TextView amount=label("",14,main.ink,true);amount.setGravity(Gravity.END);
+        amount.setText(tint(money(s.amount)+"  ·  "+percent(s.tenths),money(s.amount),outColour(s.amount)));return amount;}
     /** A row's name and amount side by side; with large text the amount goes under the name, so a name never breaks mid-word. */
     private void nameAndAmount(LinearLayout row,String name,TextView amount){TextView n=label(name,14,main.ink,false);
         if(main.getResources().getConfiguration().fontScale<1.3f){row.addView(n,new LinearLayout.LayoutParams(0,-2,1));row.addView(amount);return;}
@@ -130,7 +137,7 @@ final class ReportsScreen extends Ui {
             View swatch=new View(main);GradientDrawable d=new GradientDrawable();d.setColor(colors[i]);d.setCornerRadius(dp(2));
             swatch.setBackground(d);swatch.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(10),dp(10));
             sp.setMargins(0,0,dp(8),0);row.addView(swatch,sp);
-            TextView amount=label(money(s.amount)+"  ·  "+percent(s.tenths),14,main.ink,true);amount.setGravity(Gravity.END);nameAndAmount(row,s.name,amount);
+            TextView amount=sliceAmount(s);nameAndAmount(row,s.name,amount);
             row.setContentDescription(s.name+", "+money(s.amount)+", "+percent(s.tenths)+". Double tap for its transactions.");
             row.setOnClickListener(v->sliceTransactions(s,r));body.addView(row);}
         // Both views leave out categories that got back more than they spent: their refunds come off the total here, as in Spending.
@@ -167,15 +174,17 @@ final class ReportsScreen extends Ui {
         int n=main.trendMonths;long[] v=main.budget.trend(ids,main.month,n);long average=Budget.average(v);
         String[] labels=new String[n];YearMonth[] ms=new YearMonth[n];for(int i=0;i<n;i++){ms[i]=main.month.minusMonths(n-1-i);
             labels[i]=ms[i].format(DateTimeFormatter.ofPattern(n>6?"MMMMM":"MMM"));}
-        body.addView(label("Average "+money(average)+" a month",15,main.ink,true));TextView picked=label("",13,main.ink,true);picked.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(picked);
-        java.util.function.IntConsumer show=i->picked.setText(ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  "+money(v[i]));show.accept(n-1);
+        TextView avg=label("",15,main.ink,true);avg.setText(tint("Average "+money(average)+" a month",money(average),outColour(average)));body.addView(avg);
+        TextView picked=label("",13,main.ink,true);picked.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(picked);
+        java.util.function.IntConsumer show=i->{String month=ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+":  ";picked.setText(tint(month+money(v[i]),money(v[i]),outColour(v[i])));};show.accept(n-1);
         SpendingCharts.Trend chart=new SpendingCharts.Trend(main,v,labels,average,(main.darkTheme?SLICE_DARK:SLICE_LIGHT)[0],main.muted,main.muted,main.buttonSurface,n-1,show);
         String[] said=new String[n];for(int i=0;i<n;i++)said[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+": "+money(v[i]);
         chart.setContentDescription("Spending per month for the last "+n+" months, averaging "+money(average)+". "+String.join(". ",said)+".");chart.spoken(said);
         body.addView(chart,new LinearLayout.LayoutParams(-1,-2));
         body.addView(label("Dashed line: the average. Tap a month for its amount.",11,main.muted,false));
         LinearLayout list=column();list.setVisibility(View.GONE);
-        for(int i=n-1;i>=0;i--)list.addView(label(ms[i].format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   "+money(v[i]),13,main.muted,false));
+        for(int i=n-1;i>=0;i--){TextView row=label("",13,main.muted,false);String month=ms[i].format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   ";
+            row.setText(tint(month+money(v[i]),money(v[i]),outColour(v[i])));list.addView(row);}
         Button toggle=button("Show as a list",()->{});toggle.setOnClickListener(x->{boolean open=list.getVisibility()!=View.VISIBLE;
             list.setVisibility(open?View.VISIBLE:View.GONE);toggle.setText(open?"Hide the list":"Show as a list");});
         body.addView(toggle);body.addView(list);
@@ -197,23 +206,26 @@ final class ReportsScreen extends Ui {
         scroll.post(()->{int cell=grown(96),total=names.getWidth()+scroll.getWidth(),least=Math.max(dp(72),Math.min(grown(118),total-cell)),fit=Math.max(1,(total-least)/cell);
             LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)names.getLayoutParams();if(total-fit*cell!=names.getWidth()){p.width=total-fit*cell;names.setLayoutParams(p);}
             scroll.post(()->scroll.fullScroll(View.FOCUS_RIGHT));});
-        tableRow(names,cols,"",heads,null,main.muted,true,0);
-        tableRow(names,cols,"Income",null,null,main.blue,true,0);for(Budget.Row r:t.income)tableRow(names,cols,r.name,heads,r,main.ink,false,8);
-        tableRow(names,cols,t.incomeTotal.name,heads,t.incomeTotal,main.ink,true,0);
-        tableRow(names,cols,"Expenses",null,null,main.blue,true,0);
-        for(Budget.Row r:t.expenses)tableRow(names,cols,r.name,heads,r,r.group?main.ink:main.muted,r.group,r.group?8:16);
-        tableRow(names,cols,t.expenseTotal.name,heads,t.expenseTotal,main.ink,true,0);
-        tableRow(names,cols,"Net (income − expenses)",heads,t.net,main.ink,true,0);
+        tableRow(names,cols,"",heads,null,main.muted,true,0,1);
+        tableRow(names,cols,"Income",null,null,main.blue,true,0,1);for(Budget.Row r:t.income)tableRow(names,cols,r.name,heads,r,main.ink,false,8,1);
+        tableRow(names,cols,t.incomeTotal.name,heads,t.incomeTotal,main.ink,true,0,1);
+        tableRow(names,cols,"Expenses",null,null,main.blue,true,0,-1);
+        for(Budget.Row r:t.expenses)tableRow(names,cols,r.name,heads,r,r.group?main.ink:main.muted,r.group,r.group?8:16,-1);
+        tableRow(names,cols,t.expenseTotal.name,heads,t.expenseTotal,main.ink,true,0,-1);
+        tableRow(names,cols,"Net (income − expenses)",heads,t.net,main.ink,true,0,1);
     }
     /** [n] dp, grown with large text (up to twice), for the table's fixed rows and columns, so amounts aren't cut. */
     private int grown(int n){return Math.round(dp(n)*Math.max(1f,Math.min(2f,main.getResources().getConfiguration().fontScale)));}
-    /** One table row: its name on the left, its months, average and total in the scrolling part ([r] null: [heads] themselves, or nothing for a section title). */
-    private void tableRow(LinearLayout names,LinearLayout cols,String name,String[] heads,Budget.Row r,int color,boolean bold,int indent){
+    /**
+     * One table row: its name on the left, its months, average and total in the scrolling part ([r] null: [heads] themselves, or
+     * nothing for a section title). Each amount is coloured by its sign; [sign] -1: expenses (money out, shown without a minus) are red.
+     */
+    private void tableRow(LinearLayout names,LinearLayout cols,String name,String[] heads,Budget.Row r,int color,boolean bold,int indent,int sign){
         TextView n=label(name,12,color,bold);n.setSingleLine(true);n.setEllipsize(TextUtils.TruncateAt.END);n.setGravity(Gravity.CENTER_VERTICAL);
         n.setPadding(dp(indent),0,dp(4),0);names.addView(n,new LinearLayout.LayoutParams(-1,grown(30)));
         LinearLayout line=new LinearLayout(main);int cells=heads==null?0:heads.length;
-        for(int i=0;i<cells;i++){String text=r==null?heads[i]:money(i<r.amounts.length?r.amounts[i]:i==r.amounts.length?r.average():r.total());
-            TextView c=label(text,12,r==null?main.muted:color,bold||i>=cells-2);c.setSingleLine(true);
+        for(int i=0;i<cells;i++){long v=r==null?0:i<r.amounts.length?r.amounts[i]:i==r.amounts.length?r.average():r.total();String text=r==null?heads[i]:money(v);
+            TextView c=label(text,12,r==null?main.muted:v==0?color:sign<0?outColour(v):amountColour(v),bold||i>=cells-2);c.setSingleLine(true);
             c.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);c.setPadding(dp(4),0,dp(4),0);
             if(r!=null)c.setContentDescription(name+", "+heads[i]+", "+text);line.addView(c,new LinearLayout.LayoutParams(grown(96),grown(30)));}
         if(cells==0)line.addView(new View(main),new LinearLayout.LayoutParams(dp(1),grown(30)));cols.addView(line);

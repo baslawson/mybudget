@@ -16,10 +16,11 @@ final class AccountsScreen extends Ui {
             head(c,a.credit()?"\uD83D\uDCB3":"\uD83C\uDFE6",heading(a.name+(a.credit()?" · credit card":""),20,main.ink));
             if(a.credit()){long owed=-main.budget.balance(a,false);Budget.Category p=main.budget.paymentCategory(a);
                 long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
-                c.addView(label(owed>0?"Owed "+money(owed):owed<0?"In credit "+money(-owed):"Paid off",28,main.ink,true));
+                TextView debt=label("",28,main.ink,true);debt.setText(owed>0?tint("Owed "+money(owed),money(owed),outColour(owed)):owed<0?tint("In credit "+money(-owed),money(-owed),main.green):"Paid off");c.addView(debt);
                 c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?main.amber:main.green,true));
-                c.addView(button("Make a payment",()->main.forms.payCard(a.id)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,b<0?main.red:main.ink,true));}
-            c.addView(label("Cleared "+money(main.budget.balance(a,true))+" / Uncleared "+money(main.budget.balance(a,false)-main.budget.balance(a,true)),13,main.muted,false));
+                c.addView(button("Make a payment",()->main.forms.payCard(a.id)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
+            long cleared=main.budget.balance(a,true),uncleared=main.budget.balance(a,false)-cleared;TextView split=label("",13,main.muted,false);
+            split.setText(tint2("Cleared "+money(cleared)+" / Uncleared "+money(uncleared),money(cleared),amountColour(cleared),money(uncleared),amountColour(uncleared)));c.addView(split);
             if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,main.green,false));
             c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
             pair(c,button("Reconcile",()->reconcile(a)),button("Edit account",()->editAccount(a.id)));}
@@ -29,7 +30,8 @@ final class AccountsScreen extends Ui {
                 main.content.addView(label("Off budget: they count in Net worth only. Update their balance now and then.",13,main.muted,false));}anyTracking=true;
             LinearLayout c=card();head(c,a.liability?"\uD83D\uDCC9":"\uD83D\uDCC8",heading(a.name+(a.liability?" · loan or debt":" · asset"),20,main.ink));
             long balance=main.budget.balance(a,false);
-            c.addView(label(a.liability?(balance<0?"Owed "+money(-balance):"Paid off"):money(balance),28,main.ink,true));
+            TextView worth=label("",28,main.ink,true);
+            worth.setText(a.liability?(balance<0?tint("Owed "+money(-balance),money(-balance),outColour(-balance)):"Paid off"):tint(money(balance),money(balance),amountColour(balance)));c.addView(worth);
             if(a.liability&&(a.rate>0||a.payment>0))c.addView(label(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),13,main.muted,false));
             String id=a.id;c.addView(button("Update balance",()->updateBalance(id)));
             if(a.liability)c.addView(button("Payoff planner",()->payoffPlanner(id)));
