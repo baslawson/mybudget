@@ -136,7 +136,10 @@ final class TransactionForms extends Ui {
             if(typed==0){preview.setTextColor(main.muted);preview.setText(tint(c.name+" has "+money(now)+" available",money(now),amountColour(now)));}
             else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(amountColour(after));}
             else{preview.setText(c.name+" will be overspent by "+money(-after));preview.setTextColor(main.red);}};
-        // 4. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.
+        // 4. Reminders, as Planner's: from 9:00 on the date (an upcoming one's next date, so they move on with it). None until added.
+        ReminderEditor reminders=new ReminderEditor(main,old!=null?old.reminders:sched!=null?sched.reminders:new ArrayList<>(),()->(String)day.getTag());
+        reminders.addTo(f);onText(day,reminders::show);
+        // 5. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.
         LinearLayout more=column();Button moreButton=button("",()->{});moreButton.setBackground(bg(Color.TRANSPARENT));
         f.addView(moreButton);f.addView(more);
         // Notes used before are suggested, those with this payee first.
@@ -199,19 +202,20 @@ final class TransactionForms extends Ui {
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];
             LocalDate when=LocalDate.parse((String)day.getTag());
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
-                Budget.Scheduled s=new Budget.Scheduled(p,cat2,acc2,when.toString(),cents,rep);s.memo=memoText;
+                Budget.Scheduled s=new Budget.Scheduled(p,cat2,acc2,when.toString(),cents,rep);s.memo=memoText;s.reminders.addAll(reminders.assignIds(main.budget));
                 if(isSplit)for(Budget.Split part:parts){Budget.Split c=new Budget.Split(part.category,part.amount*(k==0?-1:1));c.memo=part.memo;s.splits.add(c);} // entered later with the same parts
                 if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;
                     if(when.toString().equals(sched.next))s.day=sched.day;} // Hunt 23 M1: rent on the 31st, shown as 30 Nov, stays the 31st
                 if(sched==null&&!when.isAfter(LocalDate.now())){main.budget.validate(s);
-                    main.budget.enter(s,photo[0],cleared.isChecked()).flag=flag.getSelectedItemPosition();
+                    Budget.Entry entered=main.budget.enter(s,photo[0],cleared.isChecked());entered.flag=flag.getSelectedItemPosition();
+                    if(rep.equals("Never")){entered.reminders.addAll(s.reminders);s.reminders.clear();} // a one-off: its reminders go with it; a repeat's stay on the repeat
                     if(!rep.equals("Never"))main.budget.scheduled.add(s);
                     return;} // today or earlier: entered now (with its photo and Cleared tick), the repeat continues
                 main.budget.validate(s);main.budget.scheduled.removeIf(t->t.id.equals(s.id));main.budget.scheduled.add(s);
                 if(!photo[0].isEmpty()||flag.getSelectedItemPosition()>0)toast("Saved as upcoming: add the photo and flag when it's entered."); // hunt 26 C3: upcoming ones keep neither
                 return;
             }
-            Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];
+            Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];e.reminders.addAll(reminders.assignIds(main.budget));
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
                 e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
             if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
@@ -221,7 +225,7 @@ final class TransactionForms extends Ui {
             long size;try{size=Budget.cents(amount.getText().toString());}catch(Exception e){size=0;}
             Toast.makeText(main,"Saved: "+payee.getText().toString().trim()+" "+(kind.selected()==0?"−":"+")+money(size),Toast.LENGTH_SHORT).show();};
         // Save and add another (new transactions only): the kind, date and account stay; everything else starts afresh.
-        Runnable again=!adding?null:()->{payee.setText("",false);amount.setText("");memo.setText("",false);photo[0]="";showPhotoBox[0].run();
+        Runnable again=!adding?null:()->{payee.setText("",false);amount.setText("");memo.setText("",false);photo[0]="";showPhotoBox[0].run();reminders.list.clear();reminders.show();
             parts.clear();showSplit.run();flag.setSelection(0);cleared.setChecked(false);if(repeatField!=null)repeatField.setSelection(0);
             cat[0]=-1;categoryChosen[0]=false;showCategories[0].run();lastTime.setVisibility(View.GONE);showPreview[0].run();amount.requestFocus();};
         sheet(sched!=null?"Edit upcoming transaction":old==null?"Add transaction":"Edit transaction",f,save,saved,again,adding?amount:null);
@@ -331,7 +335,7 @@ final class TransactionForms extends Ui {
             if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile.");
             Budget.Entry e=new Budget.Entry(required(payee),pc.id,card.id,date(day),Budget.cents(amount.getText().toString())*(kind.selected()==0?-1:1));
             e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();
-            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.flag=old.flag;e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;}
+            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.flag=old.flag;e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;e.reminders.addAll(old.reminders);}
             main.budget.validate(e);if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});}
     void transfer(){editTransfer(null,null,0);}
     /** A card payment: a transfer from a cash account to the card, for what's set aside (or what's owed, if less). */
@@ -364,7 +368,7 @@ final class TransactionForms extends Ui {
             Budget.Account a=accounts.get(from.getSelectedItemPosition()),b=accounts.get(to.getSelectedItemPosition());
             boolean out=!a.tracking()&&b.tracking();if(out&&cats.isEmpty())throw new IllegalArgumentException("Add a category first.");
             Budget.Entry e=new Budget.Entry("Transfer to "+b.name,out?cats.get(Math.max(0,category.getSelectedItemPosition())).id:"",a.id,date(day),-Budget.cents(amount.getText().toString()));
-            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account)&&e.destination.equals(old.destination);}
+            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.reminders.addAll(old.reminders);e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account)&&e.destination.equals(old.destination);}
             main.budget.validate(e);if(old!=null)e.id=old.id;if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});
 
     }
@@ -380,7 +384,7 @@ final class TransactionForms extends Ui {
         f.addView(button("Delete transaction",()->delete(old)));
         dialog("Edit transaction",f,()->{Budget.Entry e=new Budget.Entry(required(payee),"",accountId,date(day),Budget.parse(amount.getText().toString()));
             e.id=old.id;e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;
-            e.bankPayee=Budget.statementPayee(old);main.budget.validate(e);
+            e.bankPayee=Budget.statementPayee(old);e.reminders.addAll(old.reminders);main.budget.validate(e); // its reminders stay (set in the main form)
             if(!put(old.id,e))throw new IllegalArgumentException("This transaction was removed meanwhile.");});
     }
 }

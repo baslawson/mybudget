@@ -22,6 +22,7 @@ final class SettingsScreen extends Ui {
         LinearLayout money=card();money.addView(heading("Currency",20,main.ink));
         money.addView(label("Amounts are shown in this currency, in your phone's number style. Planner's bills are added only when they're in it.",14,main.muted,false));
         money.addView(button("Currency: "+code(),this::chooseCurrency));
+        reminders();
         TextView backupTitle=heading("Backup",18,main.blue);main.content.addView(backupTitle);LinearLayout backup=card();
         if(showBackup){showBackup=false;main.content.post(()->((ScrollView)main.content.getParent()).smoothScrollTo(0,backupTitle.getTop()));} // from Home's backup reminder
         backup.addView(heading("Back up and restore",20,main.ink));
@@ -251,6 +252,31 @@ final class SettingsScreen extends Ui {
             row.badge=symbol.matches(".*\\P{L}.*")&&sign.length()<=2?(symbol.length()<=2?symbol:sign):chosen.substring(0,2);
             rows.add(row);}
         MoveMenu.sheet(this,"Currency","Amounts are shown in it; they aren't converted",Collections.singletonList(rows),null);
+    }
+    /**
+     * Reminders, as Planner's Settings › Notifications: whether notifications are on, "Reminder sound" (what a reminder left at
+     * Default does), a test notification and a test alarm, and while exact alarms are off, the way to allow them.
+     */
+    private void reminders(){
+        main.content.addView(heading("Reminders",18,main.blue));LinearLayout card=card();card.addView(heading("Reminders",20,main.ink));
+        card.addView(label("Add reminders to a transaction or an upcoming one in its form. They count from "+Reminders.time(Reminders.START,main)+" on its date.",14,main.muted,false));
+        if(!ReminderNotifications.notificationsEnabled(main)){card.addView(label("Notifications are off, so reminders won't show.",14,main.red,false));
+            card.addView(button("Turn on notifications",()->main.askNotifications(main::render)));}
+        ReminderSound sound=ReminderSound.setting(main);
+        card.addView(button("Reminder sound: "+sound.label,()->{List<MoveMenu.Choice> rows=new ArrayList<>();
+            for(ReminderSound s:ReminderSound.values()){if(s==ReminderSound.DEFAULT)continue;
+                rows.add(new MoveMenu.Choice(s.alarmSeconds()==null?MoveMenu.HIDE:MoveMenu.SNOOZE,s.label,false,()->{
+                    if(!ReminderSound.write(main,s)){toast("Could not save that setting.");return;}ReminderScheduler.request(main);main.render();})
+                    .sub(s==ReminderSound.NOTIFICATION?"Silent and vibrate mode mute it":s.ring?"Rings as an alarm until you stop it":"Rings as an alarm, then stops by itself").selected(s==sound));}
+            MoveMenu.sheet(this,"Reminder sound","For reminders left at Default",Collections.singletonList(rows),null);}));
+        card.addView(label("A ringing reminder sounds like an alarm, also in silent and vibrate mode, and shows over the lock screen.",12,main.muted,false));
+        Button note=button("Test notification",()->{if(!ReminderNotifications.sendTest(main))toast("Notifications are off. Turn them on first.");});
+        Button alarm=button("Test alarm",()->{if(!AlarmService.startTest(main))toast("Notifications are off, so an alarm couldn't be stopped. Turn them on first.");});
+        pair(card,note,alarm);
+        if(!ReminderNotifications.exactAlarmsAllowed(main)){card.addView(label("Exact alarms are off: reminders may come late, and can't ring, only notify.",13,main.amber,false));
+            card.addView(button("Allow Alarms & reminders",()->{try{main.startActivity(new android.content.Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                android.net.Uri.fromParts("package",main.getPackageName(),null)));}catch(Exception e){ReminderNotifications.openAppSettings(main);}}));}
+        card.addView(button("Notification settings",()->{try{ReminderNotifications.openNotificationSettings(main);}catch(Exception e){toast("Open Android's settings for MyBudget.");}}));
     }
     private void chooseTheme(){
         String[] modes={"Light","Dark","Auto"},names={"Light","Dark","Auto"},about={"Light background, dark text","Dark background, easy on the eyes at night","Follows your phone's dark theme setting"};

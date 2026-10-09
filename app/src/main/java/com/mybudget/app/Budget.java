@@ -39,6 +39,24 @@ public final class Budget {
     }
     public static final String SPLIT="split",PAY_BY_TRANSFER="Pay a credit card with a transfer to it. Its payment category takes only that card's interest and fees.";
     public static final class Split { public String category,memo=""; public long amount; public Split(String category,long amount){this.category=category;this.amount=amount;} }
+    /**
+     * A reminder on a transaction or an upcoming one (storage version 8), as Planner's on an all-day event: [amount] [unit]
+     * ("minutes", "hours" or "days") before 9:00 on its date (an upcoming one's next date, so it moves on with it); a negative
+     * amount is after. Its sound as Planner keeps it (ReminderSound): [ring] "Until I stop it", else [ringSeconds] (0 = the
+     * Settings default, -1 = notification sound only, 10/30/60 s). [id] names its alarm and notification (from 1, never reused).
+     */
+    public static final class Reminder {
+        public static final String[] UNITS={"minutes","hours","days"};
+        public long id;public int amount;public String unit;public boolean ring;public int ringSeconds;
+        public Reminder(long id,int amount,String unit){this.id=id;this.amount=amount;this.unit=unit;}
+        public Reminder copy(){Reminder r=new Reminder(id,amount,unit);r.ring=ring;r.ringSeconds=ringSeconds;return r;}
+        public long offsetMinutes(){return (long)amount*(unit.equals("days")?1440:unit.equals("hours")?60:1);}
+        @Override public String toString(){return id+"|"+amount+"|"+unit+"|"+ring+"|"+ringSeconds;}
+    }
+    /** The next reminder id: past every one used so far (kept in the data, so a deleted reminder's id isn't used again). */
+    public long nextReminderId=1;
+    public long newReminderId(){long n=nextReminderId;for(Entry e:entries)for(Reminder r:e.reminders)n=Math.max(n,r.id+1);
+        for(Scheduled s:scheduled)for(Reminder r:s.reminders)n=Math.max(n,r.id+1);nextReminderId=n+1;return n;}
     public static final class Entry {
         public String id=Budget.id(),payee,category,account,destination="",date,memo="";
         // Set when another app (Planner) sent this expense: its payment id, and its bill (the same for every month's bill).
@@ -52,6 +70,7 @@ public final class Budget {
         public boolean reconciled; // cleared and part of a balance checked against the bank (Reconcile): editing it asks first
         // A split (category SPLIT) spreads [amount] over parts, each with a category ("" = To budget).
         public final List<Split> splits=new ArrayList<>();
+        public final List<Reminder> reminders=new ArrayList<>(); // counted from its date (Reminder)
         public Entry(String payee,String category,String account,String date,long amount) {this.payee=payee;this.category=category;this.account=account;this.date=date;this.amount=amount;}
         public boolean split(){return !splits.isEmpty();}
         /** The part of this transaction that goes to category [id] ("" = To budget). */
@@ -69,6 +88,7 @@ public final class Budget {
         public long amount;public int day; // day: the day of the month repeats keep (0 = next's day)
         // An upcoming split (category SPLIT): its parts, as an Entry's; entering it makes a split with the same parts.
         public final List<Split> splits=new ArrayList<>();
+        public final List<Reminder> reminders=new ArrayList<>(); // counted from its next date, so they move on with it (Reminder)
         public boolean split(){return !splits.isEmpty();}
         /** The part of this upcoming transaction that goes to category [id] ("" = To budget). */
         public long amountIn(String id){if(split()){long n=0;for(Split s:splits)if(s.category.equals(id))n+=s.amount;return n;}return category.equals(id)?amount:0;}

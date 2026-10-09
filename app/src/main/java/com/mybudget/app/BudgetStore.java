@@ -14,7 +14,9 @@ public final class BudgetStore {
     // Version 6 also adds the budget's "currency" (ISO 4217); versions 1 to 5 read as AUD, the only currency before it.
     // Version 7 adds "payeeCategories" (a payee's category suggestion: always one category, or none) and an entry's "reconciled": MyBudget 0.0.8 would drop
     // it on its next save, so it must refuse the data instead. Versions 2 to 6 read with none (every payee automatic).
-    public static final int VERSION=7;
+    // Version 8 adds reminders ("reminders" on transactions and upcoming ones) and "nextReminderId": MyBudget 0.0.15 would drop
+    // them on its next save, so it must refuse the data instead. Versions 2 to 7 read with none.
+    public static final int VERSION=8;
     private static final java.util.regex.Pattern PHOTO=java.util.regex.Pattern.compile("[0-9a-f-]{0,40}([.]jpg)?"); // a photo is a file name only: never a path
     // Written out directly (years of transactions made building every JSONObject first slow), exactly as JSONObject would
     // write it: the same keys in the same order, JSONObject's escaping, plain whole numbers, a null string left out.
@@ -27,17 +29,17 @@ public final class BudgetStore {
         for(int i=0;i<b.accounts.size();i++){Budget.Account a=b.accounts.get(i);open(o,i);put(o,"id",a.id);put(o,"name",a.name);put(o,"date",a.date);put(o,"opening",a.opening);put(o,"reconciled",a.reconciled);put(o,"closed",a.closed);put(o,"type",a.type);put(o,"liability",a.liability);put(o,"rate",a.rate);put(o,"payment",a.payment);put(o,"frequency",a.frequency);o.append('}');}
         o.append("],\"entries\":[");
         for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);put(o,"reconciled",e.reconciled);
-            if(e.split())parts(o,e.splits);o.append('}');}
+            if(e.split())parts(o,e.splits);reminders(o,e.reminders);o.append('}');}
         o.append("],\"scheduled\":[");
         for(int i=0;i<b.scheduled.size();i++){Budget.Scheduled s=b.scheduled.get(i);open(o,i);put(o,"id",s.id);put(o,"payee",s.payee);put(o,"category",s.category);put(o,"account",s.account);put(o,"next",s.next);put(o,"repeat",s.repeat);put(o,"day",s.day);put(o,"amount",s.amount);put(o,"memo",s.memo);put(o,"billKey",s.billKey);
-            if(s.split())parts(o,s.splits);o.append('}');}
+            if(s.split())parts(o,s.splits);reminders(o,s.reminders);o.append('}');}
         o.append("],\"billCategories\":{");for(Map.Entry<String,String> m:b.billCategories.entrySet())put(o,m.getKey(),m.getValue());
         o.append("},\"monthNotes\":{");for(Map.Entry<String,String> m:b.monthNotes.entrySet())put(o,m.getKey(),m.getValue());
         o.append("},\"flagNames\":[");for(int i=0;i<b.flagNames.length;i++){o.append(i>0?",":"");if(b.flagNames[i]==null)o.append("null");else string(o,b.flagNames[i]);}
         o.append("],\"hiddenPayees\":[");int n=0;for(String p:b.hiddenPayees){o.append(n++>0?",":"");if(p==null)o.append("null");else string(o,p);}
         o.append("],\"rules\":[");for(int i=0;i<b.rules.size();i++){Budget.Rule r=b.rules.get(i);open(o,i);put(o,"contains",r.contains);put(o,"rename",r.rename);put(o,"category",r.category);o.append('}');}
         o.append("],\"payeeCategories\":{");for(Map.Entry<String,String> m:b.payeeCategories.entrySet())put(o,m.getKey(),m.getValue());
-        o.append('}');put(o,"currency",b.currency);return o.append('}').toString();
+        o.append('}');put(o,"currency",b.currency);put(o,"nextReminderId",b.nextReminderId);return o.append('}').toString();
     }
     private static void open(StringBuilder o,int i){o.append(i>0?",{":"{");}
     /** ,"key":value (no comma straight after an opening brace); a null string is left out, as JSONObject.put(key,null) does. */
@@ -51,11 +53,20 @@ public final class BudgetStore {
         return o.append('"');}
     private static StringBuilder comma(StringBuilder o){char last=o.charAt(o.length()-1);return last=='{'?o:o.append(',');}
     private static void parts(StringBuilder o,List<Budget.Split> parts){o.append(",\"splits\":[");for(int i=0;i<parts.size();i++){Budget.Split p=parts.get(i);open(o,i);put(o,"category",p.category);put(o,"amount",p.amount);put(o,"memo",p.memo);o.append('}');}o.append(']');}
+    /** A transaction's reminders (version 8), left out when it has none. */
+    private static void reminders(StringBuilder o,List<Budget.Reminder> list){if(list.isEmpty())return;o.append(",\"reminders\":[");for(int i=0;i<list.size();i++){Budget.Reminder r=list.get(i);open(o,i);put(o,"id",r.id);put(o,"amount",r.amount);put(o,"unit",r.unit);put(o,"ring",r.ring);put(o,"ringSeconds",r.ringSeconds);o.append('}');}o.append(']');}
+    /** Reads [j]'s reminders into [into] (none before version 8). A reminder MyBudget can't use (a bad unit, an id under 1, one
+     *  that can't be set within a few years of its date) is damaged data. */
+    private static void readReminders(JSONObject j,List<Budget.Reminder> into,Set<Long> ids) throws JSONException {JSONArray list=j.optJSONArray("reminders");if(list==null)return;
+        for(int k=0;k<list.length();k++){JSONObject p=list.getJSONObject(k);Budget.Reminder r=new Budget.Reminder(p.getLong("id"),p.getInt("amount"),p.getString("unit"));
+            r.ring=p.optBoolean("ring",false);r.ringSeconds=ReminderSound.cleanSeconds(r.ring,p.optInt("ringSeconds",0));
+            if(r.id<1||!ids.add(r.id)||!Arrays.asList(Budget.Reminder.UNITS).contains(r.unit)||Math.abs(r.offsetMinutes())>Reminders.MAX_OFFSET_MINUTES)throw new JSONException("Invalid reminder.");into.add(r);}}
     /** A backup file: the saved budget plus what marks it as MyBudget's, and when it was made (local date-time). */
     // Backup version 2: storage version 5 inside (MyBudget 0.0.5 refuses it as newer). Version 1 backups still restore.
     // Backup version 3: storage version 6 (upcoming splits, the currency; MyBudget 0.0.7 refuses it as newer). Versions 1 and 2 still restore.
     // Backup version 4: storage version 7 (payee category suggestions; MyBudget 0.0.8 refuses it as newer). Versions 1 to 3 still restore.
-    public static final int BACKUP_VERSION=4;
+    // Backup version 5: storage version 8 (reminders; MyBudget 0.0.15 refuses it as newer). Versions 1 to 4 still restore.
+    public static final int BACKUP_VERSION=5;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
         return new JSONObject(encode(b)).put("app","MyBudget").put("backupVersion",BACKUP_VERSION).put("created",created.withNano(0).toString()).toString(2);
@@ -83,14 +94,14 @@ public final class BudgetStore {
             a.liability=a.tracking()&&j.optBoolean("liability",false);a.rate=Math.max(0,Math.min(100_000,j.optLong("rate",0)));a.payment=Math.max(0,j.optLong("payment",0));a.frequency=j.optString("frequency","Monthly");if(!Arrays.asList(Budget.FREQUENCIES).contains(a.frequency))a.frequency="Monthly";b.accounts.add(a);}
         for(Budget.Category c:b.categories)if(c.payment()&&(b.account(c.cardAccount)==null||!b.account(c.cardAccount).credit()))throw new JSONException("Payment category without its card.");
         // Transactions look their accounts and categories up by id (the first with each id, as Budget.account and category do).
-        Map<String,Budget.Account> accountIds=new HashMap<>();for(Budget.Account a:b.accounts)accountIds.putIfAbsent(a.id,a);Map<String,Budget.Category> categoryIds=new HashMap<>();for(Budget.Category c:b.categories)categoryIds.putIfAbsent(c.id,c);
+        Set<Long> reminderIds=new HashSet<>();Map<String,Budget.Account> accountIds=new HashMap<>();for(Budget.Account a:b.accounts)accountIds.putIfAbsent(a.id,a);Map<String,Budget.Category> categoryIds=new HashMap<>();for(Budget.Category c:b.categories)categoryIds.putIfAbsent(c.id,c);
         for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");e.photo=j.optString("photo","");e.flag=Math.max(0,Math.min(Budget.FLAGS.length-1,j.optInt("flag",0)));e.approved=j.optBoolean("approved",true);e.bankPayee=j.optString("bankPayee","").trim();e.bankPayee=Budget.cut(e.bankPayee,80);e.reconciled=j.optBoolean("reconciled",false)&&e.cleared;if(!PHOTO.matcher(e.photo).matches())throw new JSONException("Invalid photo name."); // a file name only: never a path (reconciled: version 7, missing = not reconciled)
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split s=new Budget.Split(p.getString("category"),p.getLong("amount"));s.memo=p.optString("memo","");if(!s.category.isEmpty()&&categoryIds.get(s.category)==null)throw new JSONException("Invalid split.");e.splits.add(s);}
             long parted=0;for(Budget.Split s:e.splits)parted+=s.amount;if(e.category.equals(Budget.SPLIT)!=e.split()||(e.split()&&parted!=e.amount))throw new JSONException("Invalid split."); // the parts add up to the total
             // Rows imported before bankPayee was kept (0.0.6) matched re-imports by payee: keep that text, so renaming them later doesn't import them again.
             // Not only for version 4: 0.0.6 saved such rows as version 5 with no bankPayee. Other transactions keep none.
             e.bankPayee=Budget.statementPayee(e);
-            if(accountIds.get(e.account)==null||(!e.destination.isEmpty()&&accountIds.get(e.destination)==null)||(!e.category.isEmpty()&&!e.split()&&categoryIds.get(e.category)==null))throw new JSONException("Invalid saved transaction.");b.entries.add(e);}
+            if(accountIds.get(e.account)==null||(!e.destination.isEmpty()&&accountIds.get(e.destination)==null)||(!e.category.isEmpty()&&!e.split()&&categoryIds.get(e.category)==null))throw new JSONException("Invalid saved transaction.");readReminders(j,e.reminders,reminderIds);b.entries.add(e);}
         JSONObject bills=root.optJSONObject("billCategories");if(bills!=null){Iterator<String> k=bills.keys();while(k.hasNext()){String key=k.next(),id=bills.getString(key);if(key.length()<=100&&b.category(id)!=null)b.billCategories.put(key,id);}} // a deleted category's bills are just forgotten
         JSONObject notes=root.optJSONObject("monthNotes");if(notes!=null){Iterator<String> k=notes.keys();while(k.hasNext()){String key=k.next(),text=notes.getString(key).trim();YearMonth.parse(key);if(!text.isEmpty())b.monthNotes.put(key,Budget.cut(text,Budget.MONTH_NOTE_MAX));}} // month notes: added later in version 4
         // Flag names, hidden payees and import rules (added later in version 4): missing reads as none. A rule's deleted category is dropped.
@@ -107,7 +118,8 @@ public final class BudgetStore {
             // Upcoming splits (version 6): parts in known categories (or To budget), adding up to the amount, only with category "split".
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split part=new Budget.Split(p.getString("category"),p.getLong("amount"));part.memo=p.optString("memo","");if(!part.category.isEmpty()&&b.category(part.category)==null)throw new JSONException("Invalid split.");s.splits.add(part);}
             long parted=0;for(Budget.Split p:s.splits)parted+=p.amount;if(s.category.equals(Budget.SPLIT)!=s.split()||(s.split()&&parted!=s.amount))throw new JSONException("Invalid split.");
-            if(b.account(s.account)==null||(!s.category.isEmpty()&&!s.split()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");b.scheduled.add(s);}
+            if(b.account(s.account)==null||(!s.category.isEmpty()&&!s.split()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");readReminders(j,s.reminders,reminderIds);b.scheduled.add(s);}
+        long next=1;for(long id:reminderIds)next=Math.max(next,id+1);b.nextReminderId=Math.max(next,root.optLong("nextReminderId",1)); // reminders: version 8
         return b;
     }
     private static Budget migrate(JSONObject root)throws JSONException {

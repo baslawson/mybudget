@@ -86,6 +86,9 @@ public class MainActivity extends Activity {
         // Hunt 26 C4: left open across midnight on the 1st, the month that was current moves on (one picked on purpose stays).
         YearMonth now=YearMonth.now();if(!now.equals(seenNow)){if(month.equals(seenNow)){month=now;if(editors.isEmpty())render();}seenNow=now;}
         AutoBackup.schedule(this);BudgetWidget.refresh(this); // the widget may show last month after midnight on the 1st
+        // Reminders, as Planner on each open: a ringing alarm whose notification is gone is stopped; then missed reminders are
+        // shown and every alarm is set again (at most once a minute: coming back from a picker or Settings is no new open).
+        AlarmService.stopIfUnseen(this);long at=android.os.SystemClock.elapsedRealtime();if(remindersChecked==0||at-remindersChecked>60_000L){remindersChecked=at;BootReceiver.onAppOpen(this);}
         if(prefs().getString("auto_backup_tree",null)!=null){boolean asked=backupDue(); // Home's backup reminder goes once this succeeds
             new Thread(()->{AutoBackup.run(getApplicationContext(),false);runOnUiThread(()->{if(asked&&!backupDue()&&tab.equals("Home")&&!isFinishing())render();});}).start();}}
     // Hunt 23: side by side with Planner (split screen) this screen stays resumed while an expense from Planner is saved, so
@@ -118,7 +121,10 @@ public class MainActivity extends Activity {
     // activity), but it only opens a screen or an empty form: nothing is saved without the user's tap.
     static final String OPEN="com.mybudget.app.open",OPEN_ADD="add",OPEN_HOME="home";
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);openFrom(intent);}
-    void openFrom(Intent intent){String what=intent==null?null:intent.getStringExtra(OPEN);if(what==null||!storageReadable)return;intent.removeExtra(OPEN);
+    void openFrom(Intent intent){
+        // A tap on a ringing reminder stops it (its own token: AlarmService), and opens Transactions.
+        String stop=intent==null?null:intent.getStringExtra(AlarmService.EXTRA_STOP_ALARM);if(stop!=null){intent.removeExtra(AlarmService.EXTRA_STOP_ALARM);AlarmService.stopFromTap(this,stop);}
+        String what=intent==null?null:intent.getStringExtra(OPEN);if(what==null||!storageReadable)return;intent.removeExtra(OPEN);
         try{if(reloadIfChanged())for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}catch(IllegalStateException e){ui.toast(e.getMessage());} // before onResume would, so the form stays
         boolean ready=!budget.accounts.isEmpty();month=YearMonth.now();
         tab=!ready?"Home":what.equals("budget")?"Plan":what.equals("transactions")?"Spending":"Home";if(tab.equals("Spending"))clearFilters();
@@ -126,7 +132,20 @@ public class MainActivity extends Activity {
     private void closeSettings(){tab=previousTab;render();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
-    static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6,CAMERA=7;
+    static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6,CAMERA=7,NOTIFY=8;
+    private static long remindersChecked; // when this process last looked for missed reminders (elapsed time)
+    private Runnable notificationsAsked;
+    /**
+     * Reminders' "Turn on": Android's question (Android 13 and later), or, once it was answered no for good, the app's
+     * notification settings. [after] runs when the question is answered.
+     */
+    void askNotifications(Runnable after){
+        if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED
+            &&(!prefs().getBoolean("notifications_asked",false)||shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS))){
+            prefs().edit().putBoolean("notifications_asked",true).apply();notificationsAsked=after;requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},NOTIFY);return;}
+        try{ReminderNotifications.openNotificationSettings(this);}catch(Exception e){ui.toast("Open Android's settings to turn on MyBudget's notifications.");}}
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);
+        if(request==NOTIFY&&notificationsAsked!=null){Runnable after=notificationsAsked;notificationsAsked=null;after.run();}}
     android.content.SharedPreferences prefs(){return getSharedPreferences("budget",0);}
     void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);
         try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){ui.toast("No app on this device can save or open files.");}}
@@ -287,7 +306,7 @@ public class MainActivity extends Activity {
         // Saved meanwhile (split screen: an expense from Planner): open forms hold the old budget, so they close and nothing
         // is saved over the new data; the change is made again on what is there now.
         if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();
-            throw new IllegalArgumentException("MyBudget changed meanwhile (an expense from Planner came in). Make your change again.");}
+            throw new IllegalArgumentException("MyBudget changed meanwhile (an expense from Planner, or a reminder's button). Make your change again.");}
         // What a failed change puts back: the saved data, which the budget matches between changes (read again only then: reading
         // years of transactions takes a while), or a copy while nothing is saved yet (the starter categories).
         String saved=loaded;Budget copy=null;

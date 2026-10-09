@@ -47,7 +47,7 @@ public class BudgetInstrumentation extends Instrumentation {
         batch3(BudgetStore.decode(BudgetStore.encode(flags)));
         // Version 4: scheduled transactions are saved and read back; a newer version is refused.
         Budget.Scheduled sched=new Budget.Scheduled("Landlord",flags.categories.get(0).id,flags.accounts.get(0).id,"2026-01-31",-50000,"Monthly");sched.memo="Lease";sched.billKey="planner-series-r";flags.scheduled.add(sched);
-        JSONObject v4=new JSONObject(BudgetStore.encode(flags));if(v4.getInt("version")!=7)throw new AssertionError("Not version 7");Budget.Scheduled back=BudgetStore.decode(v4.toString()).scheduled.get(0);
+        JSONObject v4=new JSONObject(BudgetStore.encode(flags));if(v4.getInt("version")!=8)throw new AssertionError("Not version 8");Budget.Scheduled back=BudgetStore.decode(v4.toString()).scheduled.get(0);
         // Version 4 data (MyBudget 0.0.5) still reads, with defaults for later fields.
         JSONObject was4=new JSONObject(v4.toString()).put("version",4);if(!BudgetStore.encode(BudgetStore.decode(was4.toString())).equals(BudgetStore.encode(flags)))throw new AssertionError("Version 4 not read");
         if(!back.id.equals(sched.id)||!back.next.equals("2026-01-31")||back.day!=31||!back.repeat.equals("Monthly")||back.amount!=-50000||!back.memo.equals("Lease")||!back.billKey.equals("planner-series-r"))throw new AssertionError("Scheduled lost data");
@@ -96,12 +96,14 @@ public class BudgetInstrumentation extends Instrumentation {
             bp.edit().putString("planner_bills_at",LocalDateTime.now().minusDays(2).withNano(0).toString()).commit();if(PlannerBills.stale(getTargetContext()))throw new AssertionError("Recent list stale");}
         finally{if(keptAt==null)bp.edit().remove("planner_bills_at").commit();else bp.edit().putString("planner_bills_at",keptAt).commit();}
         boolean badList=false;try{PlannerBills.clean("{not a list");}catch(JSONException expected){badList=true;}if(!badList)throw new AssertionError("Bad list accepted");
-        boolean newer=false;try{BudgetStore.decode(v4.put("version",BudgetStore.VERSION+1).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 8 accepted");
+        // Reminders (version 8) round-trip, also in backups; bad ones are refused; saving one sets its alarm, deleting it cancels it.
+        reminders(flags,day);
+        boolean newer=false;try{BudgetStore.decode(v4.put("version",BudgetStore.VERSION+1).toString());}catch(JSONException expected){newer=true;}if(!newer)throw new AssertionError("Version 9 accepted");
         Budget odd=BudgetStore.decode(BudgetStore.encode(flags));odd.entries.get(0).payee="Quote \" back\\ slash / tab\t nl\n cr\r ff\f bs\b ctl\u0001\u001f \u007f é ✓   😀";odd.monthNotes.put("2026-01","a/b \"c\"");odd.payeeCategories.put("quote \" payee / é","");odd.entries.get(0).cleared=true;odd.entries.get(0).reconciled=true;for(Budget.Category c:odd.categories)if(!c.payment()){odd.payeeCategories.put("coles",c.id);break;}
         sameEncoding(odd,"special characters");sameEncoding(migrated,"migrated");sameEncoding(flags,"flags and upcoming");sameEncoding(SampleBudget.make(3,LocalDate.now(),12,40,60),"generated budget"); // written as JSONObject writes it
         // Payee category suggestions (version 7) come back as saved, also from a backup.
         for(Budget read:new Budget[]{BudgetStore.decode(BudgetStore.encode(odd)),BudgetStore.readBackup(BudgetStore.backup(odd,LocalDateTime.now())).budget})if(!read.payeeCategories.equals(odd.payeeCategories)||odd.payeeCategories.size()!=2||!read.entries.get(0).reconciled)throw new AssertionError("Payee categories or reconciled lost: "+read.payeeCategories);
-        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 8 is refused, payee category suggestions round-trip (version 7) and older budgets read with none, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile, and the budget currency round-trips (backups too), older data reads as AUD, and Planner payments and bills in another currency are left out, the home-screen widget draws for no budget, a budget, Hide amounts and unreadable data, the widget and shortcuts open the Add transaction form, Budget and Transactions (Home without an account), and the first-run setup is offered only for a brand-new budget, and the budget is written exactly as JSONObject writes it.\n");finish(Activity.RESULT_OK,result);
+        result.putString("stream","PASS: migration preserves cash and envelopes, JSON roundtrip preserves targets/accounts/transfers, corrupt data rejected, Activity launched and all five tabs rendered, a sent payment is added once and removed on undo, backups restore everything and foreign or newer files are refused, hidden categories and closed accounts are saved and older budgets read without them, weekly/by-date targets and month notes round-trip (backups too) and older budgets read with defaults,scheduled transactions and splits round-trip, upcoming splits round-trip in version 6 (backups too) and bad ones are refused, version 9 is refused, reminders round-trip (version 8, backups too) and bad ones are refused, a saved reminder sets its alarm and its locked-boot copy and a deleted one cancels them, a reminder shown is recorded once, payee category suggestions round-trip (version 7) and older budgets read with none, version 4 and 5 data and version 1 and 2 backups still read, credit cards and their payment categories round-trip, photo names round-trip and paths are refused, Planner bill categories round-trip, tracking accounts, loan terms, flags, review marks, hidden payees and import rules round-trip (backups too) and older budgets read with defaults, its lists are checked, a paid bill leaves the list and old lists are stale, Home asks for a backup until one is made, and Undo puts a deleted transaction back but never over data saved meanwhile, and the budget currency round-trips (backups too), older data reads as AUD, and Planner payments and bills in another currency are left out, the home-screen widget draws for no budget, a budget, Hide amounts and unreadable data, the widget and shortcuts open the Add transaction form, Budget and Transactions (Home without an account), and the first-run setup is offered only for a brand-new budget, and the budget is written exactly as JSONObject writes it.\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable e){result.putString("stream","FAIL: "+e.toString()+"\n");finish(Activity.RESULT_CANCELED,result);}}
     /**
      * "-e sample 5y" (or 1y): replaces the saved budget with SampleBudget's made-up one (about 200 transactions a month) for
@@ -126,21 +128,85 @@ public class BudgetInstrumentation extends Instrumentation {
         for(Budget.Account a:b.accounts)accounts.put(new JSONObject().put("id",a.id).put("name",a.name).put("date",a.date).put("opening",a.opening).put("reconciled",a.reconciled).put("closed",a.closed).put("type",a.type).put("liability",a.liability).put("rate",a.rate).put("payment",a.payment).put("frequency",a.frequency));
         for(Budget.Entry e:b.entries)entries.put(new JSONObject().put("id",e.id).put("payee",e.payee).put("category",e.category).put("account",e.account).put("destination",e.destination).put("date",e.date).put("amount",e.amount).put("memo",e.memo).put("cleared",e.cleared).put("externalId",e.externalId).put("billKey",e.billKey).put("photo",e.photo).put("flag",e.flag).put("approved",e.approved).put("bankPayee",e.bankPayee).put("reconciled",e.reconciled));
         for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);if(!e.split())continue;JSONArray parts=new JSONArray();for(Budget.Split p:e.splits)parts.put(new JSONObject().put("category",p.category).put("amount",p.amount).put("memo",p.memo));entries.getJSONObject(i).put("splits",parts);}
+        for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);if(!e.reminders.isEmpty())entries.getJSONObject(i).put("reminders",reminderArray(e.reminders));}
         for(Budget.Scheduled s:b.scheduled){JSONObject j=new JSONObject().put("id",s.id).put("payee",s.payee).put("category",s.category).put("account",s.account).put("next",s.next).put("repeat",s.repeat).put("day",s.day).put("amount",s.amount).put("memo",s.memo).put("billKey",s.billKey);
-            if(s.split()){JSONArray parts=new JSONArray();for(Budget.Split p:s.splits)parts.put(new JSONObject().put("category",p.category).put("amount",p.amount).put("memo",p.memo));j.put("splits",parts);}scheduled.put(j);}
+            if(s.split()){JSONArray parts=new JSONArray();for(Budget.Split p:s.splits)parts.put(new JSONObject().put("category",p.category).put("amount",p.amount).put("memo",p.memo));j.put("splits",parts);}if(!s.reminders.isEmpty())j.put("reminders",reminderArray(s.reminders));scheduled.put(j);}
         JSONObject bills=new JSONObject();for(java.util.Map.Entry<String,String> m:b.billCategories.entrySet())bills.put(m.getKey(),m.getValue());
         JSONObject notes=new JSONObject();for(java.util.Map.Entry<String,String> m:b.monthNotes.entrySet())notes.put(m.getKey(),m.getValue());
         JSONArray flagNames=new JSONArray();for(String n:b.flagNames)flagNames.put(n);JSONArray hidden=new JSONArray();for(String p:b.hiddenPayees)hidden.put(p);
         JSONArray rules=new JSONArray();for(Budget.Rule r:b.rules)rules.put(new JSONObject().put("contains",r.contains).put("rename",r.rename).put("category",r.category));
         JSONObject chosen=new JSONObject();for(java.util.Map.Entry<String,String> m:b.payeeCategories.entrySet())chosen.put(m.getKey(),m.getValue());
-        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).put("billCategories",bills).put("monthNotes",notes).put("flagNames",flagNames).put("hiddenPayees",hidden).put("rules",rules).put("payeeCategories",chosen).put("currency",b.currency).toString();
+        return root.put("categories",categories).put("accounts",accounts).put("entries",entries).put("scheduled",scheduled).put("billCategories",bills).put("monthNotes",notes).put("flagNames",flagNames).put("hiddenPayees",hidden).put("rules",rules).put("payeeCategories",chosen).put("currency",b.currency).put("nextReminderId",b.nextReminderId).toString();
     }
+    private static JSONArray reminderArray(java.util.List<Budget.Reminder> list)throws JSONException{JSONArray a=new JSONArray();
+        for(Budget.Reminder r:list)a.put(new JSONObject().put("id",r.id).put("amount",r.amount).put("unit",r.unit).put("ring",r.ring).put("ringSeconds",r.ringSeconds));return a;}
     private static void sameEncoding(Budget b,String what)throws JSONException{if(!BudgetStore.encode(b).equals(encodeWithObjects(b)))throw new AssertionError("Encoding differs from JSONObject's: "+what);}
+    /**
+     * Reminders: saved and read back on transactions and upcoming ones (backups too), written as JSONObject writes them, ids
+     * never used twice, bad ones refused. Then on this phone, through the app's own save path: a saved upcoming reminder sets its
+     * alarm, its ledger entry and its locked-boot copy; deleting it cancels them; one delivered is recorded and not set again.
+     * The saved budget is put back afterwards.
+     */
+    private void reminders(Budget from,String day)throws Exception{
+        Budget b=BudgetStore.decode(BudgetStore.encode(from));Budget.Entry e=b.entries.get(0);Budget.Scheduled s=b.scheduled.get(0);
+        Budget.Reminder onDay=new Budget.Reminder(b.newReminderId(),0,"minutes");e.reminders.add(onDay);
+        Budget.Reminder before=new Budget.Reminder(b.newReminderId(),7,"days");before.ring=true;s.reminders.add(before);
+        Budget.Reminder after=new Budget.Reminder(b.newReminderId(),-90,"minutes");after.ringSeconds=30;s.reminders.add(after);
+        if(onDay.id!=1||before.id!=2||after.id!=3)throw new AssertionError("Reminder ids "+onDay.id+","+before.id+","+after.id);
+        sameEncoding(b,"reminders");
+        for(Budget r:new Budget[]{BudgetStore.decode(BudgetStore.encode(b)),BudgetStore.readBackup(BudgetStore.backup(b,LocalDateTime.now())).budget}){
+            if(!BudgetStore.encode(r).equals(BudgetStore.encode(b)))throw new AssertionError("Reminders lost");
+            Budget.Scheduled rs=r.scheduled.get(0);if(r.entries.get(0).reminders.size()!=1||rs.reminders.size()!=2||!rs.reminders.get(0).ring||rs.reminders.get(1).ringSeconds!=30||rs.reminders.get(1).amount!=-90)throw new AssertionError("Reminder fields");
+            if(r.newReminderId()!=4)throw new AssertionError("A reminder id used again");}
+        // A deleted reminder's id isn't used again (nextReminderId is kept).
+        Budget gone=BudgetStore.decode(BudgetStore.encode(b));gone.scheduled.get(0).reminders.clear();if(BudgetStore.decode(BudgetStore.encode(gone)).newReminderId()!=4)throw new AssertionError("Deleted reminder's id used again");
+        // Version 7 data reads with none.
+        JSONObject v7=new JSONObject(BudgetStore.encode(from)).put("version",7);v7.remove("nextReminderId");if(Reminders.all(BudgetStore.decode(v7.toString())).size()!=0)throw new AssertionError("Version 7 has reminders");
+        // Bad ones: an unknown unit, an id twice, an id under 1, too far off.
+        String[][] bad={{"unit","\"weeks\""},{"id","1"},{"id","0"},{"amount","99999999"}};
+        for(String[] x:bad){JSONObject root=new JSONObject(BudgetStore.encode(b));JSONObject r=root.getJSONArray("scheduled").getJSONObject(0).getJSONArray("reminders").getJSONObject(0);
+            r.put(x[0],new JSONTokener(x[1]).nextValue());boolean refused=false;try{BudgetStore.decode(root.toString());}catch(JSONException expected){refused=true;}if(!refused)throw new AssertionError("Bad reminder accepted: "+x[0]);}
+        // The times: 9:00 on the day; days keep the clock time; minutes after; Pick date and time back to an offset.
+        LocalDate d=LocalDate.of(2026,3,10);ZoneId z=ZoneId.of("Australia/Sydney");
+        if(!Reminders.trigger(d,onDay,z).toLocalDateTime().equals(d.atTime(9,0))||!Reminders.trigger(d,before,z).toLocalDateTime().equals(d.minusDays(7).atTime(9,0))
+            ||!Reminders.trigger(d,after,z).toLocalDateTime().equals(d.atTime(10,30)))throw new AssertionError("Reminder times");
+        Object[] at=Reminders.at(d,d.minusDays(2).atTime(9,0),z);Object[] at2=Reminders.at(d,d.plusDays(1).atTime(8,15),z);
+        if(!java.util.Arrays.equals(at,new Object[]{2,"days"})||!java.util.Arrays.equals(at2,new Object[]{-1395,"minutes"}))throw new AssertionError("Pick date and time offsets");
+        String label=Reminders.label(before,null);if(!label.startsWith("1 week before at 9:00"))throw new AssertionError("Label "+label);
+
+        // On the phone: the save path (MyBudgetApp's listener) sets and cancels the alarms.
+        android.content.Context c=getTargetContext();android.content.SharedPreferences prefs=c.getSharedPreferences("budget",0);String saved=prefs.getString("data",null);
+        try{Budget live=BudgetStore.decode(BudgetStore.encode(from));Budget.Scheduled up=live.scheduled.get(0);up.next=LocalDate.now().plusDays(3).toString();
+            Budget.Reminder r=new Budget.Reminder(live.newReminderId(),1,"days");up.reminders.add(r);
+            if(!prefs.edit().putString("data",BudgetStore.encode(live)).commit())throw new AssertionError("Not saved");drain();
+            String key=Reminders.Found.key(r.id);long when=Reminders.triggerMillis(up.next,r);
+            if(!Long.valueOf(when).equals(new AlarmLedger(c).all().get(key)))throw new AssertionError("Reminder alarm not in the ledger");
+            if(alarmSet(c,r.id)==null)throw new AssertionError("Reminder alarm not set");
+            boolean copied=false;for(LockedAlarm a:DirectBoot.store(c).read().alarms)if(a.reminderId==r.id&&a.trigger==when)copied=true;if(!copied)throw new AssertionError("Not in the locked-boot snapshot");
+            // Deleted: its alarm, ledger entry and snapshot copy go.
+            up.reminders.clear();if(!prefs.edit().putString("data",BudgetStore.encode(live)).commit())throw new AssertionError("Not saved");drain();
+            if(new AlarmLedger(c).all().containsKey(key)||alarmSet(c,r.id)!=null)throw new AssertionError("Deleted reminder's alarm left");
+            for(LockedAlarm a:DirectBoot.store(c).read().alarms)if(a.reminderId==r.id)throw new AssertionError("Deleted reminder left in the snapshot");
+            // One that went off a minute ago (notification only): shown and recorded once; not set again.
+            Budget.Entry paid=live.entries.get(0);paid.date=LocalDate.now().toString();long minuteAgo=System.currentTimeMillis()/60_000L*60_000L-60_000L;
+            Object[] off=Reminders.at(LocalDate.now(),LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(minuteAgo),ZoneId.systemDefault()),ZoneId.systemDefault());
+            Budget.Reminder past=new Budget.Reminder(live.newReminderId(),(Integer)off[0],(String)off[1]);past.ringSeconds=-1;paid.reminders.add(past);
+            if(!prefs.edit().putString("data",BudgetStore.encode(live)).commit())throw new AssertionError("Not saved");drain();
+            Reminders.Found f=Reminders.find(live,past.id);if(f.onTime()!=minuteAgo)throw new AssertionError("Past reminder time");
+            ReminderScheduler.WORK.submit(()->{ReminderReceiver.deliver(c,past.id,minuteAgo);return null;}).get();
+            if(!new Deliveries(c).deliveredOnTime(past.id,Reminders.deliveryKey(f)))throw new AssertionError("Delivery not recorded");
+            if(new AlarmLedger(c).all().containsKey(Reminders.Found.key(past.id)))throw new AssertionError("Past reminder armed");}
+        finally{if(saved==null)prefs.edit().remove("data").commit();else prefs.edit().putString("data",saved).commit();drain();
+            ((android.app.NotificationManager)c.getSystemService(android.content.Context.NOTIFICATION_SERVICE)).cancelAll();}
+    }
+    // Waits until the save's check is done: its listener runs on the main thread, then queues the work.
+    private void drain()throws Exception{waitForIdleSync();for(int i=0;i<2;i++)ReminderScheduler.WORK.submit(()->{}).get();}
+    private static android.app.PendingIntent alarmSet(android.content.Context c,long id){return ReminderScheduler.pending(c,id,new Intent(c,ReminderReceiver.class),android.app.PendingIntent.FLAG_NO_CREATE);}
     // Backup files: everything comes back, Planner's link ids included; anything else is refused with a reason.
     private void backups(Budget b)throws Exception{
         YearMonth month=YearMonth.now();b.entries.get(0).externalId="pay-b";b.entries.get(0).billKey="planner-series-b";
         String file=BudgetStore.backup(b,LocalDateTime.of(2026,10,7,12,30,15,999));JSONObject root=new JSONObject(file);
-        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=4||root.getInt("version")!=7||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
+        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=5||root.getInt("version")!=8||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
         BudgetStore.Backup read=BudgetStore.readBackup("\n"+file);Budget r=read.budget;
         if(!read.created.equals("2026-10-07T12:30:15")||!BudgetStore.encode(r).equals(BudgetStore.encode(b)))throw new AssertionError("Backup lost data");
         eq(r.cash(month),b.cash(month));eq(r.ready(month),b.ready(month));if(r.external("pay-b")==null||r.lastForBill("planner-series-b")==null)throw new AssertionError("Planner link ids lost");
