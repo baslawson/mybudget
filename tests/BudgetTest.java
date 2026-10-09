@@ -1087,6 +1087,16 @@ public class BudgetTest {
         if(m.moveGroup("Everyday",-1)||m.moveGroup("Savings",1)||m.moveGroup("Old",1))throw new AssertionError("Nothing past the ends; hidden-only groups don't move");
         if(!m.moveGroup("Bills",1))throw new AssertionError("Moved down");seen.setLength(0);for(Budget.Category k:m.categories)seen.append(k.name).append(',');
         if(!seen.toString().equals("Food,Fun,Car,Rent,Power,Gone,"))throw new AssertionError("Group order after moving down: "+seen);
+        // A group's ⋮: to any place (to top, to bottom), and A to Z (ignoring capitals) as the default order.
+        if(m.groupsSorted())throw new AssertionError("Everyday, Savings, Bills isn't A to Z");
+        if(!m.moveGroupTo("Bills",0))throw new AssertionError("Moved to the top");seen.setLength(0);for(Budget.Category k:m.categories)seen.append(k.name).append(',');
+        if(!seen.toString().equals("Rent,Power,Food,Fun,Car,Gone,"))throw new AssertionError("Group order after moving to the top: "+seen);
+        if(m.moveGroupTo("Bills",0)||m.moveGroupTo("Bills",3)||m.moveGroupTo("Bills",-1)||m.moveGroupTo("Old",0))throw new AssertionError("Nothing for its own place, outside, or a hidden-only group");
+        if(!m.groupsSorted()||m.sortGroups())throw new AssertionError("Bills, Everyday, Savings is A to Z already");
+        if(!m.moveGroupTo("Bills",2))throw new AssertionError("Moved to the bottom");
+        m.categories.get(0).group="everyday";m.categories.get(1).group="everyday"; // "everyday" (small e) sorts with E
+        if(!m.sortGroups())throw new AssertionError("Sorted");seen.setLength(0);for(Budget.Category k:m.categories)seen.append(k.name).append(',');
+        if(!seen.toString().equals("Rent,Power,Food,Fun,Car,Gone,")||!m.groupsSorted())throw new AssertionError("A to Z ignoring capitals, hidden-only last: "+seen);
         System.out.println("PASS group rename and move");
     }
     /** The order of a screen's movable sections, saved on this device (CardOrder). */

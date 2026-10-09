@@ -651,11 +651,19 @@ public final class Budget {
      * Moves [group] past the group next to it on Budget ([direction] -1 up, 1 down; groups with only hidden categories aren't
      * shown, so they're skipped and go last). Each group's own order stays. False when it's already first or last.
      */
-    public boolean moveGroup(String group,int direction){
-        List<String> order=new ArrayList<>();for(Category c:categories)if(!c.hidden&&!order.contains(c.group))order.add(c.group);
-        int i=order.indexOf(group),j=i+direction;if(i<0||j<0||j>=order.size())return false;Collections.swap(order,i,j);
-        for(Category c:categories)if(!order.contains(c.group))order.add(c.group);
-        List<Category> sorted=new ArrayList<>(categories);sorted.sort(Comparator.comparingInt(c->order.indexOf(c.group))); // stable: each group keeps its order
+    public boolean moveGroup(String group,int direction){int i=shownGroups().indexOf(group);return i>=0&&moveGroupTo(group,i+direction);}
+    /** The groups in Budget's order (those with a category shown). */
+    public List<String> shownGroups(){List<String> order=new ArrayList<>();for(Category c:categories)if(!c.hidden&&!order.contains(c.group))order.add(c.group);return order;}
+    /** Puts [group] at place [to] among the shown groups (moveGroup's rules). False when it's not shown, [to] is outside, or it's there already. */
+    public boolean moveGroupTo(String group,int to){List<String> order=shownGroups();int i=order.indexOf(group);
+        if(i<0||to<0||to>=order.size()||to==i)return false;order.remove(i);order.add(to,group);return groupOrder(order);}
+    /** Shown groups A to Z (ignoring capitals; Budget's default order). False when they already are. */
+    public boolean sortGroups(){List<String> order=shownGroups();order.sort(String.CASE_INSENSITIVE_ORDER);return groupOrder(order);}
+    public boolean groupsSorted(){List<String> order=shownGroups(),sorted=new ArrayList<>(order);sorted.sort(String.CASE_INSENSITIVE_ORDER);return order.equals(sorted);}
+    /** Orders the categories by [order] (shown groups; the others after them, as they were). False when nothing moves. */
+    private boolean groupOrder(List<String> order){if(order.equals(shownGroups()))return false;List<String> all=new ArrayList<>(order);
+        for(Category c:categories)if(!all.contains(c.group))all.add(c.group);
+        List<Category> sorted=new ArrayList<>(categories);sorted.sort(Comparator.comparingInt(c->all.indexOf(c.group))); // stable: each group keeps its order
         categories.clear();categories.addAll(sorted);changed();return true;}
     // Accounts: close at zero, delete only unused.
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}

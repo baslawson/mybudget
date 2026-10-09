@@ -19,8 +19,8 @@ import java.util.function.Consumer;
 /**
  * Sections of a screen (the Reports cards, Home's parts, accounts) that can be held and dragged up or down: the others make way
  * and the screen scrolls at its top and bottom edges. Held and let go without moving (with TalkBack, held, or from a heading's
- * actions): a sheet with Move to top, Move up, Move down, Move to bottom and Default order. The order is saved on this device
- * under [pref] (CardOrder), not in the backup.
+ * actions): a sheet with Move to top, Move above/below its neighbours, Move to bottom and Default order; the ⋮ by each title
+ * opens the same choices as a menu there (MoveMenu). The order is saved on this device under [pref] (CardOrder), not in the backup.
  */
 final class Movable {
     private static final String MIME="application/x-mybudget-section";
@@ -34,8 +34,22 @@ final class Movable {
     void build(Consumer<String> build){
         for(String key:CardOrder.order(saved(),all)){int at=main.content.getChildCount();build.accept(key);int n=main.content.getChildCount()-at;if(n<=0)continue;
             Section s=new Section(key);for(int i=0;i<n;i++){View v=main.content.getChildAt(at);main.content.removeViewAt(at);s.addView(v);} // each keeps its layout
-            main.content.addView(s,at,new LinearLayout.LayoutParams(-1,-2));shown.add(s);actions(s);}
+            main.content.addView(s,at,new LinearLayout.LayoutParams(-1,-2));shown.add(s);s.title=heading(s);actions(s);dots(s);}
+        if(shown.size()<2&&saved()==null)for(Section s:shown)if(s.dots!=null)s.dots.setVisibility(View.GONE); // one card alone: nothing to move it past
     }
+    /** The ⋮ beside the section's title, opening its menu right there. */
+    private void dots(Section s){TextView title=s.title;if(title==null)return;View[] at=new View[1];
+        at[0]=MoveMenu.dots(ui,title.getCurrentTextColor(),"Move options for "+name(s),()->{int i=shown.indexOf(s);if(i<0)return;
+            MoveMenu.show(ui,at[0],name(s),(i+1)+" of "+shown.size(),choices(s));});
+        MoveMenu.besides(ui,title,at[0]);s.dots=at[0];}
+    /** What [s] can do, by its neighbours' names: only moves that change something, each once ("Move to top" from 3rd down). */
+    private List<MoveMenu.Choice> choices(Section s){List<MoveMenu.Choice> c=new ArrayList<>();int i=shown.indexOf(s),last=shown.size()-1;
+        if(i>1)c.add(new MoveMenu.Choice(MoveMenu.TOP,"Move to top",false,()->moveTo(s,0,"Moved to the top")));
+        if(i>0)c.add(new MoveMenu.Choice(MoveMenu.UP,"Move above "+name(shown.get(i-1)),false,()->moveTo(s,i-1,"Moved up")));
+        if(i>=0&&i<last)c.add(new MoveMenu.Choice(MoveMenu.DOWN,"Move below "+name(shown.get(i+1)),false,()->moveTo(s,i+1,"Moved down")));
+        if(i>=0&&i<last-1)c.add(new MoveMenu.Choice(MoveMenu.BOTTOM,"Move to bottom",false,()->moveTo(s,last,"Moved to the bottom")));
+        if(saved()!=null)c.add(new MoveMenu.Choice(MoveMenu.RESET,"Default order",true,this::defaultOrder));
+        return c;}
     private String saved(){return main.prefs().getString(pref,null);}
     private void save(){save(keys());}
     private void save(List<String> keys){
@@ -86,46 +100,21 @@ final class Movable {
         sheet.addView(ui.label((i+1)+" of "+shown.size()+" on "+where,13,main.muted,false));
         View space=new View(main);sheet.addView(space,new LinearLayout.LayoutParams(1,ui.dp(8)));
         AlertDialog d=new AlertDialog.Builder(main).create();
-        if(i>0){row(sheet,d,Icon.TOP,"Move to top",main.ink,()->moveTo(s,0,"Moved to the top"));row(sheet,d,Icon.UP,"Move up",main.ink,()->moveTo(s,i-1,"Moved up"));}
-        if(i<last){row(sheet,d,Icon.DOWN,"Move down",main.ink,()->moveTo(s,i+1,"Moved down"));row(sheet,d,Icon.BOTTOM,"Move to bottom",main.ink,()->moveTo(s,last,"Moved to the bottom"));}
-        if(saved()!=null){View line=new View(main);line.setBackgroundColor(Ui.tint(main.ink,main.darkTheme?26:18));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,ui.dp(1));
-            lp.setMargins(0,ui.dp(6),0,ui.dp(6));sheet.addView(line,lp);row(sheet,d,Icon.RESET,"Default order",main.muted,this::defaultOrder);}
+        MoveMenu.rows(ui,sheet,choices(s),ui.dp(56),16,ui.dp(40),d::dismiss);
         TextView tip=ui.label("Tip: hold and drag to move it anywhere.",12,main.muted,false);tip.setPadding(0,ui.dp(10),0,0);sheet.addView(tip);
         WindowInsets screen=main.getWindow().getDecorView().getRootWindowInsets();int bar=android.os.Build.VERSION.SDK_INT>=30&&screen!=null?screen.getInsets(WindowInsets.Type.navigationBars()).bottom:0;
         sheet.setPadding(side,ui.dp(10),side,ui.dp(16)+bar); // the rows stay above the gesture bar the sheet runs under
-        ScrollView holder=new ScrollView(main);holder.addView(sheet);d.setView(holder,0,0,0,0); // scrolls when it doesn't fit (landscape, large text)d.setCanceledOnTouchOutside(true);main.editors.add(d);d.setOnDismissListener(x->main.editors.remove(d));d.show();
+        // Scrolls when it doesn't fit (landscape, large text).
+        ScrollView holder=new ScrollView(main);holder.addView(sheet);d.setView(holder,0,0,0,0);
+        d.setCanceledOnTouchOutside(true);main.editors.add(d);d.setOnDismissListener(x->main.editors.remove(d));d.show();
         Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));w.setGravity(Gravity.BOTTOM);
             int wide=Math.min(main.getResources().getDisplayMetrics().widthPixels,ui.dp(560));w.setLayout(wide,ViewGroup.LayoutParams.WRAP_CONTENT);
             w.setWindowAnimations(0);w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);w.setNavigationBarColor(main.surface);if(android.os.Build.VERSION.SDK_INT>=29)w.setNavigationBarContrastEnforced(false);
             if(android.os.Build.VERSION.SDK_INT>=30){w.setDecorFitsSystemWindows(false);WindowManager.LayoutParams lp=w.getAttributes();lp.setFitInsetsTypes(0);w.setAttributes(lp);}} // the sheet runs under the gesture bar (its padding keeps the rows above it)
         if(Ui.motion()){holder.setTranslationY(ui.dp(360));holder.animate().translationY(0).setDuration(240).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();}
     }
-    /** One choice in the sheet: a round tinted icon and its label, 56dp tall; it closes the sheet, then acts. */
-    private void row(LinearLayout sheet,AlertDialog d,int icon,String text,int color,Runnable action){
-        LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(ui.dp(56));row.setPadding(ui.dp(4),0,ui.dp(4),0);
-        row.addView(new Icon(icon,color==main.muted?main.muted:main.blue),new LinearLayout.LayoutParams(ui.dp(40),ui.dp(40)));
-        TextView t=ui.label(text,16,color,false);t.setPadding(ui.dp(16),0,0,0);row.addView(t,new LinearLayout.LayoutParams(0,-2,1));
-        GradientDrawable mask=new GradientDrawable();mask.setColor(Color.WHITE);mask.setCornerRadius(ui.dp(14));
-        row.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(Ui.tint(main.blue,main.darkTheme?56:36)),null,mask));
-        row.setClickable(true);row.setFocusable(true);row.setOnClickListener(v->{Ui.tick(v);d.dismiss();action.run();});
-        sheet.addView(row,new LinearLayout.LayoutParams(-1,-2));}
-    /** The sheet's icons, drawn (the arrow-to-bar symbols are missing from some phones' fonts). */
-    private final class Icon extends View {
-        static final int TOP=0,UP=1,DOWN=2,BOTTOM=3,RESET=4;
-        final int kind;final Paint fill=new Paint(Paint.ANTI_ALIAS_FLAG),pen=new Paint(Paint.ANTI_ALIAS_FLAG);
-        Icon(int kind,int color){super(main);this.kind=kind;fill.setColor(Ui.tint(color,main.darkTheme?52:30));pen.setColor(color);pen.setStyle(Paint.Style.STROKE);
-            pen.setStrokeWidth(ui.dp(2));pen.setStrokeCap(Paint.Cap.ROUND);pen.setStrokeJoin(Paint.Join.ROUND);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);}
-        @Override protected void onDraw(Canvas c){float x=getWidth()/2f,y=getHeight()/2f,u=ui.dp(1);c.drawCircle(x,y,Math.min(x,y),fill);
-            if(kind==RESET){RectF o=new RectF(x-7*u,y-7*u,x+7*u,y+7*u);c.drawArc(o,-90,290,false,pen); // ↺: from the top, round to the upper left
-                Paint head=new Paint(Paint.ANTI_ALIAS_FLAG);head.setColor(pen.getColor());float ty=y-7*u; // a filled head at the top, pointing left
-                Path p=new Path();p.moveTo(x-4*u,ty);p.lineTo(x+2*u,ty-4*u);p.lineTo(x+2*u,ty+4*u);p.close();c.drawPath(p,head);return;}
-            float dir=kind==TOP||kind==UP?-1:1,shift=kind==TOP||kind==BOTTOM?2*u*-dir:0; // arrows point up (-1) or down (1); with a bar they move off it
-            float tip=y+dir*6*u+shift,tail=y-dir*7*u+shift;c.drawLine(x,tail,x,tip,pen);
-            Path head=new Path();head.moveTo(x-5*u,tip-dir*5*u);head.lineTo(x,tip);head.lineTo(x+5*u,tip-dir*5*u);c.drawPath(head,pen);
-            if(kind==TOP||kind==BOTTOM){float bar=y+dir*10*u;c.drawLine(x-7*u,bar,x+7*u,bar,pen);}}
-    }
     /** The section's name for the sheet: its title, in sentence case if shown in capitals ("TO BUDGET" → "To budget"). */
-    private static String name(Section s){TextView h=heading(s);if(h==null)return "Move";String t=h.getText().toString();
+    private static String name(Section s){TextView h=s.title;if(h==null)return "Move";String t=h.getText().toString();
         return t.equals(t.toUpperCase(Locale.ROOT))&&!t.equals(t.toLowerCase(Locale.ROOT))?t.charAt(0)+t.substring(1).toLowerCase(Locale.ROOT):t;}
     /** The section's title (its first heading, else its first text), which carries the TalkBack actions. */
     private static TextView heading(View v){TextView first=null;ArrayDeque<View> todo=new ArrayDeque<>();todo.add(v);
@@ -134,12 +123,12 @@ final class Movable {
                 if(android.os.Build.VERSION.SDK_INT>=28&&x.isAccessibilityHeading())return (TextView)x;if(first==null)first=(TextView)x;}
             if(x instanceof ViewGroup)for(int i=0;i<((ViewGroup)x).getChildCount();i++)todo.add(((ViewGroup)x).getChildAt(i));}
         return first;}
-    private void actions(Section s){TextView title=heading(s);if(title==null)return;
+    private void actions(Section s){TextView title=s.title;if(title==null)return;
         View h=title;for(View up=title;up!=s&&up!=null;up=(View)up.getParent())if(up.isClickable())h=up; // inside a clickable card (To budget) TalkBack focuses the card, so the actions go there
         h.setAccessibilityDelegate(new View.AccessibilityDelegate(){
             @Override public void onInitializeAccessibilityNodeInfo(View v,AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(v,info);int i=shown.indexOf(s);
-                if(i>0){info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_top,"Move to top"));info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_up,"Move up"));}
-                if(i<shown.size()-1){info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_down,"Move down"));info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_bottom,"Move to bottom"));}
+                if(i>0){info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_top,"Move to top"));info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_up,"Move above "+name(shown.get(i-1))));}
+                if(i>=0&&i<shown.size()-1){info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_down,"Move below "+name(shown.get(i+1))));info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_bottom,"Move to bottom"));}
                 if(saved()!=null)info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.move_default,"Default order"));}
             @Override public boolean performAccessibilityAction(View v,int action,android.os.Bundle args){int i=shown.indexOf(s);
                 if(action==R.id.move_top)return moveTo(s,0,"Moved to the top");if(action==R.id.move_up)return moveTo(s,i-1,"Moved up");
@@ -148,7 +137,7 @@ final class Movable {
 
     /** A movable section: a hold anywhere in it (the finger kept still) picks it up, even over a button or a chart. */
     private final class Section extends LinearLayout {
-        final String key;float downX,downY;boolean held;
+        final String key;float downX,downY;boolean held;TextView title;View dots; // title: found before the ⋮ goes in beside it (that moves it a level deeper)
         private final Runnable longPress=()->{held=true;performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);cancelChildren();hold(this);};
         Section(String key){super(main);this.key=key;setOrientation(VERTICAL);}
         private void cancelChildren(){long now=SystemClock.uptimeMillis();MotionEvent c=MotionEvent.obtain(now,now,MotionEvent.ACTION_CANCEL,downX,downY,0);

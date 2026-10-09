@@ -218,6 +218,16 @@ final class BudgetScreen extends Ui {
         b.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){
             super.onInitializeAccessibilityNodeInfo(v,info);info.setClassName(Button.class.getName());}});
         b.setOnClickListener(v->{tick(v);action.run();});return b;}
+    /** A group's ⋮: move the whole group (by its neighbours' names), edit it, or sort the groups A to Z (the default order). */
+    private void groupMenu(String group,View at){List<String> order=main.budget.shownGroups();int i=order.indexOf(group),last=order.size()-1;if(i<0)return;
+        List<MoveMenu.Choice> c=new ArrayList<>();
+        if(i>1)c.add(new MoveMenu.Choice(MoveMenu.TOP,"Move to top",false,()->main.change(()->main.budget.moveGroupTo(group,0))));
+        if(i>0)c.add(new MoveMenu.Choice(MoveMenu.UP,"Move above "+order.get(i-1),false,()->main.change(()->main.budget.moveGroupTo(group,i-1))));
+        if(i<last)c.add(new MoveMenu.Choice(MoveMenu.DOWN,"Move below "+order.get(i+1),false,()->main.change(()->main.budget.moveGroupTo(group,i+1))));
+        if(i<last-1)c.add(new MoveMenu.Choice(MoveMenu.BOTTOM,"Move to bottom",false,()->main.change(()->main.budget.moveGroupTo(group,last))));
+        c.add(new MoveMenu.Choice(MoveMenu.EDIT,"Edit group",true,()->editGroup(group)));
+        if(!main.budget.groupsSorted())c.add(new MoveMenu.Choice(MoveMenu.RESET,"Sort groups A to Z",true,()->main.change(()->main.budget.sortGroups())));
+        MoveMenu.show(this,at,group,(i+1)+" of "+order.size()+" groups",c);}
     /** A group's heading: tap to fold its categories away or bring them back, hold for its edit screen. Shows the group's total Available (and, folded, how many). */
     private void groupHeader(String group,boolean shut,long total,int n){
         LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));row.setPadding(dp(4),dp(8),dp(4),0);pressable(row);
@@ -226,6 +236,8 @@ final class BudgetScreen extends Ui {
         TextView name=label(group,18,main.blue,true);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
         String sumText=(shut?count(n,"category","categories")+" · ":"")+money(total);TextView sum=label("",13,main.muted,true);
         sum.setText(tint(sumText,money(total),amountColour(total)));row.addView(sum);
+        View[] dots=new View[1];dots[0]=MoveMenu.dots(this,main.blue,"Options for "+group,()->groupMenu(group,dots[0]));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(48),dp(48));lp.setMarginEnd(-dp(10));row.addView(dots[0],lp);
         heading(row);row.setContentDescription(group+", "+(shut?"collapsed, ":"")+money(total)+" available. Double tap to "+(shut?"show":"hide")+" its categories.");
         row.setOnClickListener(v->{Set<String> now=collapsedGroups();if(!now.remove(group))now.add(group);tick(v);
             main.getSharedPreferences("appearance",0).edit().putStringSet("collapsed_groups",now).apply();main.render();});
