@@ -15,7 +15,7 @@ import java.util.function.Supplier;
 /**
  * A transaction form's Reminders section, as Planner's (RemindersSection): the "Reminders" heading, a warning with "Turn on"
  * while notifications are off, hint lines, one card per reminder (its time, which opens "Change reminder"; ✕ to remove it; when
- * it goes off; its sound), and "+ Add reminder": On the day at 9:00, 1 day before, 1 week before, Custom…, Pick date and time….
+ * it goes off; its sound), and a full-width "🔔 Add reminder" button:On the day at 9:00, 1 day before, 1 week before, Custom…, Pick date and time….
  * It edits copies: the form's save keeps them ([list], ids given then to new ones, see [assignIds]).
  */
 final class ReminderEditor extends Ui {
@@ -33,8 +33,9 @@ final class ReminderEditor extends Ui {
         box.addView(label("Reminders count from "+Reminders.time(Reminders.START,main)+" on the transaction's date.",12,main.muted,false));
         String hint=alarmHint(ReminderNotifications.exactAlarmsAllowed(main),!list.isEmpty(),ringsAny(def));if(hint!=null)box.addView(label(hint,12,main.muted,false));
         for(Budget.Reminder r:list)box.addView(row(r,day,def));
-        Button add=button("+ Add reminder",()->choose(null));add.setBackground(bg(Color.TRANSPARENT));add.setTextColor(main.blue);add.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
-        box.addView(add,new LinearLayout.LayoutParams(-2,dp(48)));}
+        // A full-width button in the form's own button style (as Save and add another): plain text was easy to miss (user, 10 Oct).
+        Button add=button("🔔  Add reminder",()->choose(null));add.setTextSize(14);add.setContentDescription("Add reminder");
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(8),0,0);box.addView(add,p);}
     private boolean ringsAny(ReminderSound def){for(Budget.Reminder r:list)if(ReminderSound.resolve(r.ring,r.ringSeconds,def).alarmSeconds()!=null)return true;return false;}
     /**
      * The warning under the reminders while exact alarms are off (the default from Android 14 for apps without USE_EXACT_ALARM):
