@@ -10,12 +10,19 @@ import java.util.*;
 final class HomeScreen extends Ui {
     HomeScreen(MainActivity main){super(main);}
     void home(){
-        main.budgetScreen.readyCard();main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));
+        // Home's parts, in the order they were held and dragged into (Movable; Default order puts them back).
+        new Movable(this,"order_home","Home",CardOrder.HOME).build(key->{switch(key){
+            case "ready":main.budgetScreen.readyCard();main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));break;
+            case "start":start();break;case "attention":attention();break;case "progress":progress();break;case "ahead":monthAheadCard();break;default:pinned();}});
+    }
+    private void start(){
         if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(heading("Start with the money you have",21,main.ink));
             c.addView(label("Add your bank, savings or cash account and its current balance. Then assign that money in your plan.",15,main.muted,false));
             if(main.budget.brandNew())c.addView(primary("Set up my budget",this::setup)); // never for a budget in use
             c.addView(button("Add your first account",main.accountsScreen::addAccount));}
-        // Needs attention: each alert opens where it's dealt with.
+    }
+    /** Needs attention: each alert opens where it's dealt with. */
+    private void attention(){
         main.content.addView(heading("Needs attention",20,main.ink));int alerts=0;
         for(Budget.Category c:main.budget.categories){long cover=main.budget.toCover(c,main.month);if(cover<=0)continue;alerts++;String id=c.id;
             LinearLayout a=alert("!",c.name+" is overspent by "+money(cover),main.red,"Cover it with money from another category or To budget.",()->main.budgetScreen.categoryDetails(main.budget.category(id)));
@@ -45,14 +52,17 @@ final class HomeScreen extends Ui {
             a.addView(button("Remind me in a week",()->{main.prefs().edit().putString("backup_reminder_until",DataSafety.snoozeUntil(LocalDate.now())).apply();main.render();}));}
         if(alerts==0){TextView t=(TextView)empty("✅","All set: nothing needs your attention.",null,null).getChildAt(1);
             t.setTextColor(main.green);t.setTypeface(null,android.graphics.Typeface.BOLD);}
+    }
+    private void progress(){
         long need=0;for(Budget.Category c:main.budget.categories)if(!c.hidden)need+=main.budget.fundNeed(c,main.month);
         LinearLayout progress=card();LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
         top.addView(badge("🎯",need>0?main.amber:main.green));TextView h=heading("Your funding progress",19,main.ink);h.setPadding(dp(12),0,0,0);
         top.addView(h,new LinearLayout.LayoutParams(0,-2,1));progress.addView(top);
         progress.addView(label(need>0?money(need)+" still needed this month":"✓ Every target is funded this month",16,need>0?main.amber:main.green,true));
         progress.addView(label("Targets tell you what to fund. They do not create money.",14,main.muted,false));
-        monthAheadCard();
-        // Priority categories: the ones pinned from their menu in Budget.
+    }
+    /** Priority categories: the ones pinned from their menu in Budget. */
+    private void pinned(){
         main.content.addView(heading("Priority categories",20,main.ink));List<Budget.Category> pinned=main.budget.pinned();
         for(Budget.Category c:pinned)main.budgetScreen.categoryCard(c);
         if(pinned.isEmpty()&&!main.budget.categories.isEmpty())empty("📌","Pin up to "+Budget.PINS+" categories to keep an eye on them here: tap a category in Budget, then Pin to Home.","Go to Budget",()->{main.tab="Plan";main.render();});

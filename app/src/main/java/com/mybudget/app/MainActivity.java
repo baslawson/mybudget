@@ -37,7 +37,7 @@ public class MainActivity extends Activity {
     String tab="Home",search="",accountFilter="",categoryFilter="",fromFilter="",toFilter=""; // Transactions filters (see Budget.Filter)
     int flagFilter=-1,clearedFilter=-1;
     private String previousTab="Home";
-    YearMonth month=YearMonth.now();
+    YearMonth month=YearMonth.now(),seenNow=YearMonth.now(); // seenNow: the real month when last shown (hunt 26 C4)
     boolean storageReadable=true,showHidden=false;
     // Money in the budget's currency (Settings), in the device's number style; made again when the currency changes.
     private NumberFormat moneyFormat;private String moneyCode;
@@ -83,6 +83,8 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();if(!storageReadable)return;
         if(pickingPhoto)pickingPhoto=false;else try{if(reloadIfChanged()){for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();
                 render();}}catch(IllegalStateException e){ui.toast(e.getMessage());}
+        // Hunt 26 C4: left open across midnight on the 1st, the month that was current moves on (one picked on purpose stays).
+        YearMonth now=YearMonth.now();if(!now.equals(seenNow)){if(month.equals(seenNow)){month=now;if(editors.isEmpty())render();}seenNow=now;}
         AutoBackup.schedule(this);BudgetWidget.refresh(this); // the widget may show last month after midnight on the 1st
         if(prefs().getString("auto_backup_tree",null)!=null){boolean asked=backupDue(); // Home's backup reminder goes once this succeeds
             new Thread(()->{AutoBackup.run(getApplicationContext(),false);runOnUiThread(()->{if(asked&&!backupDue()&&tab.equals("Home")&&!isFinishing())render();});}).start();}}

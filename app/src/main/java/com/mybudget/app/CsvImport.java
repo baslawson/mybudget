@@ -142,11 +142,19 @@ public final class CsvImport {
     private static final Pattern DECIMAL_COMMA=Pattern.compile("-?(?:\\d{1,3}(?:\\.\\d{3})+|\\d+),\\d{1,2}");
     private static final Pattern TRANSFER=Pattern.compile("(?i)\\b(?:transfer|tfr|trf|xfer)\\b"); // a statement's word for a transfer
     private static final Pattern CODE=Pattern.compile("(?<![A-Z])[A-Z]{3}(?![A-Z])"); // three letters on their own: a currency code when it's a known one
-    public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),DateTimeFormatter.ofPattern(format,Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));}
-    /** The first format that reads every non-empty value in [column] (after the header row when [header]), or null. */
+    public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),new java.time.format.DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(format).toFormatter(Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));} // "05 OCT 2026", "5 oct 2026" (hunt 26 B2)
+    /**
+     * The date format of [column] (after the header row when [header]): the first that reads every non-empty value, else the one
+     * reading the most, if at least half (hunt 26 B2: a footer, an opening or closing balance or a "Pending" row then counts as
+     * unreadable instead of refusing the file; a format reading all still wins, so a US file isn't read day first). Else null.
+     */
     public static String detectDateFormat(List<List<String>> rows,int column,boolean header){
-        for(String f:DATE_FORMATS){boolean all=true,any=false;for(int i=header?1:0;i<rows.size();i++){List<String> r=rows.get(i);if(column>=r.size()||r.get(column).isEmpty())continue;any=true;try{date(r.get(column),f);}catch(Exception e){all=false;break;}}if(all&&any)return f;}
-        return null;
+        String best=null;int bestRead=0,values=0;
+        for(int i=header?1:0;i<rows.size();i++){List<String> r=rows.get(i);if(column<r.size()&&!r.get(column).isEmpty())values++;}
+        for(String f:DATE_FORMATS){int read=0;for(int i=header?1:0;i<rows.size();i++){List<String> r=rows.get(i);if(column>=r.size()||r.get(column).isEmpty())continue;
+                try{date(r.get(column),f);read++;}catch(Exception e){}}
+            if(read==values&&read>0)return f;if(read>bestRead){best=f;bestRead=read;}}
+        return bestRead>0&&bestRead*2>=values?best:null;
     }
     /** Whether the first row looks like column names (its cells aren't dates or amounts). */
     public static boolean looksLikeHeader(List<String> first){for(String c:first){if(c.isEmpty())continue;try{amount(c);return false;}catch(Exception e){}for(String f:DATE_FORMATS)try{date(c,f);return false;}catch(Exception e){}}return true;}
@@ -160,6 +168,8 @@ public final class CsvImport {
         Result r=new Result();Map<String,Integer> existing=new HashMap<>();
         // An imported row is known by the statement's own payee text (bankPayee), so renaming or merging its payee later doesn't hide it; others by their payee.
         for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
+        // Hunt 26 B3: of those, the ones a statement brought in: a duplicate row is one of these first, and only otherwise an entry made here.
+        Map<String,Integer> imported=new HashMap<>();for(Budget.Entry e:budget.entries)if(e.account.equals(account.id)&&!Budget.statementPayee(e).isEmpty())imported.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
         // Hunt 23: transfers made in MyBudget, in or out of this account, by date and amount: the statement names them its own way
         // ("TFR to savings" for MyBudget's "Transfer to Savings"), so a row that says it is a transfer matches one of them.
         Map<String,Integer> transfers=new HashMap<>();
@@ -185,7 +195,8 @@ public final class CsvImport {
             String k=key(d.toString(),cents,payee),k2=key(d.toString(),cents,named);if(existing.getOrDefault(k,0)<=0)k=k2;if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;
                 // That transaction is this row. Hunt 24 B1: one entered here remembers the statement's payee (and is cleared), so a
                 // later statement's row never takes it as well; it's out of matching for good.
-                for(Iterator<Budget.Entry> it=unmatched.iterator();it.hasNext();){Budget.Entry e=it.next();if(key(e.date,e.amount,e.payee).equals(k)){it.remove();e.bankPayee=payee;e.cleared=true;break;}}
+                if(imported.getOrDefault(k,0)>0)imported.merge(k,-1,Integer::sum);
+                else for(Iterator<Budget.Entry> it=unmatched.iterator();it.hasNext();){Budget.Entry e=it.next();if(key(e.date,e.amount,e.payee).equals(k)){it.remove();e.bankPayee=payee;e.cleared=true;break;}}
                 continue;}
             String moved=key(d.toString(),cents,"");if(TRANSFER.matcher(payee).find()&&transfers.getOrDefault(moved,0)>0){transfers.merge(moved,-1,Integer::sum);r.duplicates++;continue;}
             pending.add(new Object[]{d,cents,payee,rule,named});
@@ -203,9 +214,13 @@ public final class CsvImport {
         // Hunt 25 B2: rows in date order (a statement is often newest first), so each takes the date the transaction has reached by
         // then; B1: entered with the row's date, as its own date can still be ahead.
         Integer[] byDate=new Integer[pending.size()];for(int p=0;p<byDate.length;p++)byDate[p]=p;Arrays.sort(byDate,(a,b)->((LocalDate)pending.get(a)[0]).compareTo((LocalDate)pending.get(b)[0]));
+        // Hunt 26 B1: entering moves an upcoming transaction on (a week, for a weekly one), which can still be within MATCH_DAYS, so a
+        // second row only enters it again when it is nearer the new date than the one just entered (two coffees on one day: one).
+        Map<Budget.Scheduled,LocalDate> entered=new IdentityHashMap<>();
         for(int p:byDate){if(takes[p]!=null)continue;LocalDate d=(LocalDate)pending.get(p)[0];long cents=(Long)pending.get(p)[1];Budget.Scheduled due=null;long best=Long.MAX_VALUE;
-            for(Budget.Scheduled s:budget.scheduled){if(!s.account.equals(account.id)||s.amount!=cents)continue;long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(d,LocalDate.parse(s.next)));if(g<=MATCH_DAYS&&g<best){due=s;best=g;}}
-            if(due!=null)takes[p]=budget.enter(due,"",true,d.toString());}
+            for(Budget.Scheduled s:budget.scheduled){if(!s.account.equals(account.id)||s.amount!=cents)continue;long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(d,LocalDate.parse(s.next)));
+                LocalDate before=entered.get(s);if(before!=null&&Math.abs(java.time.temporal.ChronoUnit.DAYS.between(d,before))<=g)continue;if(g<=MATCH_DAYS&&g<best){due=s;best=g;}}
+            if(due!=null){entered.put(due,LocalDate.parse(due.next));takes[p]=budget.enter(due,"",true,d.toString());}}
         for(int p=0;p<pending.size();p++){Object[] row=pending.get(p);LocalDate d=(LocalDate)row[0];long cents=(Long)row[1];String payee=(String)row[2];Budget.Rule rule=(Budget.Rule)row[3];String named=(String)row[4];
             Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             Budget.Entry match=takes[p];

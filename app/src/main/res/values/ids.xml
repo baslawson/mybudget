@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TalkBack actions on a movable section's heading (Movable). -->
+<resources>
+    <item name="move_up" type="id"/>
+    <item name="move_down" type="id"/>
+    <item name="move_top" type="id"/>
+    <item name="move_bottom" type="id"/>
+    <item name="move_default" type="id"/>
+</resources>

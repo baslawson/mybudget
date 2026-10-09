@@ -15,13 +15,23 @@ import java.util.*;
 final class ReportsScreen extends Ui {
     ReportsScreen(MainActivity main){super(main);}
     void reflect(){
+        // The cards, in the order they were held and dragged into (Movable; Default order puts them back).
+        new Movable(this,"order_reports","Reports",CardOrder.REPORTS).build(key->{switch(key){case "cash":cashCard();break;case "breakdown":breakdownCard();break;
+            case "trends":trendsCard();break;case "flow":flowCard();break;case "table":incomeExpenseTable();break;case "year":yearCard();break;
+            case "worth":worthCard();break;default:ageCard();}});
+        main.content.addView(heading("Last six months",20,main.ink));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
+            TextView line=label("",13,main.muted,false);line.setText(inOut(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In ",main.budget.income(m),"   Out ",main.budget.spending(m)));main.content.addView(line);}
+        main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
+    }
+    private void cashCard(){
         LinearLayout totals=card();totals.addView(heading("This month's cash flow",20,main.ink));
-        long monthIn=main.budget.income(main.month),monthOut=main.budget.spending(main.month);
+        long monthIn=main.budget.income(main.month),monthOut=main.budget.spending(main.month); // card payments, transfers and tracking accounts aren't spending
         totals.addView(label("Income "+money(monthIn),21,amountColour(monthIn),true));
         totals.addView(label("Spending "+money(monthOut),21,outColour(monthOut),true));
         totals.addView(label("Difference "+money(monthIn-monthOut),17,amountColour(monthIn-monthOut),true));
-        breakdownCard();trendsCard(); // card payments, transfers and tracking accounts aren't spending
-        // Income vs spending, six months to this one: one axis from zero; the list below is the table view.
+    }
+    /** Income vs spending, six months to this one: one axis from zero; the list below is the table view. */
+    private void flowCard(){
         LinearLayout flow=card();flow.addView(heading("Income and spending",20,main.ink));
         int income=incomeColor(),spend=spendColor();
         LinearLayout legend=new LinearLayout(main);legend.setGravity(Gravity.CENTER_VERTICAL);
@@ -37,19 +47,20 @@ final class ReportsScreen extends Ui {
         CashFlowChart chart=new CashFlowChart(main,in,out,names,income,spend,main.muted,main.muted,main.buttonSurface,5,show);
         String[] said=new String[6];for(int i=0;i<6;i++)said[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMM yyyy"))+": income "+money(in[i])+", spending "+money(out[i]);
         chart.setContentDescription("Income and spending chart, last six months. "+String.join(". ",said)+".");chart.spoken(said);
-        flow.addView(chart,new LinearLayout.LayoutParams(-1,-2));
-        incomeExpenseTable();yearCard();
-        // Net worth and Money age.
+        if(main.hideAmounts)flow.addView(label("The bars are hidden while amounts are hidden.",12,main.muted,false)); // hunt 26 C7: drawn to scale they tell which is bigger
+        else flow.addView(chart,new LinearLayout.LayoutParams(-1,-2));
+    }
+    private void worthCard(){
         LinearLayout worth=card();long now=main.budget.netWorth(main.month),change=now-main.budget.netWorth(main.month.minusMonths(1));
         worth.addView(heading("Net worth",20,main.ink));worth.addView(label(money(now),26,amountColour(now),true));
-        TextView moved=label("",13,main.muted,false);moved.setText(tint((change>=0?"Up ":"Down ")+money(Math.abs(change))+" since the end of last month",money(Math.abs(change)),amountColour(change)));worth.addView(moved);
+        TextView moved=label("",13,main.muted,false);String by=main.hideAmounts?"Changed by ":change>=0?"Up ":"Down "; // hunt 26 C7: hidden, no direction
+        moved.setText(tint(by+money(Math.abs(change))+" since the end of last month",money(Math.abs(change)),amountColour(change)));worth.addView(moved);
+    }
+    private void ageCard(){
         LinearLayout age=card();LocalDate until=main.month.isBefore(YearMonth.now())?main.month.atEndOfMonth():LocalDate.now();
         int days=main.budget.ageOfMoney(until);age.addView(heading("Money age",20,main.ink));
         age.addView(label(days<0?"Not enough spending yet":count(days,"day","days"),26,days>=30?main.green:main.ink,true));
         age.addView(label("How old your money is when you spend it, over your last 10 outflows. 30 days or more means you're spending last month's income.",13,main.muted,false));
-        main.content.addView(heading("Last six months",20,main.ink));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
-            TextView line=label("",13,main.muted,false);line.setText(inOut(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In ",main.budget.income(m),"   Out ",main.budget.spending(m)));main.content.addView(line);}
-        main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
     }
     /** "[before]in-amount[between]out-amount": money in coloured by its sign, money out (spending, shown without a minus) red. */
     private CharSequence inOut(String before,long in,String between,long out){
@@ -80,7 +91,8 @@ final class ReportsScreen extends Ui {
         int selected=year==now?LocalDate.now().getMonthValue()-1:11;show.accept(selected);
         CashFlowChart chart=new CashFlowChart(main,y.income,y.spending,names,incomeColor(),spendColor(),main.muted,main.muted,main.buttonSurface,selected,show);
         String[] said=new String[12];for(int i=0;i<12;i++)said[i]=ms[i].format(DateTimeFormatter.ofPattern("MMMM"))+": income "+money(y.income[i])+", spending "+money(y.spending[i]);
-        chart.setContentDescription("Income and spending chart for each month of "+year+". "+String.join(". ",said)+".");chart.spoken(said);body.addView(chart,new LinearLayout.LayoutParams(-1,-2));
+        chart.setContentDescription("Income and spending chart for each month of "+year+". "+String.join(". ",said)+".");chart.spoken(said);
+        if(main.hideAmounts)body.addView(label("The bars are hidden while amounts are hidden.",12,main.muted,false));else body.addView(chart,new LinearLayout.LayoutParams(-1,-2)); // C7
         for(int i=0;i<12;i++){TextView line=label("",13,main.muted,false);line.setText(inOut(ms[i].format(DateTimeFormatter.ofPattern("MMM"))+"   In ",y.income[i],"   Out ",y.spending[i]));body.addView(line);}
         // The biggest categories and every group, with their share of the year's spending (as the spending breakdown); tap for transactions.
         YearMonth[] r={YearMonth.of(year,1),YearMonth.of(year,12)};

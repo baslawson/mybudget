@@ -190,7 +190,8 @@ public final class Budget {
      * "3*12.5", "(10+5)/2", "+250"). Each * and / is rounded half up to the cent. Up to $100 million either way.
      */
     public static long evaluate(String input) {
-        try {String s=input.replaceAll("\\s","");if(s.length()>100)throw new IllegalArgumentException();Calc c=new Calc(s);BigDecimal v=c.sum();if(c.at!=s.length())throw new IllegalArgumentException();
+        try {String s=input.replaceAll("\\s","");if(s.indexOf('.')<0)s=s.replaceAll("(\\d),(\\d{1,2})(?!\\d)","$1.$2"); // hunt 26 C8: "12,50" typed on a phone with comma decimals (a comma was never accepted before)
+            if(s.length()>100)throw new IllegalArgumentException();Calc c=new Calc(s);BigDecimal v=c.sum();if(c.at!=s.length())throw new IllegalArgumentException();
             long cents=v.movePointRight(2).longValueExact();if(cents < -10_000_000_000L || cents>10_000_000_000L)throw new IllegalArgumentException();return cents;}
         catch(RuntimeException e){throw new IllegalArgumentException("Enter an amount with at most two decimal places (maximum 100 million).");}
     }
@@ -271,7 +272,9 @@ public final class Budget {
     private static long share(long funded,long part,long all){return BigDecimal.valueOf(funded).multiply(BigDecimal.valueOf(part)).divide(BigDecimal.valueOf(all),0,java.math.RoundingMode.HALF_UP).longValueExact();}
     public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
     /** Adds a credit card owing [owed] (a positive amount) and its payment category. Old debt starts with nothing set aside. */
-    public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group="Credit card payments";p.cardAccount=a.id;categories.add(p);changed();return a;}
+    public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group=paymentGroup();p.cardAccount=a.id;categories.add(p);changed();return a;}
+    /** The group card payment categories are in: "Credit card payments", or what it was renamed to (hunt 26 B4: a new card joins it). */
+    String paymentGroup(){for(Category c:categories)if(c.payment())return c.group;return "Credit card payments";}
     /** An account's balance at the end of [m] (a card's is negative while it's owed). */
     public long balanceAt(Account a,YearMonth m){return sums().balanceAt(a,m);}
     public long futureAssigned(YearMonth m){long n=0;for(Category c:categories)for(Map.Entry<String,Long>a:c.assigned.entrySet())if(a.getKey().compareTo(m.toString())>0)n+=a.getValue();return n;}
@@ -634,6 +637,26 @@ public final class Budget {
     }
     /** Swaps [c] with the next category of its group up (-1) or down (+1); false at the end of the group. */
     public boolean reorder(Category c,int direction){int i=categories.indexOf(c);for(int j=i+direction;j>=0&&j<categories.size();j+=direction)if(categories.get(j).group.equals(c.group)){Collections.swap(categories,i,j);changed();return true;}return false;}
+    /**
+     * Renames group [from]: every category in it (hidden ones too) moves to [to]. A name another group already has (any case)
+     * merges them under that group's spelling.
+     */
+    public void renameGroup(String from,String to){String name=to==null?"":to.trim();if(name.isEmpty())throw new IllegalArgumentException("Enter a group name.");
+        boolean cards=false;for(Category c:categories)if(c.group.equals(from)&&c.payment())cards=true;
+        for(Category c:categories)if(!c.group.equals(from)&&c.group.trim().equalsIgnoreCase(name)){if(c.payment()!=cards)throw new IllegalArgumentException("Card payment categories keep a group of their own."); // B4
+            name=c.group;break;}
+        boolean any=false;for(Category c:categories)if(c.group.equals(from)){c.group=name;any=true;}
+        if(!any)throw new IllegalArgumentException("That group no longer exists.");changed();}
+    /**
+     * Moves [group] past the group next to it on Budget ([direction] -1 up, 1 down; groups with only hidden categories aren't
+     * shown, so they're skipped and go last). Each group's own order stays. False when it's already first or last.
+     */
+    public boolean moveGroup(String group,int direction){
+        List<String> order=new ArrayList<>();for(Category c:categories)if(!c.hidden&&!order.contains(c.group))order.add(c.group);
+        int i=order.indexOf(group),j=i+direction;if(i<0||j<0||j>=order.size())return false;Collections.swap(order,i,j);
+        for(Category c:categories)if(!order.contains(c.group))order.add(c.group);
+        List<Category> sorted=new ArrayList<>(categories);sorted.sort(Comparator.comparingInt(c->order.indexOf(c.group))); // stable: each group keeps its order
+        categories.clear();categories.addAll(sorted);changed();return true;}
     // Accounts: close at zero, delete only unused.
     public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */

@@ -12,30 +12,13 @@ final class AccountsScreen extends Ui {
     AccountsScreen(MainActivity main){super(main);}
     void accounts(){
         if(main.budget.accounts.isEmpty())empty("🏦","No accounts yet. Add the bank, savings, cash or card accounts your money is in, with what's in them now.",null,null);
-        for(Budget.Account a:main.budget.accounts){if(a.closed||a.tracking())continue;LinearLayout c=card();
-            head(c,a.credit()?"\uD83D\uDCB3":"\uD83C\uDFE6",heading(a.name+(a.credit()?" · credit card":""),20,main.ink));
-            if(a.credit()){long owed=-main.budget.balance(a,false);Budget.Category p=main.budget.paymentCategory(a);
-                long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
-                TextView debt=label("",28,main.ink,true);debt.setText(owed>0?tint("Owed "+money(owed),money(owed),outColour(owed)):owed<0?tint("In credit "+money(-owed),money(-owed),main.green):"Paid off");c.addView(debt);
-                c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?main.amber:main.green,true));
-                pair(c,button("Make a payment",()->main.forms.payCard(a.id)),button("Add interest or fee",()->main.forms.cardCharge(a.id,null)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
-            long cleared=main.budget.balance(a,true),uncleared=main.budget.balance(a,false)-cleared;TextView split=label("",13,main.muted,false);
-            split.setText(tint2("Cleared "+money(cleared)+" / Uncleared "+money(uncleared),money(cleared),amountColour(cleared),money(uncleared),amountColour(uncleared)));c.addView(split);
-            if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,main.green,false));
-            c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
-            pair(c,button("Reconcile",()->reconcile(a)),button("Edit account",()->editAccount(a.id)));}
+        List<String> open=new ArrayList<>(),tracked=new ArrayList<>();for(Budget.Account a:main.budget.accounts)if(!a.closed)(a.tracking()?tracked:open).add(a.id);
+        // Each group's accounts, in the order they were held and dragged into (Movable; Default order puts them back).
+        new Movable(this,"order_accounts","Accounts",open).build(id->accountCard(main.accountById(id)));
         // Tracking accounts: off budget, in Net worth only.
-        boolean anyTracking=false;for(Budget.Account a:main.budget.accounts){if(a.closed||!a.tracking())continue;
-            if(!anyTracking){main.content.addView(heading("Tracking accounts",18,main.blue));
-                main.content.addView(label("Off budget: they count in Net worth only. Update their balance now and then.",13,main.muted,false));}anyTracking=true;
-            LinearLayout c=card();head(c,a.liability?"\uD83D\uDCC9":"\uD83D\uDCC8",heading(a.name+(a.liability?" · loan or debt":" · asset"),20,main.ink));
-            long balance=main.budget.balance(a,false);
-            TextView worth=label("",28,main.ink,true);
-            worth.setText(a.liability?(balance<0?tint("Owed "+money(-balance),money(-balance),outColour(-balance)):"Paid off"):tint(money(balance),money(balance),amountColour(balance)));c.addView(worth);
-            if(a.liability&&(a.rate>0||a.payment>0))c.addView(greyLine(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),money(a.payment),outColour(a.payment),13));
-            String id=a.id;c.addView(button("Update balance",()->updateBalance(id)));
-            if(a.liability)c.addView(button("Payoff planner",()->payoffPlanner(id)));
-            pair(c,button("View transactions",()->{main.clearFilters();main.accountFilter=id;main.tab="Spending";main.render();}),button("Edit account",()->editAccount(id)));}
+        if(!tracked.isEmpty()){main.content.addView(heading("Tracking accounts",18,main.blue));
+            main.content.addView(label("Off budget: they count in Net worth only. Update their balance now and then.",13,main.muted,false));}
+        new Movable(this,"order_tracking","Tracking accounts",tracked).build(id->trackingCard(main.accountById(id)));
         main.content.addView(button("+ Add account",this::addAccount));
         if(main.openAccounts().size()>1)main.content.addView(button("Transfer between accounts",main.forms::transfer));
         boolean anyClosed=false;
@@ -46,6 +29,27 @@ final class AccountsScreen extends Ui {
             c.addView(button("Reopen account",()->main.change(()->main.accountById(a.id).closed=false)));}
         main.content.addView(label("Checking, savings and cash accounts are pooled for your plan. Transfers change where money lives, not its purpose. Spending on a credit card moves the category's money to the card's payment category, ready to pay it. Moving money from your budget to a tracking account (an extra loan payment, an investment) is spending from a category; money from one into your budget is income to To budget.",14,main.muted,false));
     }
+    private void accountCard(Budget.Account a){LinearLayout c=card();
+        head(c,a.credit()?"\uD83D\uDCB3":"\uD83C\uDFE6",heading(a.name+(a.credit()?" · credit card":""),20,main.ink));
+        if(a.credit()){long owed=-main.budget.balance(a,false);Budget.Category p=main.budget.paymentCategory(a);
+            long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
+            TextView debt=label("",28,main.ink,true);debt.setText(owed>0?tint("Owed "+money(owed),money(owed),outColour(owed)):owed<0?tint("In credit "+money(-owed),money(-owed),main.green):"Paid off");c.addView(debt);
+            c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?main.amber:main.green,true));
+            pair(c,button("Make a payment",()->main.forms.payCard(a.id)),button("Add interest or fee",()->main.forms.cardCharge(a.id,null)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
+        long cleared=main.budget.balance(a,true),uncleared=main.budget.balance(a,false)-cleared;TextView split=label("",13,main.muted,false);
+        split.setText(tint2("Cleared "+money(cleared)+" / Uncleared "+money(uncleared),money(cleared),amountColour(cleared),money(uncleared),amountColour(uncleared)));c.addView(split);
+        if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,main.green,false));
+        c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
+        pair(c,button("Reconcile",()->reconcile(a)),button("Edit account",()->editAccount(a.id)));}
+    private void trackingCard(Budget.Account a){
+        LinearLayout c=card();head(c,a.liability?"\uD83D\uDCC9":"\uD83D\uDCC8",heading(a.name+(a.liability?" · loan or debt":" · asset"),20,main.ink));
+        long balance=main.budget.balance(a,false);
+        TextView worth=label("",28,main.ink,true);
+        worth.setText(a.liability?(balance<0?tint("Owed "+money(-balance),money(-balance),outColour(-balance)):"Paid off"):tint(money(balance),money(balance),amountColour(balance)));c.addView(worth);
+        if(a.liability&&(a.rate>0||a.payment>0))c.addView(greyLine(a.ratePercent().stripTrailingZeros().toPlainString()+"% a year · "+money(a.payment)+" "+a.frequency.toLowerCase(Locale.ROOT),money(a.payment),outColour(a.payment),13));
+        String id=a.id;c.addView(button("Update balance",()->updateBalance(id)));
+        if(a.liability)c.addView(button("Payoff planner",()->payoffPlanner(id)));
+        pair(c,button("View transactions",()->{main.clearFilters();main.accountFilter=id;main.tab="Spending";main.render();}),button("Edit account",()->editAccount(id)));}
     void addAccount(){
         LinearLayout f=form();
         Spinner type=spinner(f,"Type",new String[]{"Cash, checking or savings","Credit card","Tracking: an asset (savings elsewhere, investments, house, super)","Tracking: a loan or debt (mortgage, car loan)"},0);

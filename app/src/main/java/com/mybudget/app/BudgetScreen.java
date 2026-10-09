@@ -174,7 +174,49 @@ final class BudgetScreen extends Ui {
     }
     // Groups folded away on Budget: a display choice on this phone (prefs "appearance"), not part of the budget or its backups.
     private Set<String> collapsedGroups(){return new HashSet<>(main.getSharedPreferences("appearance",0).getStringSet("collapsed_groups",new HashSet<>()));}
-    /** A group's heading: tap to fold its categories away or bring them back. Shows the group's total Available (and, folded, how many). */
+    /**
+     * A held group heading: the group's edit screen. Its name, applied with Save (Budget.renameGroup: another group's name merges
+     * them; folded stays folded); its categories, hidden ones too (tap one for its own edit form; ↑ ↓ reorder them at once); a new
+     * category in it; and the whole group moved up or down on Budget (Budget.moveGroup, at once).
+     */
+    private void editGroup(String group){
+        LinearLayout f=form();EditText name=field(f,"Group name",false);name.setText(group);name.setSelection(group.length());
+        f.addView(label("Using another group's name puts the two together.",12,main.muted,false));
+        TextView inside=heading("Categories in this group",15,main.ink);inside.setPadding(0,dp(14),0,dp(2));f.addView(inside);
+        LinearLayout list=column();f.addView(list);AlertDialog[] d=new AlertDialog[1];
+        f.addView(button("+ Add a category to this group",()->{d[0].dismiss();editCategory(null,group);}));
+        Button up=button("Move group up",()->{}),down=button("Move group down",()->{});pair(f,up,down);
+        Runnable[] fill=new Runnable[1];
+        fill[0]=()->{list.removeAllViews();List<Budget.Category> in=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(c.group.equals(group))in.add(c);
+            for(int i=0;i<in.size();i++){Budget.Category c=in.get(i);String id=c.id;long available=main.budget.available(c,main.month);
+                LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(56));pressable(row);
+                LinearLayout text=column();text.addView(label(c.name+(c.hidden?" · hidden":""),15,c.hidden?main.muted:main.ink,true));
+                text.addView(label(money(available)+" available",12,amountColour(available),false));row.addView(text,new LinearLayout.LayoutParams(0,-2,1));
+                row.addView(step("↑","Move "+c.name+" up",i>0,()->{if(main.change(()->main.budget.reorder(main.categoryById(id),-1)))fill[0].run();}),new LinearLayout.LayoutParams(dp(48),dp(48)));
+                row.addView(step("↓","Move "+c.name+" down",i<in.size()-1,()->{if(main.change(()->main.budget.reorder(main.categoryById(id),1)))fill[0].run();}),new LinearLayout.LayoutParams(dp(48),dp(48)));
+                TextView go=label("›",22,main.muted,false);go.setPadding(dp(8),0,dp(4),0);go.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(go);
+                row.setContentDescription(c.name+(c.hidden?", hidden, ":", ")+money(available)+" available. Double tap to edit.");
+                row.setOnClickListener(v->{d[0].dismiss();editCategory(main.categoryById(id));});list.addView(row,new LinearLayout.LayoutParams(-1,-2));}
+            List<String> shown=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(!c.hidden&&!shown.contains(c.group))shown.add(c.group);
+            int at=shown.indexOf(group);up.setEnabled(at>0);up.setAlpha(at>0?1f:0.4f);down.setEnabled(at>=0&&at<shown.size()-1);down.setAlpha(down.isEnabled()?1f:0.4f);};
+        up.setOnClickListener(v->{if(main.change(()->main.budget.moveGroup(group,-1)))fill[0].run();});
+        down.setOnClickListener(v->{if(main.change(()->main.budget.moveGroup(group,1)))fill[0].run();});
+        fill[0].run();
+        d[0]=dialog("Edit group",f,()->{String to=name.getText().toString();if(to.trim().equals(group))return; // unchanged: no merge with a group that differs only in capitals
+            main.budget.renameGroup(group,to);Set<String> shut=collapsedGroups();
+            if(shut.remove(group)){for(Budget.Category c:main.budget.categories)if(c.group.trim().equalsIgnoreCase(to.trim())){shut.add(c.group);break;}
+                main.getSharedPreferences("appearance",0).edit().putStringSet("collapsed_groups",shut).apply();}});}
+    /** A ↑ or ↓ in the group screen's rows, drawn bold (the font's arrows are thin); faded and off at the ends. */
+    private View step(String symbol,String said,boolean enabled,Runnable action){boolean up=symbol.equals("↑");
+        android.graphics.Paint pen=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);pen.setColor(main.blue);pen.setStyle(android.graphics.Paint.Style.STROKE);
+        pen.setStrokeWidth(dp(3));pen.setStrokeCap(android.graphics.Paint.Cap.ROUND);pen.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+        View b=new View(main){@Override protected void onDraw(android.graphics.Canvas c){float x=getWidth()/2f,y=getHeight()/2f,u=dp(1),d=up?-1:1,tip=y+d*8*u;
+            c.drawLine(x,y-d*8*u,x,tip,pen);android.graphics.Path head=new android.graphics.Path();head.moveTo(x-6*u,tip-d*6*u);head.lineTo(x,tip);head.lineTo(x+6*u,tip-d*6*u);c.drawPath(head,pen);}};
+        pressable(b);b.setClickable(true);b.setFocusable(true);b.setContentDescription(said);b.setEnabled(enabled);b.setAlpha(enabled?1f:0.3f);
+        b.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){
+            super.onInitializeAccessibilityNodeInfo(v,info);info.setClassName(Button.class.getName());}});
+        b.setOnClickListener(v->{tick(v);action.run();});return b;}
+    /** A group's heading: tap to fold its categories away or bring them back, hold for its edit screen. Shows the group's total Available (and, folded, how many). */
     private void groupHeader(String group,boolean shut,long total,int n){
         LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(48));row.setPadding(dp(4),dp(8),dp(4),0);pressable(row);
         TextView arrow=label(shut?"▸":"▾",16,main.blue,true);arrow.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -185,6 +227,9 @@ final class BudgetScreen extends Ui {
         heading(row);row.setContentDescription(group+", "+(shut?"collapsed, ":"")+money(total)+" available. Double tap to "+(shut?"show":"hide")+" its categories.");
         row.setOnClickListener(v->{Set<String> now=collapsedGroups();if(!now.remove(group))now.add(group);tick(v);
             main.getSharedPreferences("appearance",0).edit().putStringSet("collapsed_groups",now).apply();main.render();});
+        row.setOnLongClickListener(v->{editGroup(group);return true;});
+        row.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){
+            super.onInitializeAccessibilityNodeInfo(v,info);info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK,"edit group"));}});
         main.content.addView(row,new LinearLayout.LayoutParams(-1,-2));}
     /** The month's note (top of Budget): the text with a small Edit, or a small "+ Note" when there's none. */
     private void monthNoteRow(){
@@ -305,7 +350,9 @@ final class BudgetScreen extends Ui {
     // Target kinds as saved (targetType), in the form's order.
     private static final String[] TARGET_TYPES={"Refill","Monthly","Balance","Weekly","ByDate","Debt"};
     private static final int[] REPEAT_MONTHS={0,3,6,12};
-    private void editCategory(Budget.Category existing){
+    private void editCategory(Budget.Category existing){editCategory(existing,"Everyday");}
+    /** [newGroup]: the group a new category starts in. */
+    private void editCategory(Budget.Category existing,String newGroup){
         LinearLayout f=form();EditText name=field(f,"Category name",false);
         AutoCompleteTextView group=suggestField(f,"Group (Bills, Everyday, Savings...)",()->main.budget.groups());
         String[] types={"Refill each month","Set aside each month","Save toward a balance","Weekly amount","Save for spending by a date","Monthly debt payment"};
@@ -325,7 +372,7 @@ final class BudgetScreen extends Ui {
         EditText note=field(f,"Note (optional)",false);
         if(existing!=null){name.setText(existing.name);group.setText(existing.group,false);amount.setText(decimal(existing.target));
             due.setText(existing.due);dueDay.setText(existing.dueDay>0?String.valueOf(existing.dueDay):"");
-            note.setText(existing.note);}else group.setText("Everyday",false);
+            note.setText(existing.note);}else group.setText(newGroup,false);
         Runnable describe=()->{String t=TARGET_TYPES[type.getSelectedItemPosition()];
             deadline.setVisibility(t.equals("Balance")?View.VISIBLE:View.GONE);weekly.setVisibility(t.equals("Weekly")?View.VISIBLE:View.GONE);
             byDate.setVisibility(t.equals("ByDate")?View.VISIBLE:View.GONE);

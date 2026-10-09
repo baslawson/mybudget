@@ -1,6 +1,7 @@
 import com.mybudget.app.Budget;
 import com.mybudget.app.CsvImport;
 import com.mybudget.app.DataSafety;
+import com.mybudget.app.CardOrder;
 import java.time.YearMonth;
 import java.time.LocalDate;
 import java.math.BigDecimal;
@@ -37,8 +38,8 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();
-        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes.");
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();
+        System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){
         // Weekly targets: amount x the chosen weekdays in the month. September 2025 has 5 Mondays, February 2025 has 4.
@@ -1037,6 +1038,75 @@ public class BudgetTest {
             java.util.List<String> keys=new java.util.ArrayList<>();for(java.util.Map.Entry<String,long[]> r:rows.entrySet()){boolean any=false;for(long v:r.getValue())any|=v!=0;if(any)keys.add(r.getKey());}
             keys.sort((x,y)->Long.compare(java.util.Arrays.stream(rows.get(y)).sum(),java.util.Arrays.stream(rows.get(x)).sum()));
             StringBuilder s=new StringBuilder();for(String k:keys)s.append(names.get(k)).append(java.util.Arrays.toString(rows.get(k)));return s.toString();}
+    }
+    /** Bug hunt 26: statement import (B1-B3), the card payment group (B4), comma decimals (C8). */
+    static void hunt26(){
+        java.util.function.Function<String[][],java.util.List<java.util.List<String>>> rowsOf=a->{java.util.List<java.util.List<String>> l=new java.util.ArrayList<>();for(String[] r:a)l.add(java.util.Arrays.asList(r));return l;};
+        // B1: two coffees on one day enter a weekly upcoming one once; the next week's row still enters the next one.
+        for(int week=0;week<2;week++){Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);
+            Budget.Scheduled cafe=new Budget.Scheduled("Cafe","",bank.id,"2025-03-05",-500,"Weekly");b.scheduled.add(cafe);
+            CsvImport.Result r=CsvImport.run(b,rowsOf.apply(new String[][]{{"05/03/2025","CAFE","-5.00"},{week==0?"05/03/2025":"12/03/2025","CAFE","-5.00"}}),false,0,1,2,-1,"d/M/uuuu",bank);
+            equal(r.matched,week==0?1:2,"B1: upcoming entered");equal(r.added,week==0?1:0,"B1: the second coffee is its own");
+            if(!cafe.next.equals(week==0?"2025-03-12":"2025-03-19"))throw new AssertionError("B1: next "+cafe.next);}
+        // B2: a footer row no longer refuses the file; month names in any capitals; a US file with a footer still reads month first.
+        if(!"d/M/uuuu".equals(CsvImport.detectDateFormat(rowsOf.apply(new String[][]{{"05/10/2025","PAY","100.00"},{"06/10/2025","SHOP","-5.00"},{"Closing balance","","195.00"}}),0,false)))throw new AssertionError("B2: footer");
+        if(!"d MMM uuuu".equals(CsvImport.detectDateFormat(rowsOf.apply(new String[][]{{"05 OCT 2025","A","1.00"},{"5 oct 2025","B","2.00"}}),0,false)))throw new AssertionError("B2: capitals");
+        if(!"M/d/uuuu".equals(CsvImport.detectDateFormat(rowsOf.apply(new String[][]{{"10/25/2025","A","1.00"},{"10/26/2025","B","2.00"},{"Pending","C","3.00"}}),0,false)))throw new AssertionError("B2: US with footer");
+        if(CsvImport.detectDateFormat(rowsOf.apply(new String[][]{{"x","A","1.00"},{"y","B","2.00"},{"05/10/2025","C","3.00"}}),0,false)!=null)throw new AssertionError("B2: mostly not dates");
+        // B3: a duplicate of an earlier imported row leaves a separate hand entry with the same date, amount and payee alone.
+        {Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000);b.accounts.add(bank);
+            Budget.Entry imported=new Budget.Entry("Coles","",bank.id,"2025-03-05",-1000);imported.bankPayee="COLES";b.entries.add(imported);
+            Budget.Entry hand=new Budget.Entry("coles","",bank.id,"2025-03-05",-1000);b.entries.add(hand);
+            CsvImport.Result r=CsvImport.run(b,rowsOf.apply(new String[][]{{"05/03/2025","COLES","-10.00"}}),false,0,1,2,-1,"d/M/uuuu",bank);
+            equal(r.duplicates,1,"B3: a duplicate");if(hand.cleared||!hand.bankPayee.isEmpty())throw new AssertionError("B3: the hand entry was taken");}
+        // B4: a new card joins the renamed card payment group; card payments and spending don't merge.
+        {Budget b=new Budget();b.addCard("Visa","2025-01-01",0);Budget.Category bills=new Budget.Category("Rent");bills.group="Bills";b.categories.add(bills);
+            b.renameGroup("Credit card payments","Cards");b.addCard("Mastercard","2025-01-01",0);
+            for(Budget.Category c:b.categories)if(c.payment()&&!c.group.equals("Cards"))throw new AssertionError("B4: "+c.name+" in "+c.group);
+            rejects(()->b.renameGroup("Bills","cards"));rejects(()->b.renameGroup("Cards","bills"));}
+        // C8: "12,50" as typed with comma decimals; "1,234" and "1.234,56" still refused.
+        equal(Budget.evaluate("12,50"),1250,"C8");equal(Budget.evaluate("12,5+3,25"),1575,"C8 sum");rejects(()->Budget.evaluate("1,234"));rejects(()->Budget.evaluate("1.234,56"));
+        System.out.println("PASS hunt 26");
+    }
+    /** Renaming a group (held heading on Budget): every category moves, hidden ones too; another group's name merges them. */
+    static void groupRename(){
+        Budget b=new Budget();Budget.Category a=new Budget.Category("Rent"),h=new Budget.Category("Old"),c=new Budget.Category("Food");
+        a.group="Bills";h.group="Bills";h.hidden=true;c.group="Everyday";b.categories.add(a);b.categories.add(h);b.categories.add(c);
+        b.renameGroup("Bills","  Fixed costs ");
+        if(!a.group.equals("Fixed costs")||!h.group.equals("Fixed costs")||!c.group.equals("Everyday"))throw new AssertionError("Renamed, trimmed, hidden too, others kept");
+        b.renameGroup("Fixed costs","everyday");
+        if(!a.group.equals("Everyday")||!h.group.equals("Everyday"))throw new AssertionError("Merged under the other group's spelling");
+        rejects(()->b.renameGroup("Everyday","   "));rejects(()->b.renameGroup("Gone","New"));
+        if(!a.group.equals("Everyday"))throw new AssertionError("A refused rename changes nothing");
+        // Moving a group (Edit group): past the shown group next to it, each group's own order kept; groups of only hidden ones skipped.
+        Budget m=new Budget();String[][] cs={{"Rent","Bills"},{"Food","Everyday"},{"Power","Bills"},{"Gone","Old"},{"Fun","Everyday"},{"Car","Savings"}};
+        for(String[] x:cs){Budget.Category k=new Budget.Category(x[0]);k.group=x[1];k.hidden=x[1].equals("Old");m.categories.add(k);}
+        if(!m.moveGroup("Everyday",-1))throw new AssertionError("Moved up");
+        StringBuilder seen=new StringBuilder();for(Budget.Category k:m.categories)seen.append(k.name).append(',');
+        if(!seen.toString().equals("Food,Fun,Rent,Power,Car,Gone,"))throw new AssertionError("Group order after moving up: "+seen);
+        if(m.moveGroup("Everyday",-1)||m.moveGroup("Savings",1)||m.moveGroup("Old",1))throw new AssertionError("Nothing past the ends; hidden-only groups don't move");
+        if(!m.moveGroup("Bills",1))throw new AssertionError("Moved down");seen.setLength(0);for(Budget.Category k:m.categories)seen.append(k.name).append(',');
+        if(!seen.toString().equals("Food,Fun,Car,Rent,Power,Gone,"))throw new AssertionError("Group order after moving down: "+seen);
+        System.out.println("PASS group rename and move");
+    }
+    /** The order of a screen's movable sections, saved on this device (CardOrder). */
+    static void cardOrder(){
+        java.util.List<String> all=java.util.Arrays.asList("a","b","c","d");
+        if(!CardOrder.order(null,all).equals(all)||!CardOrder.order("",all).equals(all))throw new AssertionError("Nothing saved: the default order");
+        if(!CardOrder.order("c,a",all).equals(java.util.Arrays.asList("c","a","b","d")))throw new AssertionError("Saved first, the rest after in the default order");
+        if(!CardOrder.order("x,d,d, b",all).equals(java.util.Arrays.asList("d","b","a","c")))throw new AssertionError("Unknown and repeated keys dropped");
+        if(CardOrder.save(all,all)!=null)throw new AssertionError("The default order isn't kept");
+        if(!"b,a,c,d".equals(CardOrder.save(java.util.Arrays.asList("b","a","c","d"),all)))throw new AssertionError("A moved order is kept");
+        // Only b and d on screen (a and c hidden this time): moving d above b leaves a and c where they were.
+        if(!CardOrder.moved(all,java.util.Arrays.asList("d","b")).equals(java.util.Arrays.asList("a","d","c","b")))throw new AssertionError("Hidden sections keep their places");
+        if(!CardOrder.REPORTS.equals(CardOrder.order("nonsense",CardOrder.REPORTS))||CardOrder.HOME.size()!=6)throw new AssertionError("Screens' default orders");
+        // Move to top / bottom and one step, from the sheet: clamped at the ends, an unknown key changes nothing.
+        java.util.List<String> four=java.util.Arrays.asList("a","b","c","d");
+        if(!CardOrder.place(four,"c",0).equals(java.util.Arrays.asList("c","a","b","d")))throw new AssertionError("Move to top");
+        if(!CardOrder.place(four,"b",3).equals(java.util.Arrays.asList("a","c","d","b")))throw new AssertionError("Move to bottom");
+        if(!CardOrder.place(four,"b",99).equals(java.util.Arrays.asList("a","c","d","b"))||!CardOrder.place(four,"c",-1).equals(java.util.Arrays.asList("c","a","b","d")))throw new AssertionError("Clamped");
+        if(!CardOrder.place(four,"c",1).equals(java.util.Arrays.asList("a","c","b","d"))||!CardOrder.place(four,"x",0).equals(four))throw new AssertionError("Move up; unknown key");
+        System.out.println("PASS card order");
     }
     static void hunt25(){
         YearMonth sep=YearMonth.of(2025,9),oct=sep.plusMonths(1),nov=oct.plusMonths(1),dec=nov.plusMonths(1),jan=dec.plusMonths(1);

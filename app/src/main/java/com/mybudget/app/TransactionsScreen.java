@@ -65,13 +65,14 @@ final class TransactionsScreen extends Ui {
         LinearLayout c=card();c.setOrientation(LinearLayout.HORIZONTAL);c.setPadding(dp(8),dp(12),dp(8),dp(12));
         // Hunt 23 M2: signed and coloured by the value: refunds above spending make money out a plus (green), and an uncategorised
         // outflow above income makes money in a minus (red).
-        String[] names={"Money in","Money out",net<0?"Short by":"Left over"};long[] values={Math.abs(in),Math.abs(out),Math.abs(net)};
+        boolean hide=main.hideAmounts; // hunt 26 C7: hidden amounts show no sign, and one word for both cases
+        String[] names={"Money in","Money out",hide?"Difference":net<0?"Short by":"Left over"};long[] values={Math.abs(in),Math.abs(out),Math.abs(net)};
         int[] colours={amountColour(in),outColour(out),amountColour(net)};String[] signs={in<0?"−":"+",out<0?"+":"−",net<0?"−":""};
         for(int i=0;i<3;i++){LinearLayout col=column();col.setGravity(Gravity.CENTER_HORIZONTAL);
             TextView n=label(names[i],11,main.muted,true);n.setGravity(Gravity.CENTER);col.addView(n);
-            TextView v=label((values[i]==0?"":signs[i])+money(values[i]),16,values[i]==0?main.muted:colours[i],true);v.setGravity(Gravity.CENTER);v.setMaxLines(1);
+            TextView v=label((values[i]==0||hide?"":signs[i])+money(values[i]),16,values[i]==0||hide?main.ink:colours[i],true);v.setGravity(Gravity.CENTER);v.setMaxLines(1);
             v.setAutoSizeTextTypeUniformWithConfiguration(10,16,1,android.util.TypedValue.COMPLEX_UNIT_SP);col.addView(v,new LinearLayout.LayoutParams(-1,dp(30)));
-            col.setContentDescription(names[i]+" this month: "+(values[i]==0?"":signs[i])+money(values[i]));col.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            col.setContentDescription(names[i]+" this month: "+(values[i]==0||hide?"":signs[i])+money(values[i]));col.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
             for(int k=0;k<col.getChildCount();k++)col.getChildAt(k).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             c.addView(col,new LinearLayout.LayoutParams(0,-2,1));}
         c.setForeground(null);} // not tappable
@@ -213,7 +214,8 @@ final class TransactionsScreen extends Ui {
             if(!e.memo.isEmpty())middle.addView(label(e.memo,12,main.muted,false));
             if(!e.photo.isEmpty())middle.addView(label("📎 Photo attached",12,main.blue,false));
             LinearLayout right=column();right.setGravity(android.view.Gravity.END);
-            TextView amount=label(money(e.amount),16,amountColour(e.amount),true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
+            long here=e.transfer()&&main.accountFilter.equals(e.destination)?-e.amount:e.amount; // hunt 26 C2: in the receiving account's list, its side (money in)
+            TextView amount=label(money(here),16,amountColour(here),true);amount.setGravity(android.view.Gravity.END);amount.setPadding(0,0,0,0);right.addView(amount);
             TextView cleared=label(e.reconciled?"🔒 Reconciled":e.cleared?"Cleared":"Uncleared",11,e.cleared?main.green:main.muted,false);cleared.setGravity(android.view.Gravity.END);cleared.setPadding(0,dp(2),0,0);right.addView(cleared);
             row.addView(right,new LinearLayout.LayoutParams(-2,-2));row.setOnClickListener(v->main.forms.transaction(e));}
         if(n==0){boolean none=main.budget.entries.isEmpty();list.addView(emptyRow(none?"🧾":"🔍",none?"No transactions yet. Add what you spend or earn and it shows here.":main.fromFilter.isEmpty()&&main.toFilter.isEmpty()?"No matching transactions this month.":"No matching transactions in these dates."));}

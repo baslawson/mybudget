@@ -30,13 +30,14 @@ public class AutoBackup extends JobService {
     static void schedule(Context context){
         JobScheduler jobs=context.getSystemService(JobScheduler.class);if(jobs==null)return;
         if(context.getSharedPreferences("budget",0).getString("auto_backup_tree",null)==null){jobs.cancel(JOB);return;}
-        if(jobs.getPendingJob(JOB)!=null)return;
-        jobs.schedule(new JobInfo.Builder(JOB,new ComponentName(context,AutoBackup.class)).setPeriodic(24L*60*60*1000).build());
+        JobInfo pending=jobs.getPendingJob(JOB);if(pending!=null&&pending.isPersisted())return; // one from before 0.0.11 isn't kept over a restart: replaced
+        jobs.schedule(new JobInfo.Builder(JOB,new ComponentName(context,AutoBackup.class)).setPeriodic(24L*60*60*1000).setPersisted(true).build()); // hunt 26 C6: kept over a restart of the phone
     }
     /** Writes today's backup unless there is one already ([force]: write anyway). Returns an error message or null. */
     static synchronized String run(Context context,boolean force){
         SharedPreferences prefs=context.getSharedPreferences("budget",0);String tree=prefs.getString("auto_backup_tree",null),raw=prefs.getString("data",null);
-        if(tree==null||raw==null)return null;LocalDate day=LocalDate.now();String today=day.toString();if(!force&&!DataSafety.autoBackupDue(day,prefs.getString("auto_backup_last",null)))return null;
+        if(tree==null)return null;if(raw==null)return force?"Nothing to back up yet: the first backup is made once something is saved.":null; // hunt 26 C9: not "saved"
+        LocalDate day=LocalDate.now();String today=day.toString();if(!force&&!DataSafety.autoBackupDue(day,prefs.getString("auto_backup_last",null)))return null;
         try{
             Uri treeUri=Uri.parse(tree),folder=DocumentsContract.buildDocumentUriUsingTree(treeUri,DocumentsContract.getTreeDocumentId(treeUri));
             String name=DataSafety.autoBackupName(day);Map<String,String> existing=children(context,treeUri);String replaced=existing.remove(name);

@@ -187,9 +187,10 @@ final class TransactionForms extends Ui {
         Runnable save=()->{int k=kind.selected();
             if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
             boolean isSplit=k!=1&&!parts.isEmpty();
-            if(k!=1&&!isSplit&&cat[0]<0)throw new IllegalArgumentException("Choose a category.");
+            boolean bare=old!=null&&old.amount<0&&old.category.isEmpty()&&!old.transfer()&&k==0&&!isSplit&&cat[0]<0; // hunt 26 C1: an outflow with no category (a reconcile adjustment) keeps none
+            if(k!=1&&!isSplit&&cat[0]<0&&!bare)throw new IllegalArgumentException("Choose a category.");
             if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile."); // the data may have been read in again since the form opened
-            String p=required(payee),cat2=k==1?"":isSplit?Budget.SPLIT:categories.get(cat[0]).id,acc2=accounts.get(acc[0]).id,memoText=memo.getText().toString().trim();
+            String p=required(payee),cat2=k==1||bare?"":isSplit?Budget.SPLIT:categories.get(cat[0]).id,acc2=accounts.get(acc[0]).id,memoText=memo.getText().toString().trim();
             long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];
             LocalDate when=LocalDate.parse((String)day.getTag());
@@ -202,7 +203,9 @@ final class TransactionForms extends Ui {
                     main.budget.enter(s,photo[0],cleared.isChecked()).flag=flag.getSelectedItemPosition();
                     if(!rep.equals("Never"))main.budget.scheduled.add(s);
                     return;} // today or earlier: entered now (with its photo and Cleared tick), the repeat continues
-                main.budget.validate(s);main.budget.scheduled.removeIf(t->t.id.equals(s.id));main.budget.scheduled.add(s);return;
+                main.budget.validate(s);main.budget.scheduled.removeIf(t->t.id.equals(s.id));main.budget.scheduled.add(s);
+                if(!photo[0].isEmpty()||flag.getSelectedItemPosition()>0)toast("Saved as upcoming: add the photo and flag when it's entered."); // hunt 26 C3: upcoming ones keep neither
+                return;
             }
             Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;

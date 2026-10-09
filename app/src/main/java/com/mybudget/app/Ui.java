@@ -227,12 +227,12 @@ class Ui {
     void toast(String s){Toast.makeText(main,s,Toast.LENGTH_LONG).show();}
     /** Large text: a dialog's three buttons stack and the last is cut off, so a third action goes into the form as a button. */
     boolean large(){return main.getResources().getConfiguration().fontScale>=1.3f;}
-    void dialog(String title,LinearLayout f,Runnable action){
+    AlertDialog dialog(String title,LinearLayout f,Runnable action){
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
             .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(action);confirm(w);main.render();
-                d.dismiss();}catch(Exception e){toast(e.getMessage());}}));d.show();
+                d.dismiss();}catch(Exception e){toast(e.getMessage());}}));d.show();return d;
     }
     /**
      * A full-screen form (Add transaction): Cancel and Save, and with [again] Save and add another, which saves, clears the form
