@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.10
+## Download 0.0.11
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.10/MyBudget-0.0.10.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.10)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.11/MyBudget-0.0.11.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.11)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.10`, version code `13`, package `com.mybudget.app`. The universal release APK is approximately 225 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.11`, version code `14`, package `com.mybudget.app`. The universal release APK is approximately 225 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -24,6 +24,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.11**: hold and drag the sections of Home, Accounts and Reports to rearrange them, edit a whole group by holding its heading on Budget, and fixes from a bug hunt (imports, transfers, shortcuts, the daily backup after a restart, Hide amounts, decimal commas).
 - **0.0.10**: fixes from a bug hunt: statement imports (a row paying an upcoming transaction a few days early, newest-first files, quotes inside fields, more file encodings, debit and credit columns), card credit that has been spent, assigning in past months, getting a month ahead with bills still to pay, open forms kept when the phone turns, and Hide amounts.
 - **0.0.9**: getting a month ahead (next month funded, how To budget is worked out, cover from a later month), search by amount, statement rows matched to transactions you entered, OFX, QFX and QIF imports, payee category settings, card interest and fees, reconciled transactions locked, a coloured To budget figure and fixes from a bug hunt. Backups from 0.0.9 can't be restored in 0.0.8.
 - **0.0.8**: a livelier look and a new logo, a faster Add transaction form, one currency per budget, a home-screen widget and shortcuts, a yearly report, first-run setup, upcoming splits, Undo after deletes, speed with years of data, and fixes from a bug hunt.
