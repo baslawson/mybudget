@@ -184,7 +184,9 @@ final class BudgetScreen extends Ui {
         f.addView(label("Using another group's name puts the two together.",12,main.muted,false));
         TextView inside=heading("Categories in this group",15,main.ink);inside.setPadding(0,dp(14),0,dp(2));f.addView(inside);
         LinearLayout list=column();f.addView(list);AlertDialog[] d=new AlertDialog[1];
-        f.addView(button("+ Add a category to this group",()->{d[0].dismiss();editCategory(null,group);}));
+        // Leaving a category's form opened from here comes back here, in the group the category ended up in.
+        java.util.function.Consumer<String> back=g->{if(hasGroup(g))editGroup(g);else if(hasGroup(group))editGroup(group);};
+        f.addView(button("+ Add a category to this group",()->{d[0].dismiss();editCategory(null,group,back);}));
         Button up=button("Move group up",()->{}),down=button("Move group down",()->{});pair(f,up,down);
         Runnable[] fill=new Runnable[1];
         fill[0]=()->{list.removeAllViews();List<Budget.Category> in=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(c.group.equals(group))in.add(c);
@@ -196,7 +198,7 @@ final class BudgetScreen extends Ui {
                 row.addView(step("↓","Move "+c.name+" down",i<in.size()-1,()->{if(main.change(()->main.budget.reorder(main.categoryById(id),1)))fill[0].run();}),new LinearLayout.LayoutParams(dp(48),dp(48)));
                 TextView go=label("›",22,main.muted,false);go.setPadding(dp(8),0,dp(4),0);go.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(go);
                 row.setContentDescription(c.name+(c.hidden?", hidden, ":", ")+money(available)+" available. Double tap to edit.");
-                row.setOnClickListener(v->{d[0].dismiss();editCategory(main.categoryById(id));});list.addView(row,new LinearLayout.LayoutParams(-1,-2));}
+                row.setOnClickListener(v->{d[0].dismiss();editCategory(main.categoryById(id),group,back);});list.addView(row,new LinearLayout.LayoutParams(-1,-2));}
             List<String> shown=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(!c.hidden&&!shown.contains(c.group))shown.add(c.group);
             int at=shown.indexOf(group);up.setEnabled(at>0);up.setAlpha(at>0?1f:0.4f);down.setEnabled(at>=0&&at<shown.size()-1);down.setAlpha(down.isEnabled()?1f:0.4f);};
         up.setOnClickListener(v->{if(main.change(()->main.budget.moveGroup(group,-1)))fill[0].run();});
@@ -350,9 +352,11 @@ final class BudgetScreen extends Ui {
     // Target kinds as saved (targetType), in the form's order.
     private static final String[] TARGET_TYPES={"Refill","Monthly","Balance","Weekly","ByDate","Debt"};
     private static final int[] REPEAT_MONTHS={0,3,6,12};
-    private void editCategory(Budget.Category existing){editCategory(existing,"Everyday");}
-    /** [newGroup]: the group a new category starts in. */
-    private void editCategory(Budget.Category existing,String newGroup){
+    private void editCategory(Budget.Category existing){editCategory(existing,"Everyday",null);}
+    /** Whether any category (hidden ones too) is in [group]. */
+    private boolean hasGroup(String group){for(Budget.Category c:main.budget.categories)if(c.group.equals(group))return true;return false;}
+    /** [newGroup]: the group a new category starts in. [back]: given the category's group when the person leaves the form (saved or not). */
+    private void editCategory(Budget.Category existing,String newGroup,java.util.function.Consumer<String> back){
         LinearLayout f=form();EditText name=field(f,"Category name",false);
         AutoCompleteTextView group=suggestField(f,"Group (Bills, Everyday, Savings...)",()->main.budget.groups());
         String[] types={"Refill each month","Set aside each month","Save toward a balance","Weekly amount","Save for spending by a date","Monthly debt payment"};
@@ -384,6 +388,7 @@ final class BudgetScreen extends Ui {
         type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){describe.run();}public void onNothingSelected(AdapterView<?> p){}});
         // Groups already in the plan are suggested; a group typed in other capitals is saved in its existing spelling ("bills" -> "Bills").
         // The target amount takes quick maths; starting with + adds to the current target.
+        String[] savedGroup={existing==null?newGroup:existing.group};
         dialog(existing==null?"New category":"Edit category & target",f,()->{
             String n=required(name),g=main.budget.existingGroup(required(group),existing==null?null:main.budget.category(existing.id));
             for(Budget.Category c:main.budget.categories)if((existing==null||!c.id.equals(existing.id))&&c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That category already exists.");
@@ -400,6 +405,7 @@ final class BudgetScreen extends Ui {
             c.weekday=weekday.getSelectedItemPosition()+1;c.weeklyRefill=weeklyMode.getSelectedItemPosition()==0;
             c.dueDate=t.equals("ByDate")?LocalDate.parse((String)dueDate.getTag()).toString():"";
             c.repeatMonths=t.equals("ByDate")?REPEAT_MONTHS[repeat.getSelectedItemPosition()]:0;
-            c.note=note.getText().toString().trim();if(existing==null)main.budget.categories.add(c);});
+            c.note=note.getText().toString().trim();if(existing==null)main.budget.categories.add(c);savedGroup[0]=g;},
+            back==null?null:()->back.accept(savedGroup[0]));
     }
 }

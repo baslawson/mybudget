@@ -227,12 +227,14 @@ class Ui {
     void toast(String s){Toast.makeText(main,s,Toast.LENGTH_LONG).show();}
     /** Large text: a dialog's three buttons stack and the last is cut off, so a third action goes into the form as a button. */
     boolean large(){return main.getResources().getConfiguration().fontScale>=1.3f;}
-    AlertDialog dialog(String title,LinearLayout f,Runnable action){
+    AlertDialog dialog(String title,LinearLayout f,Runnable action){return dialog(title,f,action,null);}
+    /** [closed]: runs when the person leaves the form (Save that worked, Cancel, Back), not when a reload closes the forms. */
+    AlertDialog dialog(String title,LinearLayout f,Runnable action,Runnable closed){
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle(title).setView(scroll)
-            .setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
-        main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
+            .setNegativeButton("Cancel",closed==null?null:(x,w)->closed.run()).setPositiveButton("Save",null).create();
+        main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));if(closed!=null)d.setOnCancelListener(v->closed.run());
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{try{main.commit(action);confirm(w);main.render();
-                d.dismiss();}catch(Exception e){toast(e.getMessage());}}));d.show();return d;
+                d.dismiss();}catch(Exception e){toast(e.getMessage());return;}if(closed!=null)closed.run();}));d.show();return d;
     }
     /**
      * A full-screen form (Add transaction): Cancel and Save, and with [again] Save and add another, which saves, clears the form
