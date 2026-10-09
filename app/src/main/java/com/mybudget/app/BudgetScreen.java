@@ -261,22 +261,31 @@ final class BudgetScreen extends Ui {
         text.setFilters(new InputFilter[]{new InputFilter.LengthFilter(Budget.MONTH_NOTE_MAX)});text.setText(main.budget.monthNote(m));
         dialog("Month note",f,()->main.budget.setMonthNote(m,text.getText().toString()));
     }
+    /** A category's actions, in a sheet: money, the category itself, its place in the group, and hiding or deleting it. */
     void categoryDetails(Budget.Category c){
-        List<String> names=new ArrayList<>();List<Runnable> actions=new ArrayList<>();String id=c.id;
-        if(main.budget.toCover(c,main.month)>0){names.add("Cover overspending");actions.add(()->cover(id));}
-        names.add("Assign or return money");actions.add(()->assign(c));names.add("Move money");actions.add(this::move);
-        names.add("Edit category and target");actions.add(()->editCategory(c));
-        names.add("View transactions");actions.add(()->{main.clearFilters();main.tab="Spending";main.categoryFilter=id;main.render();});
-        names.add("Move up");actions.add(()->reorder(id,-1));names.add("Move down");actions.add(()->reorder(id,1));
+        String id=c.id;long available=main.budget.available(c,main.month);
+        List<MoveMenu.Choice> money=new ArrayList<>(),self=new ArrayList<>(),place=new ArrayList<>(),away=new ArrayList<>();
+        if(main.budget.toCover(c,main.month)>0)money.add(MoveMenu.Choice.danger(MoveMenu.COVER,"Cover overspending",()->cover(id)));
+        money.add(new MoveMenu.Choice(MoveMenu.MONEY,"Assign or return money",false,()->assign(c)));
+        money.add(new MoveMenu.Choice(MoveMenu.SWAP,"Move money",false,this::move));
+        self.add(new MoveMenu.Choice(MoveMenu.EDIT,"Edit category and target",false,()->editCategory(c)));
+        self.add(new MoveMenu.Choice(MoveMenu.LIST,"View transactions",false,()->{main.clearFilters();main.tab="Spending";main.categoryFilter=id;main.render();}));
         if(c.target>0){boolean snoozed=c.snoozed.equals(main.month.toString());String m=main.month.toString();
-            names.add(snoozed?"Unsnooze target":"Snooze target this month");
-            actions.add(()->main.change(()->main.categoryById(id).snoozed=snoozed?"":m));}
-        boolean pinned=c.pinned;names.add(pinned?"Unpin from Home":"Pin to Home");
-        actions.add(()->{if(main.change(()->main.budget.pin(main.categoryById(id),!pinned)))toast(pinned?"Unpinned from Home.":"Pinned to Home: it shows under Priority categories.");});
-        names.add(c.hidden?"Unhide":"Hide");actions.add(()->hide(id,!c.hidden));
-        if(!c.payment()){names.add("Delete category");actions.add(()->deleteCategory(id));}
-        tracked(new AlertDialog.Builder(main).setTitle(c.name).setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()));
+            self.add(new MoveMenu.Choice(MoveMenu.SNOOZE,snoozed?"Unsnooze target":"Snooze target this month",false,()->main.change(()->main.categoryById(id).snoozed=snoozed?"":m)));}
+        boolean pinned=c.pinned;
+        self.add(new MoveMenu.Choice(MoveMenu.PIN,pinned?"Unpin from Home":"Pin to Home",false,
+            ()->{if(main.change(()->main.budget.pin(main.categoryById(id),!pinned)))toast(pinned?"Unpinned from Home.":"Pinned to Home: it shows under Priority categories.");}));
+        Budget.Category above=neighbour(c,-1),below=neighbour(c,1); // the ones reorder() swaps with: in its group, hidden ones too
+        if(above!=null)place.add(new MoveMenu.Choice(MoveMenu.UP,"Move above "+above.name,false,()->reorder(id,-1)));
+        if(below!=null)place.add(new MoveMenu.Choice(MoveMenu.DOWN,"Move below "+below.name,false,()->reorder(id,1)));
+        away.add(new MoveMenu.Choice(c.hidden?MoveMenu.SHOW:MoveMenu.HIDE,c.hidden?"Unhide":"Hide",false,()->hide(id,!c.hidden)));
+        if(!c.payment())away.add(MoveMenu.Choice.danger(MoveMenu.DELETE,"Delete category",()->deleteCategory(id)));
+        String about=c.group+(c.hidden?" · hidden":"")+" · "+money(available)+" available";
+        MoveMenu.sheet(this,c.name,about,Arrays.asList(money,self,place,away),null);
     }
+    /** The category next to [c] in its group (hidden ones too), up (-1) or down (1); null at the end. */
+    private Budget.Category neighbour(Budget.Category c,int direction){List<Budget.Category> all=main.budget.categories;
+        for(int j=all.indexOf(c)+direction;j>=0&&j<all.size();j+=direction)if(all.get(j).group.equals(c.group))return all.get(j);return null;}
     private void reorder(String id,int direction){main.change(()->{if(!main.budget.reorder(main.categoryById(id),direction))throw new IllegalArgumentException(direction<0?"Already first in its group.":"Already last in its group.");});}
     private void hide(String id,boolean hidden){boolean[] unpinned={false};
         if(main.change(()->unpinned[0]=main.budget.setHidden(main.categoryById(id),hidden)))toast(hidden?"Hidden. It's at the bottom of Budget; its money still counts.":unpinned[0]?"Back in your plan. Home already has "+Budget.PINS+" pinned, so it was unpinned.":"Back in your plan.");}
@@ -287,13 +296,15 @@ final class BudgetScreen extends Ui {
                 .setPositiveButton("Delete",(d,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),null))).show();return;}
         List<Budget.Category> others=new ArrayList<>();for(Budget.Category o:main.budget.categories)if(o!=c&&!o.payment())others.add(o);
         if(others.isEmpty()){toast("Add another category first, to take its transactions and money.");return;}
-        String[] labels=others.stream().map(o->o.name+(o.hidden?" (hidden)":"")).toArray(String[]::new);
-        new AlertDialog.Builder(main).setTitle("Move "+c.name+" to…").setItems(labels,(d,n)->{String into=others.get(n).id;
+        java.util.function.IntConsumer chosen=n->{String into=others.get(n).id;
             int count=main.budget.entriesIn(c);
             new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?")
                 .setMessage("Its "+count(count,"transaction","transactions")+" and the money assigned to it in every month move to "+others.get(n).name+". Bills from Planner then suggest "+others.get(n).name+" too. Past months' balances in "+others.get(n).name+" may change.")
                 .setNegativeButton("Cancel",null)
-                    .setPositiveButton("Move and delete",(d2,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show();}).show();
+                    .setPositiveButton("Move and delete",(d2,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show();};
+        List<MoveMenu.Choice> into=new ArrayList<>();for(int i=0;i<others.size();i++){int n=i;Budget.Category o=others.get(i);
+            into.add(categoryPick(o,main.budget.available(o,main.month),()->chosen.accept(n)));}
+        MoveMenu.sheet(this,"Move "+c.name+" to…","Its transactions and money go to the category you pick, then it's deleted.",Collections.singletonList(into),null);
     }
     /** Cover overspending: pick the envelope the money comes from (categories with money, or To budget). */
     void cover(String id){
@@ -310,7 +321,16 @@ final class BudgetScreen extends Ui {
             for(Budget.Category o:main.budget.categories){long back=o==c?0:main.budget.futureCover(o,later);if(back<=0)continue;
                 labels.add(o.name+" in "+later.format(DateTimeFormatter.ofPattern("MMMM"))+" ("+money(back)+" assigned)");froms.add(o);laters.add(later);has.add(back);}
         if(labels.isEmpty()){toast("No category has money to move. Record income or assign money first.");return;}
-        tracked(new AlertDialog.Builder(main).setTitle("Cover "+money(missing)+" for "+c.name).setItems(labels.toArray(new String[0]),(d,n)->{
+        // Sheet rows: To budget, then categories with money, then later months' assignments, each with what it can give.
+        List<MoveMenu.Choice> now=new ArrayList<>(),cats=new ArrayList<>(),ahead=new ArrayList<>();
+        for(int i=0;i<labels.size();i++){int n=i;Budget.Category from=froms.get(i);YearMonth later=laters.get(i);Runnable pick=()->coverFrom(id,c,missing,froms,laters,has,n);
+            if(from==null)now.add(new MoveMenu.Choice(MoveMenu.MONEY,"To budget",false,pick).sub("Money without a job yet").detail(money(has.get(i)),amountColour(has.get(i))));
+            else if(later==null)cats.add(categoryPick(from,has.get(i),pick));
+            else ahead.add(categoryPick(from,has.get(i),pick).sub("Assigned in "+later.format(DateTimeFormatter.ofPattern("MMMM yyyy"))));}
+        MoveMenu.sheet(this,"Cover "+money(missing)+" for "+c.name,"Take the money from:",Arrays.asList(now,cats,ahead),null);
+    }
+    /** Cover's confirmation for the source picked in its sheet ([n] in the lists cover() built). */
+    private void coverFrom(String id,Budget.Category c,long missing,List<Budget.Category> froms,List<YearMonth> laters,List<Long> has,int n){{
             Budget.Category from=froms.get(n);YearMonth later=laters.get(n);long amount=Math.min(missing,has.get(n));String fromId=from==null?null:from.id;
             String laterName=later==null?"":later.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
             String source=from==null?"To budget":later==null?from.name:from.name+"'s money assigned in "+laterName;
@@ -321,7 +341,7 @@ final class BudgetScreen extends Ui {
                     .setPositiveButton("Cover",(d2,w)->main.change(()->{if(fromId==null)main.budget.assign(main.categoryById(id),main.month,amount);
                         else if(later==null)main.budget.move(main.categoryById(fromId),main.categoryById(id),main.month,amount);
                         else main.budget.coverFromFuture(main.categoryById(fromId),later,main.categoryById(id),main.month,amount);})));
-        }));
+        }
     }
     private void assign(Budget.Category c){
         LinearLayout f=form();long spare=main.budget.spendable(main.month);TextView head=label("",16,main.blue,true);head.setText(tint(money(spare)+" to budget",money(spare),amountColour(spare)));f.addView(head);

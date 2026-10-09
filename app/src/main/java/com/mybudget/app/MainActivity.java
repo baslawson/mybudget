@@ -104,13 +104,13 @@ public class MainActivity extends Activity {
         if(cameraFile!=null)state.putString("cameraFile",cameraFile.getName());
         super.onSaveInstanceState(state);}
     private void options(View anchor){
-        PopupMenu menu=new PopupMenu(this,anchor);menu.getMenu().add("Settings");menu.getMenu().add(hideAmounts?"Show amounts":"Hide amounts");
-        menu.getMenu().add("Budget reset");
-        menu.setOnMenuItemClickListener(item->{String t=item.getTitle().toString();
-            if(t.equals("Budget reset"))budgetScreen.planReset();
-            else if(t.endsWith("amounts")){if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){ui.toast("Could not save that setting.");
-                    return true;}hideAmounts=!hideAmounts;render();BudgetWidget.refresh(this);}
-            else openSettings();return true;});menu.show();
+        List<MoveMenu.Choice> c=new ArrayList<>();
+        c.add(new MoveMenu.Choice(MoveMenu.GEAR,"Settings",false,this::openSettings));
+        c.add(new MoveMenu.Choice(hideAmounts?MoveMenu.SHOW:MoveMenu.HIDE,hideAmounts?"Show amounts":"Hide amounts",false,()->{
+            if(!getSharedPreferences("appearance",0).edit().putBoolean("hideAmounts",!hideAmounts).commit()){ui.toast("Could not save that setting.");return;}
+            hideAmounts=!hideAmounts;render();BudgetWidget.refresh(this);}));
+        c.add(new MoveMenu.Choice(MoveMenu.RESET,"Budget reset",true,budgetScreen::planReset));
+        MoveMenu.show(ui,anchor,"MyBudget",month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy")),c);
     }
     void openSettings(){if(!tab.equals("Settings"))previousTab=tab;tab="Settings";render();}
     // The widget and the app shortcuts open a screen with the OPEN extra: the Add transaction form, Budget, Transactions or

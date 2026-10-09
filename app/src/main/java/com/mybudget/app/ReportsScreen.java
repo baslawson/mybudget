@@ -122,7 +122,7 @@ final class ReportsScreen extends Ui {
         return r[0].equals(r[1])?r[0].format(f):r[0].format(f)+" to "+r[1].format(f);}
     private static String percent(int tenths){return tenths/10+"."+tenths%10+"%";}
     private Spinner choice(String[] names,int selection,String description){Spinner s=new Spinner(main);
-        s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));s.setSelection(Math.max(0,selection));
+        Ui.dropdown(s,names);s.setSelection(Math.max(0,selection));
         s.setContentDescription(description);return s;}
     private void breakdownCard(){
         LinearLayout card=card();card.addView(heading("Spending breakdown",20,main.ink));LinearLayout pickers=new LinearLayout(main);
@@ -162,10 +162,10 @@ final class ReportsScreen extends Ui {
     private void sliceTransactions(Budget.Slice s,YearMonth[] r){
         if(s.ids.size()==1){showTransactions(s.ids.get(0),r);return;}Map<String,Long> spent=main.budget.spentBy(r[0],r[1]);
         List<String> ids=new ArrayList<>(s.ids);ids.sort((a,b)->Long.compare(spent.getOrDefault(b,0L),spent.getOrDefault(a,0L)));
-        String[] names=ids.stream().map(id->{Budget.Category c=main.budget.category(id);
-            return(c==null?"":c.name)+" ("+money(spent.getOrDefault(id,0L))+")";}).toArray(String[]::new);
-        new AlertDialog.Builder(main).setTitle(s.name+": which category?").setItems(names,(d,n)->showTransactions(ids.get(n),r))
-            .setNegativeButton("Cancel",null).show();
+        List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(String id:ids){Budget.Category c=main.budget.category(id);long spentThere=spent.getOrDefault(id,0L);
+            rows.add(MoveMenu.Choice.pick(c==null?"":c.name,()->showTransactions(id,r)).sub(c==null||c.group.equals(s.name)?null:c.group).detail(money(spentThere),main.ink));}
+        MoveMenu.sheet(this,s.name,"Spent in each category: pick one to see its transactions",Collections.singletonList(rows),null);
     }
     private void showTransactions(String categoryId,YearMonth[] r){main.clearFilters();main.categoryFilter=categoryId;
         main.fromFilter=r[0].atDay(1).toString();main.toFilter=r[1].atEndOfMonth().toString();main.tab="Spending";main.render();}

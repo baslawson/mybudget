@@ -4,6 +4,7 @@ import android.app.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.content.Context;
 import android.content.res.ColorStateList;
 import android.text.*;
 import android.view.View;
@@ -198,8 +199,24 @@ class Ui {
     }
     AutoCompleteTextView suggestField(LinearLayout f,String hint,java.util.function.Supplier<List<String>> options){AutoCompleteTextView e=Suggest.box(main,f,hint,options);
         e.setTextColor(main.ink);return e;}
+    /** A category to pick in a sheet: its first letter, its group under the name and [amount] at the end, coloured by sign. */
+    MoveMenu.Choice categoryPick(Budget.Category c,long amount,Runnable picked){
+        return MoveMenu.Choice.pick(c.name,picked).sub(c.group+(c.hidden?" · hidden":"")).detail(money(amount),amountColour(amount));}
+    /**
+     * Fills [s] with [names], its open list in a rounded, raised box with roomy rows and the current one in bold, in the
+     * window's own colours (also in Planner's add-expense window, which has no Ui).
+     */
+    static void dropdown(Spinner s,String[] names){Context c=s.getContext();float dp=c.getResources().getDisplayMetrics().density;
+        android.content.res.TypedArray a=c.obtainStyledAttributes(new int[]{android.R.attr.textColorPrimary,android.R.attr.colorBackgroundFloating,android.R.attr.colorAccent});
+        int ink=a.getColor(0,Color.BLACK),floating=a.getColor(1,Color.WHITE),accent=a.getColor(2,ink);a.recycle();
+        s.setAdapter(new ArrayAdapter<String>(c,android.R.layout.simple_spinner_dropdown_item,names){
+            @Override public View getDropDownView(int at,View reuse,ViewGroup parent){TextView t=(TextView)super.getDropDownView(at,reuse,parent);boolean on=at==s.getSelectedItemPosition();
+                t.setEllipsize(TextUtils.TruncateAt.END);t.setPadding((int)(20*dp),(int)(14*dp),(int)(20*dp),(int)(14*dp));t.setMinHeight((int)(52*dp));t.setTextSize(16);
+                t.setTextColor(on?accent:ink);t.setTypeface(null,on?android.graphics.Typeface.BOLD:android.graphics.Typeface.NORMAL);return t;}});
+        GradientDrawable box=new GradientDrawable();box.setColor(floating);box.setCornerRadius(16*dp);box.setStroke((int)Math.max(1,dp),tint(ink,30));
+        s.setPopupBackgroundDrawable(box);}
     Spinner spinner(LinearLayout f,String title,String[] names,int selection){TextView t=label(title,12,main.muted,true);f.addView(t);Spinner s=new Spinner(main);names(t,s);
-        s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));
+        dropdown(s,names);
         if(names.length>0)s.setSelection(Math.max(0,selection));f.addView(s);return s;}
     String required(EditText e){String s=e.getText().toString().trim();
         if(s.isEmpty())throw new IllegalArgumentException("Please enter a name.");return s;}

@@ -56,9 +56,10 @@ final class TransactionsScreen extends Ui {
     }
     private void chooseBillCategory(String billKey,String payee){
         List<Budget.Category> cats=main.visibleCategories(null);if(cats.isEmpty()){toast("Add a category first.");return;}
-        new AlertDialog.Builder(main).setTitle("Plan "+payee+" from")
-            .setItems(cats.stream().map(c->c.name+" ("+money(main.budget.available(c,main.month))+")").toArray(String[]::new),(d,n)->{String id=cats.get(n).id;
-            if(main.change(()->main.budget.billCategories.put(billKey,id)))toast("Planned from "+cats.get(n).name+". MyBudget suggests it when the bill is paid, too.");}).show();
+        List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(Budget.Category c:cats){String id=c.id;rows.add(categoryPick(c,main.budget.available(c,main.month),
+            ()->{if(main.change(()->main.budget.billCategories.put(billKey,id)))toast("Planned from "+c.name+". MyBudget suggests it when the bill is paid, too.");}));}
+        MoveMenu.sheet(this,"Plan "+payee+" from","The category this bill's money comes from",Collections.singletonList(rows),null);
     }
     /** The month on screen at a glance: money in (green), money out (red) and what's left over. */
     private void monthSummary(){long in=main.budget.income(main.month),out=main.budget.spending(main.month),net=in-out;

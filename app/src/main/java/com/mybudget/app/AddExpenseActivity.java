@@ -86,11 +86,11 @@ public class AddExpenseActivity extends Activity {
         else if(sent>10_000_000_000L)label(f,"This bill's amount is over MyBudget's limit of 100 million. Enter what you paid, in parts if need be.",13);
         label(f,"Date",12);EditText dateField=dateField(f,date);
         String[] categoryNames=new String[categories.size()+1];categoryNames[0]="Choose a category";for(int i=0;i<categories.size();i++){Budget.Category c=categories.get(i);categoryNames[i+1]=c.name+" ("+money(budget.available(c,YearMonth.now()))+" available)";}
-        TextView categoryLabel=label(f,"Category",12);Spinner category=new Spinner(this);Ui.names(categoryLabel,category);category.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,categoryNames));category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
+        TextView categoryLabel=label(f,"Category",12);Spinner category=new Spinner(this);Ui.names(categoryLabel,category);Ui.dropdown(category,categoryNames);category.setSelection(suggested==null?0:categories.indexOf(suggested)+1);f.addView(category);
         // Picking a known payee chooses its suggested category (Budget.suggestedCategory), unless a category is already chosen.
         payeeField.setOnItemClickListener((p,v,position,rowId)->{String usual=budget.suggestedCategory(payeeField.getText().toString());if(usual==null||category.getSelectedItemPosition()!=0)return;int i=categories.indexOf(budget.category(usual));if(i>=0)category.setSelection(i+1);});
         if(suggested!=null)label(f,last!=null?"Suggested from last time for this bill.":"The category you planned this bill from.",12);
-        TextView accountLabel=label(f,"Account",12);Spinner account=new Spinner(this);Ui.names(accountLabel,account);account.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,accounts.stream().map(a->a.name).toArray(String[]::new)));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
+        TextView accountLabel=label(f,"Account",12);Spinner account=new Spinner(this);Ui.names(accountLabel,account);Ui.dropdown(account,accounts.stream().map(a->a.name).toArray(String[]::new));account.setSelection(lastAccount==null?0:accounts.indexOf(lastAccount));f.addView(account);
         if(!note.isEmpty())label(f,"Note: "+note,12);
         // Hunt 24 E2: the bank statement may have been imported first: a row with this amount within a week, not linked to
         // Planner yet, is offered instead of a second expense ("Use imported" links it to this payment).

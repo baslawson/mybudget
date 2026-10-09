@@ -89,30 +89,8 @@ final class Movable {
         s.setAlpha(0.35f);} // its place, while the shadow follows the finger
 
     /** The sheet from the bottom of the screen: the section's name and place, then each move it can make. */
-    private void menu(Section s){
-        int i=shown.indexOf(s),last=shown.size()-1;
-        LinearLayout sheet=new LinearLayout(main);sheet.setOrientation(LinearLayout.VERTICAL);int side=ui.dp(20);sheet.setPadding(side,ui.dp(10),side,ui.dp(16));
-        GradientDrawable bg=new GradientDrawable();bg.setColor(main.surface);float r=ui.dp(24);bg.setCornerRadii(new float[]{r,r,r,r,0,0,0,0});sheet.setBackground(bg);
-        View handle=new View(main);GradientDrawable h=new GradientDrawable();h.setColor(Ui.tint(main.muted,110));h.setCornerRadius(ui.dp(2));handle.setBackground(h);
-        handle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(ui.dp(36),ui.dp(4));
-        hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=ui.dp(14);sheet.addView(handle,hp);
-        TextView title=ui.label(name(s),20,main.ink,true);Ui.heading(title);sheet.addView(title);
-        sheet.addView(ui.label((i+1)+" of "+shown.size()+" on "+where,13,main.muted,false));
-        View space=new View(main);sheet.addView(space,new LinearLayout.LayoutParams(1,ui.dp(8)));
-        AlertDialog d=new AlertDialog.Builder(main).create();
-        MoveMenu.rows(ui,sheet,choices(s),ui.dp(56),16,ui.dp(40),d::dismiss);
-        TextView tip=ui.label("Tip: hold and drag to move it anywhere.",12,main.muted,false);tip.setPadding(0,ui.dp(10),0,0);sheet.addView(tip);
-        WindowInsets screen=main.getWindow().getDecorView().getRootWindowInsets();int bar=android.os.Build.VERSION.SDK_INT>=30&&screen!=null?screen.getInsets(WindowInsets.Type.navigationBars()).bottom:0;
-        sheet.setPadding(side,ui.dp(10),side,ui.dp(16)+bar); // the rows stay above the gesture bar the sheet runs under
-        // Scrolls when it doesn't fit (landscape, large text).
-        ScrollView holder=new ScrollView(main);holder.addView(sheet);d.setView(holder,0,0,0,0);
-        d.setCanceledOnTouchOutside(true);main.editors.add(d);d.setOnDismissListener(x->main.editors.remove(d));d.show();
-        Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));w.setGravity(Gravity.BOTTOM);
-            int wide=Math.min(main.getResources().getDisplayMetrics().widthPixels,ui.dp(560));w.setLayout(wide,ViewGroup.LayoutParams.WRAP_CONTENT);
-            w.setWindowAnimations(0);w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);w.setNavigationBarColor(main.surface);if(android.os.Build.VERSION.SDK_INT>=29)w.setNavigationBarContrastEnforced(false);
-            if(android.os.Build.VERSION.SDK_INT>=30){w.setDecorFitsSystemWindows(false);WindowManager.LayoutParams lp=w.getAttributes();lp.setFitInsetsTypes(0);w.setAttributes(lp);}} // the sheet runs under the gesture bar (its padding keeps the rows above it)
-        if(Ui.motion()){holder.setTranslationY(ui.dp(360));holder.animate().translationY(0).setDuration(240).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();}
-    }
+    private void menu(Section s){int i=shown.indexOf(s);
+        MoveMenu.sheet(ui,name(s),(i+1)+" of "+shown.size()+" on "+where,Collections.singletonList(choices(s)),"Tip: hold and drag to move it anywhere.");}
     /** The section's name for the sheet: its title, in sentence case if shown in capitals ("TO BUDGET" → "To budget"). */
     private static String name(Section s){TextView h=s.title;if(h==null)return "Move";String t=h.getText().toString();
         return t.equals(t.toUpperCase(Locale.ROOT))&&!t.equals(t.toLowerCase(Locale.ROOT))?t.charAt(0)+t.substring(1).toLowerCase(Locale.ROOT):t;}

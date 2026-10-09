@@ -86,8 +86,10 @@ final class TransactionForms extends Ui {
             List<String> names=new ArrayList<>();for(Budget.Category c:shown)names.add(c.name);names.add("All categories…");
             categoryChips.show(names,cat[0]<0?-1:shown.indexOf(categories.get(cat[0])),n->{
                 if(n<shown.size()){cat[0]=categories.indexOf(shown.get(n));categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();return;}
-                YearMonth m=YearMonth.now();String[] all=categories.stream().map(c->c.name+"  ·  "+money(main.budget.available(fresh(c),m))).toArray(String[]::new);
-                new AlertDialog.Builder(main).setTitle("Choose a category").setItems(all,(d,i)->{cat[0]=i;categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();}).show();});};
+                YearMonth m=YearMonth.now();List<MoveMenu.Choice> all=new ArrayList<>();
+                for(int k=0;k<categories.size();k++){int i=k;Budget.Category c=categories.get(k);
+                    all.add(categoryPick(c,main.budget.available(fresh(c),m),()->{cat[0]=i;categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();}).selected(cat[0]==k));}
+                MoveMenu.sheet(this,"Choose a category","Available this month",Collections.singletonList(all),null);});};
         showCategories[0].run();
         Runnable showSplit=()->{boolean on=!parts.isEmpty();categoryChips.view.setVisibility(on?View.GONE:View.VISIBLE);categoryTitle.setVisibility(categoryChips.view.getVisibility());
             splitSummary.setVisibility(on?View.VISIBLE:View.GONE);splitButton.setText(on?"Edit split":"Split into categories");amount.setEnabled(!on);
@@ -148,11 +150,13 @@ final class TransactionForms extends Ui {
         Runnable[] showPhotoBox=new Runnable[1];
         showPhotoBox[0]=()->{photoBox.removeAllViews();
             // Take a photo (the camera app) or choose one from the gallery; either is copied into photos at most 1600 px.
-            if(photo[0].isEmpty())photoBox.addView(button("+ Add a photo",()->new AlertDialog.Builder(main).setTitle("Add a photo")
-                .setItems(new String[]{"Take a photo","Choose from gallery"},(d,n)->{main.photoTarget=u->{try{photo[0]=main.copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}
+            if(photo[0].isEmpty()){java.util.function.IntConsumer pick=n->{main.photoTarget=u->{try{photo[0]=main.copyPhoto(u);}catch(Exception e){toast("Could not add that photo.");}
                     showPhotoBox[0].run();};main.pickingPhoto=true;
-                main.photoForm=main.editors.isEmpty()?null:main.editors.get(main.editors.size()-1); // this form: the newest open one
-                if(!(n==0?main.takePhoto():main.choosePhoto())){main.pickingPhoto=false;main.photoTarget=null;main.photoForm=null;}}).show()));
+                main.photoForm=main.editors.isEmpty()?null:main.editors.get(main.editors.size()-1); // this form: the newest open one (the sheet has left the list)
+                if(!(n==0?main.takePhoto():main.choosePhoto())){main.pickingPhoto=false;main.photoTarget=null;main.photoForm=null;}};
+                photoBox.addView(button("+ Add a photo",()->MoveMenu.sheet(this,"Add a photo","Kept on this phone only, not in backups",
+                    Collections.singletonList(Arrays.asList(new MoveMenu.Choice(MoveMenu.CAMERA,"Take a photo",false,()->pick.accept(0)),
+                        new MoveMenu.Choice(MoveMenu.GALLERY,"Choose from gallery",false,()->pick.accept(1)))),null)));}
             else{android.graphics.Bitmap bm=main.photoBitmap(photo[0],480);
                 if(bm==null)photoBox.addView(label("The photo isn't on this phone.",13,main.muted,false));else{ImageView img=new ImageView(main);
                     img.setImageBitmap(bm);img.setAdjustViewBounds(true);img.setScaleType(ImageView.ScaleType.FIT_START);
@@ -238,7 +242,7 @@ final class TransactionForms extends Ui {
         interface Row{void add(String category,Long cents,String note);}
         Row addRow=(category,cents,note)->{LinearLayout part=column(),row=new LinearLayout(main);part.addView(row);
             row.setGravity(Gravity.CENTER_VERTICAL);Spinner s=new Spinner(main);
-            s.setAdapter(new ArrayAdapter<>(main,android.R.layout.simple_spinner_dropdown_item,names));
+            Ui.dropdown(s,names);
             int i=category==null?0:category.isEmpty()?categories.size():Math.max(0,categories.indexOf(main.budget.category(category)));
             s.setSelection(i);row.addView(s,new LinearLayout.LayoutParams(0,-2,1));
             EditText a=new EditText(main);a.setHint("0.00");a.setTextColor(main.ink);a.setSingleLine(true);a.setInputType(AMOUNT_INPUT);sumsHint(a,"Amount of this part");s.setContentDescription("Category of this part");
@@ -289,14 +293,14 @@ final class TransactionForms extends Ui {
     void dueActions(String id){
         Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){return;}
         boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());
-        List<String> names=new ArrayList<>();List<Runnable> actions=new ArrayList<>();
-        if(isDue){names.add("Enter it now");
-            actions.add(()->{if(main.change(()->main.budget.enter(scheduledById(id))))toast("Entered "+s.payee+".");});
-            names.add(s.repeat.equals("Never")?"Skip it (delete)":"Skip this one");
-            actions.add(()->main.change(()->main.budget.advance(scheduledById(id))));}
-        names.add("Edit");actions.add(()->transaction(null,s));
-        tracked(new AlertDialog.Builder(main).setTitle(s.payee+" · "+money(s.amount))
-            .setItems(names.toArray(new String[0]),(d,n)->actions.get(n).run()));
+        List<MoveMenu.Choice> choices=new ArrayList<>();
+        if(isDue){choices.add(new MoveMenu.Choice(MoveMenu.ENTER,"Enter it now",false,
+                ()->{if(main.change(()->main.budget.enter(scheduledById(id))))toast("Entered "+s.payee+".");}));
+            Runnable skip=()->main.change(()->main.budget.advance(scheduledById(id)));
+            choices.add(s.repeat.equals("Never")?MoveMenu.Choice.danger(MoveMenu.DELETE,"Skip it (delete)",skip):new MoveMenu.Choice(MoveMenu.SKIP,"Skip this one",false,skip));}
+        choices.add(new MoveMenu.Choice(MoveMenu.EDIT,"Edit",false,()->transaction(null,s)));
+        MoveMenu.sheet(this,s.payee,money(s.amount)+" · "+(isDue?"due ":"next ")+pretty(s.next)+(s.repeat.equals("Never")?"":" · "+s.repeat.toLowerCase(Locale.ROOT)),
+            Collections.singletonList(choices),null);
     }
     String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
     private void delete(Budget.Entry e){new AlertDialog.Builder(main).setTitle("Delete transaction?")

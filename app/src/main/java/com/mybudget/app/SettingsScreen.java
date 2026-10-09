@@ -79,10 +79,12 @@ final class SettingsScreen extends Ui {
     void payees(){
         List<String> all=main.budget.allPayees();Map<String,Integer> uses=new HashMap<>();
         for(Budget.Entry e:main.budget.entries)if(!e.transfer())uses.merge(e.payee.trim().toLowerCase(Locale.ROOT),1,Integer::sum);
-        String[] rows=all.stream().map(p->p+" ("+uses.getOrDefault(p.toLowerCase(Locale.ROOT),0)+")"+(main.budget.hiddenPayee(p)?" · hidden":"")).toArray(String[]::new);
-        AlertDialog.Builder d=new AlertDialog.Builder(main).setTitle(all.isEmpty()?"No payees yet":"Payees").setNegativeButton("Close",null)
-            .setNeutralButton("Import rules ("+main.budget.rules.size()+")",(x,w)->rules());
-        if(all.isEmpty())d.setMessage("Payees appear here once you have transactions. Import rules can be set up now.");else d.setItems(rows,(x,n)->payeeActions(all.get(n)));d.show();
+        List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(String p:all){int n=uses.getOrDefault(p.toLowerCase(Locale.ROOT),0);
+            rows.add(MoveMenu.Choice.pick(p,()->payeeActions(p)).sub(count(n,"transaction","transactions")+(main.budget.hiddenPayee(p)?" · hidden from suggestions":"")));}
+        List<MoveMenu.Choice> more=Collections.singletonList(new MoveMenu.Choice(MoveMenu.LIST,"Import rules ("+main.budget.rules.size()+")",true,this::rules));
+        MoveMenu.sheet(this,all.isEmpty()?"No payees yet":"Payees",all.isEmpty()?"Payees appear here once you have transactions. Import rules can be set up now.":"Tap one to rename, merge, hide or set its category.",
+            Arrays.asList(rows,more),null);
     }
     /** What a payee's category suggestion is, in words: "automatic (Groceries)", "always Groceries" or "none". */
     private String suggestionText(String payee){String set=main.budget.payeeCategories.get(payee.trim().toLowerCase(Locale.ROOT));Budget.Category fixed=set==null||set.isEmpty()?null:main.budget.category(set);
@@ -91,15 +93,18 @@ final class SettingsScreen extends Ui {
     /** A payee's category suggestion: automatic (changes once two of its last three agree), always one category, or none. */
     private void payeeCategory(String payee){
         List<Budget.Category> cats=new ArrayList<>();for(Budget.Category c:main.budget.categories)if(!c.payment()&&!c.hidden)cats.add(c);
-        String[] choices=new String[cats.size()+2];choices[0]="Automatic: the category it usually has (one odd purchase doesn't change it; two of its last three do)";choices[1]="Don't suggest a category";
-        for(int i=0;i<cats.size();i++)choices[i+2]="Always "+cats.get(i).name;
-        new AlertDialog.Builder(main).setTitle(payee+": category").setItems(choices,(d,n)->{String id=n==0?null:n==1?"":cats.get(n-2).id;
-            if(main.change(()->main.budget.setPayeeCategory(payee,id)))toast(payee+": category "+suggestionText(payee)+".");}).setNegativeButton("Cancel",null).show();
+        String set=main.budget.payeeCategories.get(payee.trim().toLowerCase(Locale.ROOT)); // null automatic, "" none, else the category
+        java.util.function.Consumer<String> choose=id->{if(main.change(()->main.budget.setPayeeCategory(payee,id)))toast(payee+": category "+suggestionText(payee)+".");};
+        List<MoveMenu.Choice> ways=new ArrayList<>(),always=new ArrayList<>();
+        ways.add(new MoveMenu.Choice(MoveMenu.RESET,"Automatic",false,()->choose.accept(null)).sub("The category it usually has: one odd purchase doesn't change it; two of its last three do").selected(set==null));
+        ways.add(new MoveMenu.Choice(MoveMenu.HIDE,"Don't suggest a category",false,()->choose.accept("")).selected(set!=null&&set.isEmpty()));
+        for(Budget.Category c:cats){String id=c.id;always.add(MoveMenu.Choice.pick("Always "+c.name,()->choose.accept(id)).sub(c.group).selected(id.equals(set)));
+            always.get(always.size()-1).badge=c.name.isEmpty()?"·":new String(Character.toChars(c.name.codePointAt(0))).toUpperCase(Locale.ROOT);}
+        MoveMenu.sheet(this,payee,"Category suggested for this payee",Arrays.asList(ways,always),null);
     }
     private void payeeActions(String payee){
         boolean hidden=main.budget.hiddenPayee(payee);
-        new AlertDialog.Builder(main).setTitle(payee)
-            .setItems(new String[]{"Rename","Merge into another payee",hidden?"Show in suggestions":"Hide from suggestions","Category: "+suggestionText(payee)},(d,n)->{
+        java.util.function.IntConsumer act=n->{ // 0 rename, 1 merge, 2 hide or show, 3 category
             if(n==3){payeeCategory(payee);return;}
             if(n==0){LinearLayout f=form();
                 f.addView(label("Every transaction and upcoming transaction with this payee gets the new name.",13,main.muted,false));
@@ -107,22 +112,28 @@ final class SettingsScreen extends Ui {
                 dialog("Rename payee",f,()->{if(main.budget.renamePayee(payee,name.getText().toString())==0)throw new IllegalArgumentException("That payee no longer has transactions.");});}
             else if(n==1){List<String> others=new ArrayList<>(main.budget.allPayees());others.removeIf(o->o.equalsIgnoreCase(payee));
                 if(others.isEmpty()){toast("There's no other payee to merge with.");return;}
-                new AlertDialog.Builder(main).setTitle("Merge "+payee+" into…")
-                    .setItems(others.toArray(new String[0]),(d2,k)->{String keep=others.get(k);
-                    new AlertDialog.Builder(main).setTitle("Merge into "+keep+"?")
+                List<MoveMenu.Choice> keeps=new ArrayList<>();
+                for(String keep:others)keeps.add(MoveMenu.Choice.pick(keep,()->new AlertDialog.Builder(main).setTitle("Merge into "+keep+"?")
                         .setMessage("Transactions with "+payee+" become "+keep+". "+keep+" is the one kept.").setNegativeButton("Cancel",null)
-                        .setPositiveButton("Merge",(d3,w)->{if(main.change(()->main.budget.mergePayees(Collections.singletonList(payee),keep)))toast("Merged into "+keep+".");}).show();}).show();}
+                        .setPositiveButton("Merge",(d3,w)->{if(main.change(()->main.budget.mergePayees(Collections.singletonList(payee),keep)))toast("Merged into "+keep+".");}).show()));
+                MoveMenu.sheet(this,"Merge "+payee+" into…","The payee you pick is the one kept",Collections.singletonList(keeps),null);}
             else if(main.change(()->main.budget.hidePayee(payee,!hidden)))toast(hidden?"Suggested again.":"Hidden from suggestions. Its transactions stay.");
-        }).show();
+        };
+        List<MoveMenu.Choice> name=new ArrayList<>(),use=new ArrayList<>();
+        name.add(new MoveMenu.Choice(MoveMenu.EDIT,"Rename",false,()->act.accept(0)));
+        name.add(new MoveMenu.Choice(MoveMenu.MERGE,"Merge into another payee",false,()->act.accept(1)));
+        use.add(new MoveMenu.Choice(MoveMenu.TAG,"Category: "+suggestionText(payee),false,()->act.accept(3)));
+        use.add(new MoveMenu.Choice(hidden?MoveMenu.SHOW:MoveMenu.HIDE,hidden?"Show in suggestions":"Hide from suggestions",false,()->act.accept(2)));
+        MoveMenu.sheet(this,payee,hidden?"Payee · hidden from suggestions":"Payee",Arrays.asList(name,use),null);
     }
     private String ruleText(Budget.Rule r){Budget.Category c=main.budget.category(r.category);
         return "Contains \""+r.contains+"\" → "+(r.rename.isEmpty()?"":"rename to "+r.rename)+(r.rename.isEmpty()||c==null?"":", ")+(c==null?"":"category "+c.name);}
     private void rules(){
-        String[] rows=main.budget.rules.stream().map(this::ruleText).toArray(String[]::new);
-        AlertDialog.Builder d=new AlertDialog.Builder(main).setTitle("Import rules").setNegativeButton("Close",null)
-            .setPositiveButton("+ Add rule",(x,w)->editRule(-1));
-        if(rows.length==0)d.setMessage("When a bank statement's payee contains some text, a rule renames it and/or gives it a category. Rules are checked in order, ignoring capitals; the first match wins. Without a match, the payee's last category is used as before.");
-        else d.setItems(rows,(x,n)->editRule(n));d.show();
+        List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(int i=0;i<main.budget.rules.size();i++){int n=i;rows.add(new MoveMenu.Choice(MoveMenu.TAG,ruleText(main.budget.rules.get(i)),false,()->editRule(n)));}
+        List<MoveMenu.Choice> add=Collections.singletonList(new MoveMenu.Choice(MoveMenu.COVER,"Add a rule",false,()->editRule(-1)));
+        MoveMenu.sheet(this,"Import rules",rows.isEmpty()?"When a bank statement's payee contains some text, a rule renames it and/or gives it a category. Rules are checked in order, ignoring capitals; the first match wins. Without a match, the payee's last category is used as before."
+            :"Checked in order, ignoring capitals; the first match wins. Tap one to change it.",Arrays.asList(rows,add),null);
     }
     private void editRule(int index){
         Budget.Rule old=index>=0&&index<main.budget.rules.size()?main.budget.rules.get(index):null;
@@ -227,23 +238,27 @@ final class SettingsScreen extends Ui {
     }
     // Common currencies first, then the rest A to Z. Amounts stay as they are (no conversion), so the change asks first.
     private void chooseCurrency(){
-        List<String> codes=Budget.currencyChoices();String[] names=new String[codes.size()];
-        for(int i=0;i<names.length;i++)names[i]=codes.get(i)+" · "+Currency.getInstance(codes.get(i)).getDisplayName(Locale.getDefault());
-        new AlertDialog.Builder(main).setTitle("Currency").setSingleChoiceItems(names,codes.indexOf(code()),(dialog,which)->{
-            String chosen=codes.get(which);dialog.dismiss();if(chosen.equals(code()))return;
+        List<String> codes=Budget.currencyChoices();List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(String chosen:codes){Currency cur=Currency.getInstance(chosen);MoveMenu.Choice row=MoveMenu.Choice.pick(cur.getDisplayName(Locale.getDefault()),()->{
+            if(chosen.equals(code()))return;
             new AlertDialog.Builder(main).setTitle("Show amounts in "+chosen+"?")
                 .setMessage("Amounts aren't converted, only shown in "+chosen+": "+Budget.money(10000,main.money())+" becomes "+Budget.money(10000,Budget.moneyFormat(chosen,Locale.getDefault()))+". Planner's bills in other currencies won't be added or planned for.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Change to "+chosen,(d,w)->{
                     try{main.commit(()->main.budget.currency=chosen);main.render();toast("Amounts are now shown in "+chosen+".");}catch(Exception e){toast(e.getMessage());}}).show();
-        }).setNegativeButton("Cancel",null).show();
+            }).sub(chosen).selected(chosen.equals(code()));
+            // The circle: a short symbol as it is ("A$", "€"), a long one's sign ("US$" → "$"), else the code's start ("AED" → "AE").
+            String symbol=cur.getSymbol(Locale.getDefault()),sign=symbol.replaceAll("^\\p{L}+(?=\\P{L})","");
+            row.badge=symbol.matches(".*\\P{L}.*")&&sign.length()<=2?(symbol.length()<=2?symbol:sign):chosen.substring(0,2);
+            rows.add(row);}
+        MoveMenu.sheet(this,"Currency","Amounts are shown in it; they aren't converted",Collections.singletonList(rows),null);
     }
     private void chooseTheme(){
-        String[] modes={"Light","Dark","Auto"};int selected=Arrays.asList(modes).indexOf(main.themeMode);
-        new AlertDialog.Builder(main).setTitle("Appearance")
-            .setSingleChoiceItems(new String[]{"Light","Dark","Auto (follow device)"},selected,(dialog,which)->{
-            String chosen=modes[which];if(chosen.equals(main.themeMode)){dialog.dismiss();return;}
+        String[] modes={"Light","Dark","Auto"},names={"Light","Dark","Auto"},about={"Light background, dark text","Dark background, easy on the eyes at night","Follows your phone's dark theme setting"};
+        int[] icons={MoveMenu.SUN,MoveMenu.MOON,MoveMenu.AUTO};List<MoveMenu.Choice> rows=new ArrayList<>();
+        for(int i=0;i<modes.length;i++){String chosen=modes[i];rows.add(new MoveMenu.Choice(icons[i],names[i],false,()->{
+            if(chosen.equals(main.themeMode))return;
             if(!main.getSharedPreferences("appearance",0).edit().putString("theme",chosen).commit()){toast("Could not save your theme preference.");return;}
-            dialog.dismiss();main.recreate();
-        }).setNegativeButton("Cancel",null).show();
+            main.recreate();}).sub(about[i]).selected(chosen.equals(main.themeMode)));}
+        MoveMenu.sheet(this,"Appearance",null,Collections.singletonList(rows),null);
     }
 }
