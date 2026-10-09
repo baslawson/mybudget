@@ -38,7 +38,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){
@@ -398,7 +398,7 @@ public class BudgetTest {
         rejects(()->b.validate(new Budget.Entry("x",pay.id,bank.id,"2025-02-13",-100)));rejects(()->b.deleteCategory(pay,null));rejects(()->b.deleteCategory(fun,pay));
         b.planReset(feb);equal(b.available(pay,feb),-2000,"Plan reset leaves card payment money");
         b.rename(visa,"Visa Gold");same(pay.name,"Visa Gold","Payment category follows the card's name");
-        Budget.Account amex=b.addCard("Amex","2025-01-01",0);Budget.Category amexPay=b.paymentCategory(amex);b.assign(amexPay,feb,100);rejects(()->b.deleteAccount(amex));b.assign(amexPay,feb,-100);amexPay.assigned.clear();b.deleteAccount(amex);if(b.paymentCategory(amex)!=null||b.categories.contains(amexPay))throw new AssertionError("Payment category goes with its card");
+        Budget.Account amex=b.addCard("Amex","2025-01-01",0);Budget.Category amexPay=b.paymentCategory(amex);b.assign(amexPay,feb,100);b.assign(amexPay,feb,-100);amexPay.assigned.clear();b.deleteAccount(amex);if(b.paymentCategory(amex)!=null||b.categories.contains(amexPay))throw new AssertionError("Payment category goes with its card");
         // Two cards: funded spending splits by card.
         Budget.Account mc=b.addCard("Mastercard","2025-01-01",0);b.assign(food,feb,5000);b.entries.add(new Budget.Entry("Shop",food.id,mc.id,"2025-02-14",-3000));equal(b.movedToCard(food,feb,mc),3000,"Moved to the right card");equal(b.movedToCard(food,feb,visa),-2000,"Refund only on Visa");
     }
@@ -466,7 +466,7 @@ public class BudgetTest {
         b.assign(food,mar,4000);equal(b.fundNeed(food,mar),6000,"Upcoming minus available");food.target=20000;food.targetType="Monthly";equal(b.fundNeed(food,mar),16000,"Target need when larger");
         same(b.fundOrder(mar).get(0).name,"Food","Earliest bill first (3rd before 31st)");
         // Scheduled transactions count as use.
-        Budget.Account spare=new Budget.Account("Spare","2025-01-01",0);b.accounts.add(spare);weekly.account=spare.id;rejects(()->b.close(spare));rejects(()->b.deleteAccount(spare));
+        Budget.Account spare=new Budget.Account("Spare","2025-01-01",0);b.accounts.add(spare);weekly.account=spare.id;rejects(()->b.close(spare));
         Budget.Category other=new Budget.Category("Other");b.categories.add(other);rejects(()->b.deleteCategory(food,null));b.deleteCategory(food,other);same(weekly.category,other.id,"Scheduled moves with a deleted category");
         // Validation: no zero, no unknown repeat, not before the account opened.
         rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2025-05-01",0,"Monthly")));rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2025-05-01",-1,"Daily")));rejects(()->b.validate(new Budget.Scheduled("x",rent.id,bank.id,"2024-12-01",-1,"Never")));
@@ -509,9 +509,9 @@ public class BudgetTest {
         Budget.Category fuel=new Budget.Category("Fuel");b.categories.add(fuel);if(!b.reorder(fuel,-1)||b.categories.indexOf(fuel)!=0||b.reorder(fuel,-1)||!b.reorder(fuel,1)||b.categories.get(2)!=fuel)throw new AssertionError("Reorder in group");if(b.reorder(rent,1)||b.reorder(rent,-1))throw new AssertionError("Bills group has one category");
         // Hiding changes nothing in the sums.
         food.hidden=true;equal(b.ready(feb),ready,"Hidden money still counts");food.hidden=false;
-        // Accounts: close at $0, delete only unused.
+        // Accounts: close at $0; delete any (deleteAccounts() checks what goes with it).
         Budget.Account wallet=new Budget.Account("Wallet","2025-01-01",0),old=new Budget.Account("Old","2025-01-01",500);b.accounts.add(wallet);b.accounts.add(old);
-        b.close(wallet);if(!wallet.closed)throw new AssertionError("Closed");rejects(()->b.close(old));rejects(()->b.deleteAccount(bank));b.deleteAccount(old);equal(b.accounts.size(),2,"Unused account deleted");
+        b.close(wallet);if(!wallet.closed)throw new AssertionError("Closed");rejects(()->b.close(old));b.deleteAccount(old);equal(b.accounts.size(),2,"Unused account deleted");
         // Reconcile: an adjustment for the difference, cleared, to Ready to Assign.
         if(b.adjustment(bank,b.balance(bank,true),"2025-02-10")!=null)throw new AssertionError("No adjustment when equal");
         Budget.Entry adj=b.adjustment(bank,b.balance(bank,true)-250,"2025-02-10");equal(adj.amount,-250,"Adjustment amount");if(!adj.cleared||!adj.category.isEmpty()||!adj.account.equals(bank.id))throw new AssertionError("Adjustment fields");
@@ -523,6 +523,34 @@ public class BudgetTest {
         b.entries.add(new Budget.Entry("cafe",food.id,bank.id,"2025-02-20",-500));Budget.Entry move=new Budget.Entry("Transfer to Wallet","",bank.id,"2025-02-21",-1);move.destination=wallet.id;b.entries.add(move);
         same(String.join("|",b.payees()),"cafe|Reconciliation adjustment|Shop","Payees: newest spelling, no transfers");if(b.lastForPayee(" CAFE ").date.compareTo("2025-02-20")!=0)throw new AssertionError("Newest for payee");
         b.rename(wallet,"Purse");same(move.payee,"Transfer to Purse","Transfer payee follows a rename");same(wallet.name,"Purse","Renamed");
+    }
+    /** Deleting an account (any): its transactions and upcoming ones go; transfers keep the other side; a card takes its payment category. */
+    static void deleteAccounts(){
+        Budget b=new Budget();YearMonth feb=YearMonth.of(2025,2);
+        Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000),old=new Budget.Account("Old","2025-01-01",20000),house=new Budget.Account("House","2025-01-01",0);
+        house.type="tracking";b.accounts.add(bank);b.accounts.add(old);b.accounts.add(house);
+        Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        b.entries.add(new Budget.Entry("Shop",food.id,old.id,"2025-02-02",-3000));                 // old's own spending
+        Budget.Entry in=new Budget.Entry("Transfer to Bank","",old.id,"2025-02-03",-5000);in.destination=bank.id;b.entries.add(in);   // old -> bank
+        Budget.Entry out=new Budget.Entry("Transfer to Old","",bank.id,"2025-02-04",-2000);out.destination=old.id;b.entries.add(out); // bank -> old
+        Budget.Entry toHouse=new Budget.Entry("Transfer to House",food.id,old.id,"2025-02-05",-1000);toHouse.destination=house.id;b.entries.add(toHouse);
+        Budget.Scheduled rent=new Budget.Scheduled("Rent",food.id,old.id,"2025-03-01",-1000,"Monthly");b.scheduled.add(rent);
+        long bankBefore=b.balance(bank,false),houseBefore=b.balance(house,false);
+        int[] n=b.deleteCounts(old);equal(n[0],1,"Own transactions");equal(n[1],3,"Transfers with other accounts");equal(n[2],1,"Upcoming");
+        b.deleteAccount(old);b.changed();
+        if(b.accounts.contains(old))throw new AssertionError("Account gone");equal(b.scheduled.size(),0,"Its upcoming go");equal(b.entries.size(),3,"Its own spending goes; 3 transfer sides stay");
+        equal(b.balance(bank,false),bankBefore,"The other account's balance stays");equal(b.balance(house,false),houseBefore,"A tracking account's balance stays");
+        for(Budget.Entry e:b.entries){if(e.transfer())throw new AssertionError("No transfer left");if(e.account.equals(old.id))throw new AssertionError("Nothing left in the deleted account");}
+        same(in.payee,"Transfer from Old","Money that left Old: money in at Bank");same(in.account,bank.id,"On Bank");equal(in.amount,5000,"As money in");same(in.category,"","To To budget");
+        same(out.payee,"Transfer to Old","Money that went to Old stays money out of Bank");equal(out.amount,-2000,"Still out");
+        same(toHouse.account,house.id,"House keeps its side");same(toHouse.category,"","No category in a tracking account");
+        // A card: its payment category goes, the money in it goes back to To budget; a payment from Bank stays as money out.
+        Budget.Account card=b.addCard("Visa","2025-01-01",0);Budget.Category pay=b.paymentCategory(card);b.assign(pay,feb,4000);
+        Budget.Entry payment=new Budget.Entry("Transfer to Visa","",bank.id,"2025-02-06",-1500);payment.destination=card.id;b.entries.add(payment);
+        b.payeeCategories.put("visa",pay.id);b.deleteAccount(card);b.changed();
+        if(b.categories.contains(pay))throw new AssertionError("Payment category gone");if(b.payeeCategories.containsValue(pay.id))throw new AssertionError("No suggestion left pointing at it");
+        same(payment.account,bank.id,"Payment stays on Bank");if(payment.transfer())throw new AssertionError("Not a transfer any more");
+        System.out.println("PASS deleting accounts");
     }
     static void same(String actual,String expected,String message){if(!actual.equals(expected))throw new AssertionError(message+":\n"+actual+"\n!=\n"+expected);}
     static void suggestions(){

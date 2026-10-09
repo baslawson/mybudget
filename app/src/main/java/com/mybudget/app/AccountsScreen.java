@@ -26,7 +26,8 @@ final class AccountsScreen extends Ui {
             anyClosed=true;LinearLayout c=card();c.addView(label(a.name,17,main.muted,true));
             c.addView(label("Closed. Its transactions stay in your history.",13,main.muted,false));
             c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
-            c.addView(button("Reopen account",()->main.change(()->main.accountById(a.id).closed=false)));}
+            Button reopen=button("Reopen account",()->main.change(()->main.accountById(a.id).closed=false)),delete=button("Delete account",()->confirmDelete(a.id));
+            pair(c,reopen,delete);}
         main.content.addView(label("Checking, savings and cash accounts are pooled for your plan. Transfers change where money lives, not its purpose. Spending on a credit card moves the category's money to the card's payment category, ready to pay it. Moving money from your budget to a tracking account (an extra loan payment, an investment) is spending from a category; money from one into your budget is income to To budget.",14,main.muted,false));
     }
     private void accountCard(Budget.Account a){LinearLayout c=card();
@@ -90,6 +91,22 @@ final class AccountsScreen extends Ui {
                         acc.reconciled=today;main.budget.lockReconciled(acc);})){d.dismiss();toast("Adjustment added and reconciled. Cleared transactions are locked now.");}}).show();
         }));d.show();
     }
+    /**
+     * Deleting any account: says what goes with it (its transactions, upcoming ones, a card's payment category) and what stays
+     * (the other side of transfers), with a red Delete; Undo is offered for a few seconds after.
+     */
+    private void confirmDelete(String id){Budget.Account a=main.budget.account(id);if(a==null)return;int[] n=main.budget.deleteCounts(a);
+        StringBuilder m=new StringBuilder();
+        if(n[0]+n[2]==0)m.append("It has no transactions of its own.");
+        else m.append(n[0]>0?count(n[0],"transaction","transactions"):"").append(n[0]>0&&n[2]>0?" and ":"").append(n[2]>0?count(n[2],"upcoming transaction","upcoming transactions"):"")
+            .append(" in it ").append(n[0]+n[2]==1?"is":"are").append(" deleted too.");
+        if(n[1]>0)m.append("\n\n").append(n[1]==1?"1 transfer with another account stays there as money in or out, so its balance doesn't change."
+            :n[1]+" transfers with other accounts stay there as money in or out, so their balances don't change.");
+        if(main.budget.paymentCategory(a)!=null)m.append("\n\nIts payment category goes too; any money in it goes back to To budget.");
+        if(!a.tracking()&&n[0]>0)m.append("\n\nCategory balances in past months change.");
+        m.append("\n\nYou can undo this for a few seconds.");
+        Ui.danger(new AlertDialog.Builder(main).setTitle("Delete "+a.name+"?").setMessage(m.toString()).setNegativeButton("Cancel",null)
+            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Account deleted",()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show());}
     private void editAccount(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;LinearLayout f=form();f.addView(label("Name",12,main.muted,true));
         EditText name=field(f,"Account name",false);name.setText(a.name);
@@ -100,9 +117,7 @@ final class AccountsScreen extends Ui {
             .setNegativeButton("Cancel",null)
             .setPositiveButton("Close account",(d,w)->{if(main.change(()->main.budget.close(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show()));
         else f.addView(greyLine("To close it, first move its "+money(balance)+" to another account: an account closes at a zero balance.",money(balance),amountColour(balance),13));
-        if(!main.budget.usedAccount(a))f.addView(button("Delete account",()->Ui.danger(new AlertDialog.Builder(main).setTitle("Delete "+a.name+"?")
-            .setMessage("It has no transactions. Its opening balance of "+money(a.opening)+" leaves your plan.").setNegativeButton("Cancel",null)
-            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Account deleted",()->main.budget.deleteAccount(main.accountById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show())));
+        f.addView(button("Delete account",()->confirmDelete(id)));
         // A loan's terms, for the payoff planner.
         LinearLayout terms=column();if(a.liability)f.addView(terms);terms.addView(label("Loan terms (for the payoff planner)",12,main.muted,true));
         EditText rate=field(terms,"Interest rate (% a year, e.g. 6.25)",false);

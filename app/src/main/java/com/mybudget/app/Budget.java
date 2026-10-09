@@ -670,8 +670,33 @@ public final class Budget {
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
     public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
     public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a zero balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
-    public void deleteAccount(Account a){if(usedAccount(a))throw new IllegalArgumentException("This account has transactions. Close it instead.");Category p=paymentCategory(a);
-        if(p!=null){for(long v:p.assigned.values())if(v!=0)throw new IllegalArgumentException("Move the money out of its payment category first.");categories.remove(p);}accounts.remove(a);changed();}
+    /**
+     * What deleting [a] takes with it: {its own transactions, transfers with another account (that side stays there), upcoming
+     * transactions}.
+     */
+    public int[] deleteCounts(Account a){int own=0,kept=0,upcoming=0;
+        for(Entry e:entries){boolean from=e.account.equals(a.id),to=e.destination.equals(a.id);if(!from&&!to)continue;
+            if(e.transfer()&&account(from?e.destination:e.account)!=null)kept++;else own++;}
+        for(Scheduled s:scheduled)if(s.account.equals(a.id))upcoming++;return new int[]{own,kept,upcoming};}
+    /**
+     * Deletes [a] (any account: open, closed, card or tracking) with its transactions and upcoming ones. A transfer with another
+     * account keeps that account's side as a plain transaction, so its balance stays: money that left [a] becomes money in there
+     * ("Transfer from A", to To budget); money that came into [a] stays money out there ("Transfer to A", its category kept, none
+     * from a tracking account). A card's payment category goes too; anything still in it goes back to To budget.
+     */
+    public void deleteAccount(Account a){
+        for(Entry e:entries){boolean from=e.account.equals(a.id),to=e.destination.equals(a.id);if(!e.transfer()||!from&&!to)continue;
+            Account other=account(from?e.destination:e.account);if(other==null)continue;
+            if(from){if(e.payee.equals("Transfer to "+other.name))e.payee="Transfer from "+a.name;e.account=other.id;e.amount=-e.amount;e.category="";}
+            else if(other.tracking())e.category="";
+            e.destination="";e.splits.clear();}
+        entries.removeIf(e->e.account.equals(a.id)||e.destination.equals(a.id));scheduled.removeIf(s->s.account.equals(a.id));
+        Category p=paymentCategory(a);
+        if(p!=null){for(Entry e:entries){if(e.category.equals(p.id))e.category="";for(Split s:e.splits)if(s.category.equals(p.id))s.category="";}
+            for(Scheduled s:scheduled){if(s.category.equals(p.id))s.category="";for(Split q:s.splits)if(q.category.equals(p.id))q.category="";}
+            billCategories.values().removeIf(id->id.equals(p.id));payeeCategories.values().removeIf(id->id.equals(p.id));
+            for(Rule r:rules)if(r.category.equals(p.id))r.category="";rules.removeIf(r->r.rename.isEmpty()&&r.category.isEmpty());categories.remove(p);}
+        accounts.remove(a);changed();}
     /** Reconciling when the bank's cleared balance differs: a cleared inflow/outflow into To budget for the difference (on a card, see paymentActivity). */
     public Entry adjustment(Account a,long bankCleared,String today){long difference=bankCleared-balance(a,true);if(difference==0)return null;Entry e=new Entry("Reconciliation adjustment","",a.id,today,difference);e.cleared=true;return e;}
     // Quick assign: what each choice adds to this month's Assigned.
