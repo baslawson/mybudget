@@ -20,6 +20,7 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:datePickerDialogTheme">@style/DatePickerDialog.Dark</item>
+        <item name="android:alertDialogTheme">@style/Dialog.Dark</item>
     </style>
     <style name="AppTheme.Light" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
@@ -34,7 +35,53 @@
         <item name="android:navigationBarColor">#F3F5FA</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:alertDialogTheme">@style/Dialog.Light</item>
+        <item name="android:datePickerDialogTheme">@style/DatePickerDialog.Light</item>
     </style>
+    <!-- Every dialog (forms, questions, confirmations; also Planner's add-expense window): a rounded card, a bold title, the
+         main button filled indigo like the app's primary buttons and the others as quiet text, in sentence case. -->
+    <style name="Dialog.Dark" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@drawable/dialog_window_dark</item>
+        <item name="android:colorAccent">#B3BFFF</item>
+        <item name="android:colorBackgroundFloating">#252B3C</item>
+        <item name="android:textColorPrimary">#EDF1FA</item>
+        <item name="android:textColorSecondary">#ABB5C9</item>
+        <item name="android:textColorHint">#ABB5C9</item>
+        <item name="android:windowTitleStyle">@style/DialogTitle</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/DialogPrimary.Dark</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/DialogQuiet.Dark</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/DialogQuiet.Dark</item>
+        <item name="android:buttonBarStyle">@style/DialogButtons</item>
+    </style>
+    <style name="Dialog.Light" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@drawable/dialog_window_light</item>
+        <item name="android:colorAccent">#394DA5</item>
+        <item name="android:colorBackgroundFloating">#FFFFFF</item>
+        <item name="android:textColorPrimary">#1B273E</item>
+        <item name="android:textColorSecondary">#6F798C</item>
+        <item name="android:textColorHint">#6F798C</item>
+        <item name="android:windowTitleStyle">@style/DialogTitle</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/DialogPrimary.Light</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/DialogQuiet.Light</item>
+        <item name="android:buttonBarNeutralButtonStyle">@style/DialogQuiet.Light</item>
+        <item name="android:buttonBarStyle">@style/DialogButtons</item>
+    </style>
+    <style name="DialogButtons" parent="android:style/Widget.Material.ButtonBar.AlertDialog"><item name="android:paddingStart">16dp</item><item name="android:paddingEnd">18dp</item><item name="android:paddingBottom">18dp</item><item name="android:paddingTop">4dp</item></style>
+    <style name="DialogTitle"><item name="android:textAppearance">@style/DialogTitleText</item><item name="android:maxLines">2</item><item name="android:ellipsize">end</item></style>
+    <style name="DialogTitleText" parent="android:style/TextAppearance.Material.DialogWindowTitle">
+        <item name="android:textSize">22sp</item><item name="android:textStyle">bold</item><item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+    <style name="DialogButton" parent="android:style/Widget.Material.Button.Borderless.Colored">
+        <item name="android:textAllCaps">false</item><item name="android:textSize">15sp</item><item name="android:textStyle">bold</item>
+        <item name="android:minHeight">44dp</item><item name="android:paddingStart">20dp</item><item name="android:paddingEnd">20dp</item>
+        <item name="android:layout_marginStart">6dp</item>
+    </style>
+    <style name="DialogPrimary.Dark" parent="DialogButton"><item name="android:background">@drawable/dialog_primary_dark</item><item name="android:textColor">#FFFFFF</item></style>
+    <style name="DialogPrimary.Light" parent="DialogButton"><item name="android:background">@drawable/dialog_primary_light</item><item name="android:textColor">#FFFFFF</item></style>
+    <style name="DialogQuiet.Dark" parent="DialogButton"><item name="android:background">@drawable/dialog_quiet</item><item name="android:textColor">#B3BFFF</item></style>
+    <style name="DialogQuiet.Light" parent="DialogButton"><item name="android:background">@drawable/dialog_quiet</item><item name="android:textColor">#394DA5</item></style>
     <!-- AddExpenseActivity: only its dialog shows, over the app that opened it. -->
     <style name="AppTheme.Overlay">
         <item name="android:windowIsTranslucent">true</item>
@@ -49,6 +96,10 @@
     <!-- The date picker in dark: MyBudget's indigo header and dialog colours instead of Material's grey. A dialog overlay (as light theme uses), not
          an alert: an alert is wider than the calendar and left a grey strip beside the header. -->
     <style name="DatePickerDialog.Dark" parent="android:style/ThemeOverlay.Material.Dialog">
+        <item name="android:windowBackground">@drawable/dialog_window_dark</item>
+        <item name="android:buttonBarStyle">@style/DialogButtons</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/DialogPrimary.Dark</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/DialogQuiet.Dark</item>
         <item name="android:colorAccent">#B3BFFF</item>
         <item name="android:colorBackgroundFloating">#202635</item>
         <item name="android:textColorPrimary">#EDF1FA</item>
@@ -56,6 +107,21 @@
         <item name="android:datePickerStyle">@style/DatePicker.Dark</item>
     </style>
     <style name="DatePicker.Dark" parent="android:style/Widget.Material.DatePicker">
-        <item name="android:headerBackground">#41509F</item>
+        <item name="android:headerBackground">@drawable/date_header_dark</item>
+    </style>
+    <!-- The date picker in light: the same rounded card, indigo header and buttons as the other dialogs. -->
+    <style name="DatePickerDialog.Light" parent="android:style/ThemeOverlay.Material.Dialog">
+        <item name="android:colorAccent">#394DA5</item>
+        <item name="android:colorBackgroundFloating">#FFFFFF</item>
+        <item name="android:textColorPrimary">#1B273E</item>
+        <item name="android:textColorSecondary">#6F798C</item>
+        <item name="android:windowBackground">@drawable/dialog_window_light</item>
+        <item name="android:buttonBarStyle">@style/DialogButtons</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/DialogPrimary.Light</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/DialogQuiet.Light</item>
+        <item name="android:datePickerStyle">@style/DatePicker.Light</item>
+    </style>
+    <style name="DatePicker.Light" parent="android:style/Widget.Material.Light.DatePicker">
+        <item name="android:headerBackground">@drawable/date_header_light</item>
     </style>
 </resources>

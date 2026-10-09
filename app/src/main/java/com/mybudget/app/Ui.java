@@ -206,6 +206,8 @@ class Ui {
      * Fills [s] with [names], its open list in a rounded, raised box with roomy rows and the current one in bold, in the
      * window's own colours (also in Planner's add-expense window, which has no Ui).
      */
+    /** A question that deletes, removes or resets something: its main button red instead of indigo (call after show()). */
+    static AlertDialog danger(AlertDialog d){Button b=d.getButton(AlertDialog.BUTTON_POSITIVE);if(b!=null)b.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(192,57,63)));return d;}
     static void dropdown(Spinner s,String[] names){Context c=s.getContext();float dp=c.getResources().getDisplayMetrics().density;
         android.content.res.TypedArray a=c.obtainStyledAttributes(new int[]{android.R.attr.textColorPrimary,android.R.attr.colorBackgroundFloating,android.R.attr.colorAccent});
         int ink=a.getColor(0,Color.BLACK),floating=a.getColor(1,Color.WHITE),accent=a.getColor(2,ink);a.recycle();

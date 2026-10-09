@@ -76,18 +76,13 @@ final class MoveMenu {
             box.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();}
     }
     /**
-     * The sheet from the bottom of the screen (a tap on a category, an upcoming transaction or a payee, a card held still): a
-     * handle, [title] and [subtitle], then each list in [sections] with a line between them, and [tip] (or none) at the end. It
+     * The menu card in the middle of the screen (a tap on a category, an upcoming transaction or a payee, a list to pick from,
+     * a card held still): [title] and [subtitle], then each list in [sections] with a line between them, and [tip] (or none) at the end. It
      * closes with the forms when data is read in meanwhile (main.editors), and leaves that list before a choice acts, so a
      * choice that opens a form (a photo) sees the form under it as the newest one.
      */
     static AlertDialog sheet(Ui ui,String title,String subtitle,List<List<Choice>> sections,String tip){MainActivity main=ui.main;
         LinearLayout sheet=new LinearLayout(main);sheet.setOrientation(LinearLayout.VERTICAL);int side=ui.dp(20);
-        GradientDrawable bg=new GradientDrawable();bg.setColor(main.darkTheme?mix(main.surface,main.ink,0.05f):main.surface);float r=ui.dp(24);
-        bg.setCornerRadii(new float[]{r,r,r,r,0,0,0,0});sheet.setBackground(bg);
-        View handle=new View(main);GradientDrawable h=new GradientDrawable();h.setColor(Ui.tint(main.muted,110));h.setCornerRadius(ui.dp(2));handle.setBackground(h);
-        handle.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(ui.dp(36),ui.dp(4));
-        hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=ui.dp(14);sheet.addView(handle,hp);
         TextView name=ui.label(title,20,main.ink,true);Ui.heading(name);sheet.addView(name);
         if(subtitle!=null&&!subtitle.isEmpty())sheet.addView(ui.label(subtitle,13,main.muted,false));
         View space=new View(main);sheet.addView(space,new LinearLayout.LayoutParams(1,ui.dp(8)));
@@ -98,16 +93,20 @@ final class MoveMenu {
             int before=sheet.getChildCount();rows(ui,sheet,part,ui.dp(52),16,ui.dp(40),close);first=false;
             if(sheet.getChildCount()==before)first=true;}
         if(tip!=null){TextView t=ui.label(tip,12,main.muted,false);t.setPadding(ui.dp(12),ui.dp(10),0,0);sheet.addView(t);}
-        WindowInsets screen=main.getWindow().getDecorView().getRootWindowInsets();int bar=android.os.Build.VERSION.SDK_INT>=30&&screen!=null?screen.getInsets(WindowInsets.Type.navigationBars()).bottom:0;
-        sheet.setPadding(side,ui.dp(10),side,ui.dp(16)+bar); // the rows stay above the gesture bar the sheet runs under
-        // Scrolls when it doesn't fit (landscape, large text).
-        ScrollView holder=new ScrollView(main);holder.addView(sheet);d.setView(holder,0,0,0,0);
+        sheet.setPadding(side,ui.dp(20),side,ui.dp(14));
+        // A rounded card in the middle of the screen, at most 85% of its height; longer lists scroll inside it.
+        int tallest=(int)(main.getResources().getDisplayMetrics().heightPixels*0.85f);
+        ScrollView holder=new ScrollView(main){@Override protected void onMeasure(int w,int h){
+            super.onMeasure(w,MeasureSpec.makeMeasureSpec(Math.min(tallest,MeasureSpec.getSize(h)>0?MeasureSpec.getSize(h):tallest),MeasureSpec.AT_MOST));}};
+        GradientDrawable bg=new GradientDrawable();bg.setColor(main.darkTheme?mix(main.surface,main.ink,0.05f):main.surface);bg.setCornerRadius(ui.dp(28));
+        bg.setStroke(ui.dp(1),Ui.tint(main.ink,main.darkTheme?46:20));holder.setBackground(bg);holder.setClipToOutline(true);holder.setElevation(ui.dp(12));
+        holder.addView(sheet);d.setView(holder,0,0,0,0);
         d.setCanceledOnTouchOutside(true);main.editors.add(d);d.setOnDismissListener(x->main.editors.remove(d));d.show();
-        Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));w.setGravity(Gravity.BOTTOM);
-            int wide=Math.min(main.getResources().getDisplayMetrics().widthPixels,ui.dp(560));w.setLayout(wide,ViewGroup.LayoutParams.WRAP_CONTENT);
-            w.setWindowAnimations(0);w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);w.setNavigationBarColor(main.surface);if(android.os.Build.VERSION.SDK_INT>=29)w.setNavigationBarContrastEnforced(false);
-            if(android.os.Build.VERSION.SDK_INT>=30){w.setDecorFitsSystemWindows(false);WindowManager.LayoutParams lp=w.getAttributes();lp.setFitInsetsTypes(0);w.setAttributes(lp);}} // the sheet runs under the gesture bar (its padding keeps the rows above it)
-        if(Ui.motion()){holder.setTranslationY(ui.dp(360));holder.animate().translationY(0).setDuration(240).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();}
+        Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));w.setGravity(Gravity.CENTER);
+            int wide=Math.min(main.getResources().getDisplayMetrics().widthPixels-ui.dp(40),ui.dp(480));w.setLayout(wide,ViewGroup.LayoutParams.WRAP_CONTENT);
+            w.setWindowAnimations(0);}
+        if(Ui.motion()){holder.setAlpha(0f);holder.setScaleX(0.94f);holder.setScaleY(0.94f);
+            holder.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator(2f)).start();}
         return d;}
     /** [a] moved [part] of the way to [b] (opaque). */
     private static int mix(int a,int b,float part){return Color.rgb(Math.round(Color.red(a)+(Color.red(b)-Color.red(a))*part),

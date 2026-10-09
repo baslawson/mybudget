@@ -154,6 +154,6 @@ public class AddExpenseActivity extends Activity {
                 Budget.Entry now=budget.external(id);if(now==null){setResult(RESULT_OK,reply("Marked unpaid. The expense was already gone from MyBudget."));return;}
                 budget.entries.remove(now);if(save())setResult(RESULT_OK,reply("Marked unpaid and removed from MyBudget."));else Toast.makeText(this,"Could not save to device storage.",Toast.LENGTH_LONG).show();})
             .create();
-        dialog.setOnDismissListener(d->finish());dialog.show();
+        dialog.setOnDismissListener(d->finish());dialog.show();Ui.danger(dialog);
     }
 }

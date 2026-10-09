@@ -286,9 +286,9 @@ final class TransactionForms extends Ui {
     }
     private Budget.Scheduled scheduledById(String id){for(Budget.Scheduled s:main.budget.scheduled)if(s.id.equals(id))return s;
         throw new IllegalArgumentException("That upcoming transaction no longer exists.");}
-    private void deleteScheduled(String id){new AlertDialog.Builder(main).setTitle("Delete upcoming transaction?")
+    private void deleteScheduled(String id){Ui.danger(new AlertDialog.Builder(main).setTitle("Delete upcoming transaction?")
             .setMessage("It and its repeats are removed. Transactions already entered stay.").setNegativeButton("Cancel",null)
-            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Upcoming transaction deleted",()->main.budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
+            .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo("Upcoming transaction deleted",()->main.budget.scheduled.remove(scheduledById(id))))for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show());}
     /** A due upcoming transaction: enter it (it becomes money), skip this date, or edit it. */
     void dueActions(String id){
         Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){return;}
@@ -303,10 +303,10 @@ final class TransactionForms extends Ui {
             Collections.singletonList(choices),null);
     }
     String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
-    private void delete(Budget.Entry e){new AlertDialog.Builder(main).setTitle("Delete transaction?")
+    private void delete(Budget.Entry e){Ui.danger(new AlertDialog.Builder(main).setTitle("Delete transaction?")
             .setMessage("Account and category balances will be recalculated.").setNegativeButton("Cancel",null)
             .setPositiveButton("Delete",(d,w)->{if(main.deleteWithUndo(e.transfer()?"Transfer deleted":"Transaction deleted",()->{if(!main.budget.entries.removeIf(t->t.id.equals(e.id)))throw new IllegalArgumentException("That transaction no longer exists.");}))
-                for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show();}
+                for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();}).show());}
     /** A reconciled transaction is part of a balance checked against the bank: ask before opening it. */
     private void reconciledWarning(Budget.Entry e,Runnable open){Budget.Account a=main.budget.account(e.account);String when=a==null||a.reconciled.isEmpty()?"":" on "+pretty(a.reconciled);
         AlertDialog warning=new AlertDialog.Builder(main).setTitle("This transaction is reconciled")

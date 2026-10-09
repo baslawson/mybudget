@@ -21,10 +21,10 @@ final class BudgetScreen extends Ui {
         int n=back.size(); // exactly what the reset returns
         if(n==0){toast("No category has money to return this month.");return;}
         String monthName=main.month.format(DateTimeFormatter.ofPattern("MMMM yyyy"));
-        new AlertDialog.Builder(main).setTitle("Budget reset")
+        Ui.danger(new AlertDialog.Builder(main).setTitle("Budget reset")
             .setMessage("Return "+money(total)+" from "+count(n,"category","categories")+" into To budget in "+monthName+", then assign it again by today's priorities?\n\nTargets and transactions stay. You can undo this on Budget.")
             .setNegativeButton("Cancel",null).setPositiveButton("Reset",(d,w)->{String before=main.prefs().getString("data",null);
-                if(main.change(()->main.budget.planReset(main.month))){if(!main.prefs().edit().putString("before_reset",before==null?"":before).putString("before_reset_at",LocalDateTime.now().withNano(0).toString()).commit())toast("Reset done, but Undo couldn't be saved.");else{main.tab="Plan";main.render();}}}).show();
+                if(main.change(()->main.budget.planReset(main.month))){if(!main.prefs().edit().putString("before_reset",before==null?"":before).putString("before_reset_at",LocalDateTime.now().withNano(0).toString()).commit())toast("Reset done, but Undo couldn't be saved.");else{main.tab="Plan";main.render();}}}).show());
     }
     private void undoPlanReset(){
         new AlertDialog.Builder(main).setTitle("Undo budget reset?")
@@ -291,17 +291,17 @@ final class BudgetScreen extends Ui {
         if(main.change(()->unpinned[0]=main.budget.setHidden(main.categoryById(id),hidden)))toast(hidden?"Hidden. It's at the bottom of Budget; its money still counts.":unpinned[0]?"Back in your plan. Home already has "+Budget.PINS+" pinned, so it was unpinned.":"Back in your plan.");}
     private void deleteCategory(String id){
         Budget.Category c=main.budget.category(id);if(c==null)return;
-        if(!main.budget.used(c)){new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?").setMessage("It has no transactions or assigned money.")
+        if(!main.budget.used(c)){Ui.danger(new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?").setMessage("It has no transactions or assigned money.")
                 .setNegativeButton("Cancel",null)
-                .setPositiveButton("Delete",(d,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),null))).show();return;}
+                .setPositiveButton("Delete",(d,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),null))).show());return;}
         List<Budget.Category> others=new ArrayList<>();for(Budget.Category o:main.budget.categories)if(o!=c&&!o.payment())others.add(o);
         if(others.isEmpty()){toast("Add another category first, to take its transactions and money.");return;}
         java.util.function.IntConsumer chosen=n->{String into=others.get(n).id;
             int count=main.budget.entriesIn(c);
-            new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?")
+            Ui.danger(new AlertDialog.Builder(main).setTitle("Delete "+c.name+"?")
                 .setMessage("Its "+count(count,"transaction","transactions")+" and the money assigned to it in every month move to "+others.get(n).name+". Bills from Planner then suggest "+others.get(n).name+" too. Past months' balances in "+others.get(n).name+" may change.")
                 .setNegativeButton("Cancel",null)
-                    .setPositiveButton("Move and delete",(d2,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show();};
+                    .setPositiveButton("Move and delete",(d2,w)->main.deleteWithUndo("Category deleted",()->main.budget.deleteCategory(main.categoryById(id),main.categoryById(into)))).show());};
         List<MoveMenu.Choice> into=new ArrayList<>();for(int i=0;i<others.size();i++){int n=i;Budget.Category o=others.get(i);
             into.add(categoryPick(o,main.budget.available(o,main.month),()->chosen.accept(n)));}
         MoveMenu.sheet(this,"Move "+c.name+" to…","Its transactions and money go to the category you pick, then it's deleted.",Collections.singletonList(into),null);
