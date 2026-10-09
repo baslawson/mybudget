@@ -275,17 +275,21 @@ final class BudgetScreen extends Ui {
         boolean pinned=c.pinned;
         self.add(new MoveMenu.Choice(MoveMenu.PIN,pinned?"Unpin from Home":"Pin to Home",false,
             ()->{if(main.change(()->main.budget.pin(main.categoryById(id),!pinned)))toast(pinned?"Unpinned from Home.":"Pinned to Home: it shows under Priority categories.");}));
-        Budget.Category above=neighbour(c,-1),below=neighbour(c,1); // the ones reorder() swaps with: in its group, hidden ones too
-        if(above!=null)place.add(new MoveMenu.Choice(MoveMenu.UP,"Move above "+above.name,false,()->reorder(id,-1)));
-        if(below!=null)place.add(new MoveMenu.Choice(MoveMenu.DOWN,"Move below "+below.name,false,()->reorder(id,1)));
+        Budget.Category above=neighbour(c,-1),below=neighbour(c,1); // hunt 27 H1: a shown category passes hidden ones
+        if(above!=null)place.add(new MoveMenu.Choice(MoveMenu.UP,"Move above "+above.name,false,()->reorderPast(id,above.id,-1)));
+        if(below!=null)place.add(new MoveMenu.Choice(MoveMenu.DOWN,"Move below "+below.name,false,()->reorderPast(id,below.id,1)));
         away.add(new MoveMenu.Choice(c.hidden?MoveMenu.SHOW:MoveMenu.HIDE,c.hidden?"Unhide":"Hide",false,()->hide(id,!c.hidden)));
         if(!c.payment())away.add(MoveMenu.Choice.danger(MoveMenu.DELETE,"Delete category",()->deleteCategory(id)));
         String about=c.group+(c.hidden?" · hidden":"")+" · "+money(available)+" available";
         MoveMenu.sheet(this,c.name,about,Arrays.asList(money,self,place,away),null);
     }
-    /** The category next to [c] in its group (hidden ones too), up (-1) or down (1); null at the end. */
+    /** The category next to [c] in its group, up (-1) or down (1), as Budget shows it: a shown one skips hidden ones (they sit
+     * in their own section); a hidden one counts every category. Null at the end. */
     private Budget.Category neighbour(Budget.Category c,int direction){List<Budget.Category> all=main.budget.categories;
-        for(int j=all.indexOf(c)+direction;j>=0&&j<all.size();j+=direction)if(all.get(j).group.equals(c.group))return all.get(j);return null;}
+        for(int j=all.indexOf(c)+direction;j>=0&&j<all.size();j+=direction){Budget.Category o=all.get(j);if(o.group.equals(c.group)&&(c.hidden||!o.hidden))return o;}return null;}
+    /** Moves [id] one place at a time in its group ([direction] -1 up, 1 down) until it has passed [pastId]. */
+    private void reorderPast(String id,String pastId,int direction){main.change(()->{Budget.Category c=main.categoryById(id),past=main.categoryById(pastId);List<Budget.Category> all=main.budget.categories;
+        while(direction<0?all.indexOf(c)>all.indexOf(past):all.indexOf(c)<all.indexOf(past))if(!main.budget.reorder(c,direction))throw new IllegalArgumentException(direction<0?"Already first in its group.":"Already last in its group.");});}
     private void reorder(String id,int direction){main.change(()->{if(!main.budget.reorder(main.categoryById(id),direction))throw new IllegalArgumentException(direction<0?"Already first in its group.":"Already last in its group.");});}
     private void hide(String id,boolean hidden){boolean[] unpinned={false};
         if(main.change(()->unpinned[0]=main.budget.setHidden(main.categoryById(id),hidden)))toast(hidden?"Hidden. It's at the bottom of Budget; its money still counts.":unpinned[0]?"Back in your plan. Home already has "+Budget.PINS+" pinned, so it was unpinned.":"Back in your plan.");}

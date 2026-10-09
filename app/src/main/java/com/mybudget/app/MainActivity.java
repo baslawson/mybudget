@@ -217,6 +217,7 @@ public class MainActivity extends Activity {
     /** What a tab is called on screen (MyBudget's own names; the keys stay as saved in older sessions). */
     static String tabTitle(String tab){switch(tab){case"Plan":return "Budget";case"Spending":return "Transactions";case"Reflect":return "Reports";default:return tab;}}
     void render(){
+        if(popup!=null){android.widget.PopupWindow open=popup;popup=null;open.dismiss();}
         budget.fromPlanner.clear();budget.fromPlanner.addAll(PlannerBills.read(this,budget)); // Planner may have sent a new list meanwhile
         if(!budget.cached())budget.cache(true); // month maths are kept from screen to screen until a change (commit), which works them out afresh
         int keepY=screenScroll!=null&&tab.equals(shownTab)&&month.equals(shownMonth)?screenScroll.getScrollY():0; // the same screen again (after a save): stay where you were
@@ -332,6 +333,8 @@ public class MainActivity extends Activity {
         catch(Exception e){ui.toast(e.getMessage());render();return;}
         for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();String back=done.replace(" deleted"," restored")+".";ui.toast(back);}
     final List<AlertDialog> editors=new ArrayList<>();
+    /** The ⋮ menu open now (MoveMenu.show): closed when the screen is drawn again, so it never acts on old figures (hunt 27 H2). */
+    android.widget.PopupWindow popup;
     Budget.Account accountById(String id){Budget.Account a=budget.account(id);
         if(a==null)throw new IllegalArgumentException("That account no longer exists.");return a;}
     /** Open accounts, plus [keep] (an old transaction's accounts) even when closed. */

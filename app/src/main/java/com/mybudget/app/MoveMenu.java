@@ -62,6 +62,7 @@ final class MoveMenu {
         TextView head=ui.label(title.toUpperCase(Locale.ROOT)+"  ·  "+place,11,main.muted,true);head.setLetterSpacing(0.08f);head.setSingleLine(true);
         head.setEllipsize(android.text.TextUtils.TruncateAt.END);head.setPadding(ui.dp(14),ui.dp(2),ui.dp(14),ui.dp(8));head.setContentDescription(title+", "+place);Ui.heading(head);box.addView(head);
         PopupWindow p=new PopupWindow(box,ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,true);
+        if(main.popup!=null)main.popup.dismiss();main.popup=p;p.setOnDismissListener(()->{if(main.popup==p)main.popup=null;});
         rows(ui,box,choices,ui.dp(48),15,ui.dp(32),p::dismiss);
         // Dark: a shade lighter than the cards (a shadow barely shows on dark), with a clearer edge.
         int raised=main.darkTheme?mix(main.surface,main.ink,0.07f):main.surface;

@@ -89,8 +89,8 @@ final class Movable {
         s.setAlpha(0.35f);} // its place, while the shadow follows the finger
 
     /** The sheet from the bottom of the screen: the section's name and place, then each move it can make. */
-    private void menu(Section s){int i=shown.indexOf(s);
-        MoveMenu.sheet(ui,name(s),(i+1)+" of "+shown.size()+" on "+where,Collections.singletonList(choices(s)),"Tip: hold and drag to move it anywhere.");}
+    private void menu(Section s){int i=shown.indexOf(s);List<MoveMenu.Choice> c=choices(s);if(c.isEmpty())return; // hunt 27 H3: a card alone has no moves
+        MoveMenu.sheet(ui,name(s),(i+1)+" of "+shown.size()+" on "+where,Collections.singletonList(c),"Tip: hold and drag to move it anywhere.");}
     /** The section's name for the sheet: its title, in sentence case if shown in capitals ("TO BUDGET" → "To budget"). */
     private static String name(Section s){TextView h=s.title;if(h==null)return "Move";String t=h.getText().toString();
         return t.equals(t.toUpperCase(Locale.ROOT))&&!t.equals(t.toLowerCase(Locale.ROOT))?t.charAt(0)+t.substring(1).toLowerCase(Locale.ROOT):t;}

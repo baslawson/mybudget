@@ -257,7 +257,7 @@ final class SettingsScreen extends Ui {
         int[] icons={MoveMenu.SUN,MoveMenu.MOON,MoveMenu.AUTO};List<MoveMenu.Choice> rows=new ArrayList<>();
         for(int i=0;i<modes.length;i++){String chosen=modes[i];rows.add(new MoveMenu.Choice(icons[i],names[i],false,()->{
             if(chosen.equals(main.themeMode))return;
-            if(!main.getSharedPreferences("appearance",0).edit().putString("theme",chosen).commit()){toast("Could not save your theme preference.");return;}
+            if(!main.getSharedPreferences("appearance",0).edit().putString("theme",chosen).commit()){toast("Could not save your theme. Try again.");return;}
             main.recreate();}).sub(about[i]).selected(chosen.equals(main.themeMode)));}
         MoveMenu.sheet(this,"Appearance",null,Collections.singletonList(rows),null);
     }
