@@ -244,6 +244,14 @@ class Ui {
      * forms instead of leaving it on old figures (Cover's amounts, a category's or upcoming transaction's actions, Review). */
     AlertDialog tracked(AlertDialog.Builder b){AlertDialog d=b.create();main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));d.show();return d;}
     void toast(String s){Toast.makeText(main,s,Toast.LENGTH_LONG).show();}
+    /**
+     * A dialog's or menu card's title with a ✕ at its end that closes it ([close]), so there is always something to tap to
+     * back out, not only Back or a tap outside. [side]: the title's start padding, lined up with the content.
+     */
+    LinearLayout titleRow(String title,int size,int side,Runnable close){LinearLayout row=new LinearLayout(main);row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView t=label(title,size,main.ink,true);heading(t);row.addView(t,new LinearLayout.LayoutParams(0,-2,1));
+        Button x=button("✕",close);x.setTextSize(18);x.setTextColor(main.muted);x.setBackground(bg(Color.TRANSPARENT));pressable(x);x.setPadding(0,0,0,0);
+        x.setContentDescription("Close");row.addView(x,new LinearLayout.LayoutParams(dp(48),dp(48)));row.setPadding(side,dp(14),dp(8),0);return row;}
     /** Large text: a dialog's three buttons stack and the last is cut off, so a third action goes into the form as a button. */
     boolean large(){return main.getResources().getConfiguration().fontScale>=1.3f;}
     AlertDialog dialog(String title,LinearLayout f,Runnable action){return dialog(title,f,action,null);}
@@ -258,18 +266,31 @@ class Ui {
     /**
      * A full-screen form (Add transaction): Cancel and Save, and with [again] Save and add another, which saves, clears the form
      * for the next one (again) and stays open. [saved] runs after each save that worked. [focus]: the box the keyboard opens on.
+     * A ✕ beside the title closes it, as Cancel does. Its own bar at the bottom holds Cancel and Save, always in sight under the
+     * scrolling form: in AlertDialog's button bar the full-screen window cut them off (with Save and add another as a third
+     * button, Android stacked them and only Save showed). Save and add another is a button at the end of the form.
      */
     void sheet(String title,LinearLayout f,Runnable action,Runnable saved,Runnable again,EditText focus){
-        ScrollView scroll=new ScrollView(main);Button inForm=again!=null&&large()?button("Save and add another",()->{}):null; // large text: in the form (see large())
+        ScrollView scroll=new ScrollView(main);Button inForm=again!=null?button("Save and add another",()->{}):null;
         if(inForm!=null)f.addView(inForm);scroll.addView(f);
-        AlertDialog.Builder b=new AlertDialog.Builder(main).setTitle(title).setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Save",null);
-        if(again!=null&&inForm==null)b.setNeutralButton("Save and add another",null);
-        AlertDialog d=b.create();main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
+        AlertDialog[] made={null};LinearLayout frame=column();
+        frame.addView(titleRow(title,22,dp(24),()->made[0].cancel()));frame.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        View line=new View(main);line.setBackgroundColor(tint(main.ink,main.darkTheme?26:18));frame.addView(line,new LinearLayout.LayoutParams(-1,dp(1)));
+        LinearLayout bar=new LinearLayout(main);bar.setGravity(android.view.Gravity.END|android.view.Gravity.CENTER_VERTICAL);bar.setPadding(dp(16),dp(10),dp(18),dp(14));
+        Button cancel=button("Cancel",()->made[0].cancel());cancel.setBackground(bg(Color.TRANSPARENT));cancel.setTextColor(main.blue);cancel.setTextSize(15);
+        Button ok=primary("Save",()->{});ok.setTextSize(15);
+        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,dp(52));cp.setMarginEnd(dp(8));bar.addView(cancel,cp);bar.addView(ok,new LinearLayout.LayoutParams(dp(120),dp(52)));
+        frame.addView(bar);
+        // The bar stays above the keyboard: from Android 15 (edge to edge) the window no longer shrinks for it by itself, so the
+        // keyboard covered Cancel and Save while typing. The part of the keyboard over the form becomes padding under the bar.
+        frame.setOnApplyWindowInsetsListener((v,insets)->{int ime=android.os.Build.VERSION.SDK_INT>=30?insets.getInsets(android.view.WindowInsets.Type.ime()).bottom:0;
+            v.post(()->{int[] at=new int[2];v.getLocationInWindow(at);int gap=v.getRootView().getHeight()-(at[1]+v.getHeight()-v.getPaddingBottom());
+                int pad=Math.max(0,ime-gap);if(pad!=v.getPaddingBottom())v.setPadding(0,0,0,pad);});return insets;});
+        AlertDialog d=new AlertDialog.Builder(main).setView(frame).create();made[0]=d;main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
         java.util.function.Predicate<View> save=w->{try{main.commit(action);}catch(Exception e){toast(e.getMessage());return false;}
             confirm(w);saved.run();main.render();return true;};
         View.OnClickListener next=w->{if(save.test(w)){again.run();scroll.scrollTo(0,0);}};
-        d.setOnShowListener(v->{d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{if(save.test(w))d.dismiss();});
-            if(again!=null&&inForm==null)d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(next);});
+        ok.setOnClickListener(w->{if(save.test(w))d.dismiss();});
         if(inForm!=null)inForm.setOnClickListener(next);
         if(focus!=null){focus.requestFocus();d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE|android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);}
         d.show();d.getWindow().setLayout(-1,-1);

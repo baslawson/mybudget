@@ -60,9 +60,13 @@ final class MoveMenu {
     static void show(Ui ui,View anchor,String title,String place,List<Choice> choices){MainActivity main=ui.main;
         LinearLayout box=new LinearLayout(main);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(ui.dp(6),ui.dp(10),ui.dp(6),ui.dp(8));
         TextView head=ui.label(title.toUpperCase(Locale.ROOT)+"  ·  "+place,11,main.muted,true);head.setLetterSpacing(0.08f);head.setSingleLine(true);
-        head.setEllipsize(android.text.TextUtils.TruncateAt.END);head.setPadding(ui.dp(14),ui.dp(2),ui.dp(14),ui.dp(8));head.setContentDescription(title+", "+place);Ui.heading(head);box.addView(head);
+        head.setEllipsize(android.text.TextUtils.TruncateAt.END);head.setPadding(ui.dp(14),ui.dp(2),ui.dp(14),ui.dp(8));head.setContentDescription(title+", "+place);Ui.heading(head);
+        // A ✕ beside the heading closes the menu (a tap outside or Back still do too).
+        LinearLayout top=new LinearLayout(main);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(head,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1));
+        Button x=ui.button("✕",()->{});x.setTextSize(15);x.setTextColor(main.muted);x.setBackground(ui.bg(Color.TRANSPARENT));x.setPadding(0,0,0,0);x.setContentDescription("Close");
+        LinearLayout.LayoutParams xp=new LinearLayout.LayoutParams(ui.dp(40),ui.dp(40));xp.topMargin=-ui.dp(8);top.addView(x,xp);box.addView(top);
         PopupWindow p=new PopupWindow(box,ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT,true);
-        if(main.popup!=null)main.popup.dismiss();main.popup=p;p.setOnDismissListener(()->{if(main.popup==p)main.popup=null;});
+        if(main.popup!=null)main.popup.dismiss();main.popup=p;p.setOnDismissListener(()->{if(main.popup==p)main.popup=null;});x.setOnClickListener(v->p.dismiss());
         rows(ui,box,choices,ui.dp(48),15,ui.dp(32),p::dismiss);
         // Dark: a shade lighter than the cards (a shadow barely shows on dark), with a clearer edge.
         int raised=main.darkTheme?mix(main.surface,main.ink,0.07f):main.surface;
@@ -84,17 +88,19 @@ final class MoveMenu {
      */
     static AlertDialog sheet(Ui ui,String title,String subtitle,List<List<Choice>> sections,String tip){MainActivity main=ui.main;
         LinearLayout sheet=new LinearLayout(main);sheet.setOrientation(LinearLayout.VERTICAL);int side=ui.dp(20);
-        TextView name=ui.label(title,20,main.ink,true);Ui.heading(name);sheet.addView(name);
+        // The title with a ✕ that closes the card (a tap outside or Back still do too).
+        AlertDialog[] made={null};LinearLayout top=ui.titleRow(title,20,0,()->{main.editors.remove(made[0]);made[0].dismiss();});top.setPadding(0,0,0,0);
+        ((LinearLayout.LayoutParams)top.getChildAt(1).getLayoutParams()).setMarginEnd(-ui.dp(12));sheet.addView(top);
         if(subtitle!=null&&!subtitle.isEmpty())sheet.addView(ui.label(subtitle,13,main.muted,false));
         View space=new View(main);sheet.addView(space,new LinearLayout.LayoutParams(1,ui.dp(8)));
-        AlertDialog d=new AlertDialog.Builder(main).create();Runnable close=()->{main.editors.remove(d);d.dismiss();};boolean first=true;
+        AlertDialog d=new AlertDialog.Builder(main).create();made[0]=d;Runnable close=()->{main.editors.remove(d);d.dismiss();};boolean first=true;
         for(List<Choice> part:sections){if(part.isEmpty())continue;
             if(!first){View line=new View(main);line.setBackgroundColor(Ui.tint(main.ink,main.darkTheme?26:18));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,ui.dp(1));
                 lp.setMargins(ui.dp(12),ui.dp(6),ui.dp(12),ui.dp(6));sheet.addView(line,lp);}
             int before=sheet.getChildCount();rows(ui,sheet,part,ui.dp(52),16,ui.dp(40),close);first=false;
             if(sheet.getChildCount()==before)first=true;}
         if(tip!=null){TextView t=ui.label(tip,12,main.muted,false);t.setPadding(ui.dp(12),ui.dp(10),0,0);sheet.addView(t);}
-        sheet.setPadding(side,ui.dp(20),side,ui.dp(14));
+        sheet.setPadding(side,ui.dp(10),side,ui.dp(14)); // the ✕ row is tall enough on its own
         // A rounded card in the middle of the screen, at most 85% of its height; longer lists scroll inside it.
         int tallest=(int)(main.getResources().getDisplayMetrics().heightPixels*0.85f);
         ScrollView holder=new ScrollView(main){@Override protected void onMeasure(int w,int h){

@@ -275,10 +275,11 @@ final class TransactionForms extends Ui {
         helpers.addView(even,new LinearLayout.LayoutParams(0,-2,1));LinearLayout.LayoutParams fp=new LinearLayout.LayoutParams(0,-2,1);
         fp.setMargins(dp(8),0,0,0);helpers.addView(fill,fp);f.addView(helpers);
         f.addView(sum);total2.run();AlertDialog[] shown={null};
-        if(large()&&!parts.isEmpty())f.addView(button("Remove split",()->{parts.clear();done.run();shown[0].dismiss();}));
+        // In the dialog, not as a third button: beside Cancel and Done the three stacked (hunt 28).
+        if(!parts.isEmpty())f.addView(button("Remove split",()->{parts.clear();done.run();shown[0].dismiss();}));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Split").setView(scroll)
             .setNegativeButton("Cancel",null).setPositiveButton("Done",null)
-            .setNeutralButton(parts.isEmpty()||large()?null:"Remove split",(x,w)->{parts.clear();done.run();}).create();shown[0]=d;
+            .create();shown[0]=d;
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
             List<Budget.Split> result=new ArrayList<>();
             for(int i=0;i<cats.size();i++){long cents;
