@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.14
+## Download 0.0.15
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.14/MyBudget-0.0.14.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.14)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.15/MyBudget-0.0.15.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.15)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.14`, version code `17`, package `com.mybudget.app`. The universal release APK is approximately 225 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.15`, version code `18`, package `com.mybudget.app`. The universal release APK is approximately 225 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -24,6 +24,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.15**: any account can be deleted (open, closed, card or tracking) with its transactions, after a warning that says what goes and what stays; transfers with other accounts keep their side, and you can undo it for a few seconds.
 - **0.0.14**: a new look for every menu and dialog: menus and pick-lists as rounded cards with icons, groups and amounts; forms, questions and the date picker with rounded corners and clearer buttons (deleting is red); and fixes from a bug hunt.
 - **0.0.13**: a ⋮ on every card of Home, Accounts and Reports and on every group on Budget, to move it to the top, above or below the one next to it, to the bottom, or back to the default order; holding a card without dragging opens its move options again.
 - **0.0.12**: leaving a category opened from Edit group brings you back to Edit group instead of Budget.
