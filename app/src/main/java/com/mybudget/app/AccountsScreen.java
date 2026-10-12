@@ -117,7 +117,16 @@ final class AccountsScreen extends Ui {
     private void editAccount(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;LinearLayout f=form();f.addView(label("Name",12,main.muted,true));
         EditText name=field(f,"Account name",false);name.setText(a.name);
-        f.addView(greyLine("Opened "+pretty(a.date)+" with "+money(a.opening)+". These stay fixed so past months don't change.",money(a.opening),amountColour(a.opening),13));
+        // The opening balance and date: changeable until the account is reconciled (Budget.setOpening), with what changes shown first.
+        boolean owes=a.credit()||a.tracking()&&a.liability,fixed=main.budget.reconciled(a);
+        String what=owes?"Owed when added":a.tracking()?"Worth when added":"Opening balance";EditText opening=null,opened=null;
+        if(fixed){f.addView(greyLine("Opened "+pretty(a.date)+" with "+money(a.opening)+". It's fixed now that the account has been reconciled. To correct its balance, use Reconcile.",money(a.opening),amountColour(a.opening),13));
+            f.addView(button("Reconcile",()->{for(AlertDialog editor:new ArrayList<>(main.editors))editor.dismiss();reconcile(main.accountById(id));}));}
+        else{f.addView(label(what+" ("+code()+")",12,main.muted,true));opening=field(f,what,true);
+            if(main.hideAmounts)opening.setHint("Hidden · leave empty to keep it");else opening.setText(decimal(Math.abs(a.opening)));
+            f.addView(label("Opening date",12,main.muted,true));opened=dateField(f,a.date);
+            f.addView(label("Until you reconcile it, these can be corrected: "+(owes?"what it owes":a.tracking()?"Net worth":"To budget")+" from the opening month on is worked out again.",12,main.muted,false));}
+        EditText openingBox=opening,openedBox=opened;String[] change={null,null}; // a changed opening ({cents, date}), confirmed after the save
         long balance=main.budget.balance(a,false);
         if(balance==0)f.addView(button("Close account",()->new AlertDialog.Builder(main).setTitle("Close "+a.name+"?")
             .setMessage("It moves to Closed accounts and isn't offered for new transactions. Its history stays, and you can reopen it.")
@@ -139,9 +148,43 @@ final class AccountsScreen extends Ui {
                 if(r<0||r>100_000)throw new IllegalArgumentException("Enter an interest rate from 0 to 100%, with up to three decimals.");
                 String pt=payment.getText().toString().trim();p=pt.isEmpty()?(main.hideAmounts?main.accountById(id).payment:0):Budget.parse(pt);
                 if(p<0)throw new IllegalArgumentException("Enter the payment as a positive amount.");}
-            Budget.Account acc=main.accountById(id);main.budget.rename(acc,n);
-            if(acc.liability){acc.rate=r;acc.payment=p;acc.frequency=Budget.FREQUENCIES[often.getSelectedItemPosition()];}});
+            Budget.Account acc=main.accountById(id);
+            // A changed opening is checked now (on a copy, so a refusal keeps the form open) and confirmed after the save.
+            change[0]=null;change[1]=null;
+            if(openingBox!=null){String typed=openingBox.getText().toString().trim();
+                long size=typed.isEmpty()?(main.hideAmounts?Math.abs(acc.opening):0):Budget.parse(typed);if(size<0)throw new IllegalArgumentException("Enter the amount as a positive number.");
+                long cents=owes?-size:size;String day=(String)openedBox.getTag();
+                if(cents!=acc.opening||!day.equals(acc.date)){Budget copy=copyOf();copy.setOpening(copy.account(id),cents,day);change[0]=String.valueOf(cents);change[1]=day;}}
+            main.budget.rename(acc,n);
+            if(acc.liability){acc.rate=r;acc.payment=p;acc.frequency=Budget.FREQUENCIES[often.getSelectedItemPosition()];}},
+            ()->{if(change[0]!=null){long cents=Long.parseLong(change[0]);String day=change[1];change[0]=null;confirmOpening(id,cents,day);}});
     }
+    /** The budget as it is, to try a change on without touching it. */
+    private Budget copyOf(){try{return BudgetStore.decode(BudgetStore.encode(main.budget));}catch(org.json.JSONException e){throw new IllegalStateException("Could not work out the change.");}}
+    /**
+     * Asks before changing account [id]'s opening to [cents] on [day]: what it opened with, and what changes (To budget in the
+     * opening month and now, or what a card or debt owes, or Net worth), with a warning when a month's To budget would go
+     * below zero. Changed with Undo.
+     */
+    private void confirmOpening(String id,long cents,String day){Budget.Account a=main.budget.account(id);if(a==null)return;
+        Budget before=copyOf(),after=copyOf();try{after.setOpening(after.account(id),cents,day);}catch(IllegalArgumentException e){toast(e.getMessage());return;}
+        Budget.Account was=before.account(id),now=after.account(id);StringBuilder m=new StringBuilder();
+        boolean owes=a.credit()||a.tracking()&&a.liability;DateTimeFormatter month=DateTimeFormatter.ofPattern("MMMM yyyy",Locale.forLanguageTag("en-AU"));
+        boolean sameDay=was.date.equals(now.date),sameAmount=was.opening==now.opening; // only what changes is spelt out
+        m.append(a.name).append(owes?" owed ":a.tracking()?" was worth ":" opened with ").append(money(Math.abs(was.opening)));
+        if(sameDay)m.append(" → ").append(money(Math.abs(now.opening))).append(" (").append(pretty(now.date)).append(").\n\n");
+        else m.append(" on ").append(pretty(was.date)).append(" → ").append(sameAmount?"":money(Math.abs(now.opening))+" ").append("on ").append(pretty(now.date)).append(".\n\n");
+        YearMonth from=YearMonth.from(LocalDate.parse(was.date.compareTo(now.date)<0?was.date:now.date)),today=YearMonth.now();String warning=null;
+        if(a.cash()){m.append("To budget in ").append(from.format(month)).append(": ").append(money(before.ready(from))).append(" → ").append(money(after.ready(from))).append(".");
+            if(!from.equals(today))m.append("\nTo budget now (").append(today.format(month)).append("): ").append(money(before.ready(today))).append(" → ").append(money(after.ready(today))).append(".");
+            for(YearMonth k=from;!k.isAfter(today);k=k.plusMonths(1))if(after.ready(k)<0&&before.ready(k)>=0){
+                warning=k.format(month)+"'s To budget would be "+money(after.ready(k))+": more was assigned than you'd have had.";break;}}
+        else if(owes)m.append("What it owes now: ").append(money(-before.balance(was,false))).append(" → ").append(money(-after.balance(now,false))).append(".");
+        else m.append("Net worth now: ").append(money(before.netWorth(today))).append(" → ").append(money(after.netWorth(today))).append(".");
+        m.append(from.equals(today)?"":"\nThe months between change the same way.");
+        CharSequence text=warning==null?m:android.text.TextUtils.concat(m,"\n\n",tint(warning,warning,main.red));
+        tracked(new AlertDialog.Builder(main).setTitle("Change the opening balance?").setMessage(text).setNegativeButton("Cancel",null)
+            .setPositiveButton("Change it",(d,w)->main.deleteWithUndo("Opening balance changed",()->main.budget.setOpening(main.accountById(id),cents,day))));}
     /** A tracking account's value update: the new balance (what's owed, for a debt) as a cleared transaction for the difference. */
     private void updateBalance(String id){
         Budget.Account a=main.budget.account(id);if(a==null)return;long now=main.budget.balance(a,false);LinearLayout f=form();

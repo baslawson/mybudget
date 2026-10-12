@@ -304,6 +304,27 @@ public final class Budget {
     public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
     /** Adds a credit card owing [owed] (a positive amount) and its payment category. Old debt starts with nothing set aside. */
     public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group=paymentGroup();p.cardAccount=a.id;categories.add(p);changed();return a;}
+    // The opening balance and date: fixed once an account is reconciled (its balance was checked against the bank then).
+    // Before that, they can be corrected (a typo, a guess): every month from the opening on is worked out again.
+    /** Whether [a] has been reconciled: Reconcile ran on it, or a transaction in or out of it is locked. */
+    public boolean reconciled(Account a){if(!a.reconciled.isEmpty())return true;
+        for(Entry e:entries)if(e.reconciled&&(e.account.equals(a.id)||e.destination.equals(a.id)))return true;return false;}
+    /** The earliest date of [a]'s transactions and upcoming ones, in or out (ISO), or null when it has none. */
+    public String firstUse(Account a){String first=null;
+        for(Entry e:entries)if((e.account.equals(a.id)||e.destination.equals(a.id))&&(first==null||e.date.compareTo(first)<0))first=e.date;
+        for(Scheduled s:scheduled)if((s.account.equals(a.id)||s.destination.equals(a.id))&&(first==null||s.next.compareTo(first)<0))first=s.next;return first;}
+    /**
+     * Changes [a]'s opening balance to [opening] (cents; what a card, a pay-later plan or a debt owed is negative) and its opening
+     * date to [date], until it's reconciled. The date can't be after its first transaction or upcoming one.
+     */
+    public void setOpening(Account a,long opening,String date){
+        if(reconciled(a))throw new IllegalArgumentException("This account has been reconciled, so its opening balance stays as it is. Use Reconcile to correct its balance.");
+        LocalDate d=LocalDate.parse(date);if(d.isAfter(LocalDate.now())||d.getYear()<1900)throw new IllegalArgumentException("Use an opening date between 1900 and today.");
+        boolean owes=a.credit()||a.tracking()&&a.liability;
+        if(owes?opening>0:opening<0)throw new IllegalArgumentException(owes?"Enter what was owed as a positive amount.":a.tracking()?"Enter what it was worth as a positive amount.":"Use a nonnegative cash opening balance.");
+        String first=firstUse(a);
+        if(first!=null&&date.compareTo(first)>0)throw new IllegalArgumentException("This account has transactions from "+LocalDate.parse(first).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy",Locale.forLanguageTag("en-AU")))+": the opening date can't be after that.");
+        a.opening=opening;a.date=date;changed();}
     // Pay later (Pay in 4, Afterpay, Zip): a purchase on a pay-later plan is spending in its category when it's made, as on a
     // card (the money moves to the plan's payment category); its instalments are transfers into the plan from where they're
     // paid, those still to come waiting as upcoming transfers. A refund lowers the instalments left, the last ones first.

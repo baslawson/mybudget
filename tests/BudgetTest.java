@@ -38,7 +38,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){
@@ -577,6 +577,31 @@ public class BudgetTest {
         equal(b.instalmentsLeft(plan2).size(),3,"Afterpay's three to come");b.deleteAccount(plan2);
         if(b.scheduled.stream().anyMatch(s->s.destination.equals(plan2.id))||b.paymentCategory(plan2)!=null)throw new AssertionError("A deleted plan's instalments go");
         System.out.println("PASS pay later");
+    }
+    /** The opening balance and date: changeable until the account is reconciled; every month from the opening is worked out again. */
+    static void openingBalance(){
+        Budget b=new Budget();YearMonth jan=YearMonth.of(2025,1),feb=YearMonth.of(2025,2);
+        Budget.Account bank=new Budget.Account("Bank","2025-01-10",100000);b.accounts.add(bank);
+        Budget.Category food=new Budget.Category("Food");b.categories.add(food);b.assign(food,jan,30000);
+        b.entries.add(new Budget.Entry("Shop",food.id,bank.id,"2025-02-05",-2000));b.changed();
+        equal(b.ready(jan),70000,"To budget before");if(b.reconciled(bank))throw new AssertionError("Not reconciled yet");
+        b.setOpening(bank,120000,"2025-01-10");b.changed();
+        equal(b.ready(jan),90000,"A higher opening adds to To budget in its month");equal(b.ready(feb),90000,"And the months after");equal(b.balance(bank,false),118000,"The balance follows");
+        b.setOpening(bank,120000,"2025-02-01");b.changed();equal(b.ready(jan),-30000,"Opened later: January had nothing to assign");equal(b.ready(feb),90000,"February has it");
+        rejects(()->b.setOpening(bank,120000,"2025-02-06"));                                      // after its first transaction
+        rejects(()->b.setOpening(bank,-1,"2025-01-10"));                                          // a cash account doesn't start below zero
+        rejects(()->b.setOpening(bank,1000,java.time.LocalDate.now().plusDays(1).toString()));    // not in the future
+        // An upcoming transaction counts as a use too.
+        b.scheduled.add(new Budget.Scheduled("Rent",food.id,bank.id,"2025-01-20",-5000,"Never"));equal(b.firstUse(bank).compareTo("2025-01-20"),0,"An upcoming one is a use");
+        rejects(()->b.setOpening(bank,120000,"2025-01-25"));b.scheduled.clear();
+        // A card's opening is what it owed (negative); a positive one is refused.
+        Budget.Account card=b.addCard("Visa","2025-01-10",50000);b.setOpening(card,-45000,"2025-01-10");b.changed();equal(b.balance(card,false),-45000,"A card's starting debt changes");
+        rejects(()->b.setOpening(card,100,"2025-01-10"));
+        // Reconciled (by Reconcile, or a locked transaction in it): fixed.
+        bank.reconciled="2025-02-10";rejects(()->b.setOpening(bank,1,"2025-01-10"));bank.reconciled="";
+        Budget.Entry locked=new Budget.Entry("Transfer to Visa","",bank.id,"2025-02-06",-1000);locked.destination=card.id;locked.cleared=true;locked.reconciled=true;b.entries.add(locked);
+        if(!b.reconciled(card)||!b.reconciled(bank))throw new AssertionError("A locked transfer marks both accounts reconciled");rejects(()->b.setOpening(card,-1,"2025-01-10"));
+        System.out.println("PASS opening balance");
     }
     static void deleteAccounts(){
         Budget b=new Budget();YearMonth feb=YearMonth.of(2025,2);
