@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.view.*;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import java.util.ArrayList;
@@ -46,9 +45,8 @@ final class AddButton {
                 for(Move m:moves(main))info.addAction(new AccessibilityNodeInfo.AccessibilityAction(m.id,m.text));}
             @Override public boolean performAccessibilityAction(View v,int action,Bundle args){
                 for(Move m:moves(main))if(m.id==action){m.run(main,add);return true;}return super.performAccessibilityAction(v,action,args);}});
-        // It pops in when the main screens come back (from Settings, or on opening), not on each tab.
-        if(Ui.motion()&&(main.shownTab==null||main.shownTab.equals("Settings"))){add.setScaleX(0f);add.setScaleY(0f);
-            add.animate().scaleX(1f).scaleY(1f).setStartDelay(120).setDuration(260).setInterpolator(new OvershootInterpolator(2f)).start();}}
+        // No pop-in: it is there from the first frame (0.0.17's grew from nothing and was cancelled by place(), so it stayed hidden).
+    }
 
     private static SharedPreferences prefs(MainActivity main){return main.getSharedPreferences("appearance",0);}
     private static boolean left(MainActivity main){return prefs(main).getString("add_side","right").equals("left");}
@@ -59,7 +57,7 @@ final class AddButton {
     private static float roomY(MainActivity main,View add){return Math.max(0,main.body.getHeight()-add.getHeight()-main.ui.dp(BOTTOM)-main.ui.dp(EDGE));}
     /** Moves [add] to its saved place, sliding there when [slide] (and the phone's animations are on). */
     private static void place(MainActivity main,View add,boolean slide){float x=left(main)?-roomX(main,add):0,y=-height(main)*roomY(main,add);
-        add.animate().cancel();
+        add.animate().cancel();add.setScaleX(1f);add.setScaleY(1f); // a stopped animation (the drag's lift) never leaves it smaller
         if(slide&&Ui.motion())add.animate().translationX(x).translationY(y).setStartDelay(0).setDuration(200).setInterpolator(new DecelerateInterpolator()).start();
         else{add.setTranslationX(x);add.setTranslationY(y);}}
     private static void save(MainActivity main,boolean left,float height){SharedPreferences.Editor e=prefs(main).edit();
@@ -83,7 +81,7 @@ final class AddButton {
                     v.setTranslationX(Math.max(-roomX(main,v),Math.min(0,startX+dx)));v.setTranslationY(Math.max(-roomY(main,v),Math.min(0,startY+dy)));return true;}
                 case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:{if(!dragging[0])return false;dragging[0]=false;
                     float room=roomX(main,v),up=roomY(main,v);boolean left=room>0&&-v.getTranslationX()>room/2;
-                    save(main,left,up>0?-v.getTranslationY()/up:0f);v.setScaleX(1f);v.setScaleY(1f);place(main,v,true);return true;}}
+                    save(main,left,up>0?-v.getTranslationY()/up:0f);place(main,v,true);return true;}}
             return false;}
     }
 
