@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.16
+## Download 0.0.17
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.16/MyBudget-0.0.16.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.16)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.17/MyBudget-0.0.17.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.17)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.16`, version code `19`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.17`, version code `20`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -24,6 +24,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.17**: the round **+** for Add transaction is on every main screen and can be dragged anywhere (it settles on the nearer side; hold it to move it to the other side or back to the corner); MyBudget opens on the screen you were last on; and Add transaction can make a new category (**+ New category**) and use it straight away.
 - **0.0.16**: reminders on transactions and upcoming ones (on the day, a day or a week before at 9:00, or any time), which ring like an alarm for a few seconds or until you stop them, also in silent and vibrate mode, with Snooze, and Enter it now or Skip for an upcoming one; every form and menu has a ✕ to close it, and Add transaction keeps Cancel and Save in sight above the keyboard.
 - **0.0.15**: any account can be deleted (open, closed, card or tracking) with its transactions, after a warning that says what goes and what stays; transfers with other accounts keep their side, and you can undo it for a few seconds.
 - **0.0.14**: a new look for every menu and dialog: menus and pick-lists as rounded cards with icons, groups and amounts; forms, questions and the date picker with rounded corners and clearer buttons (deleting is red); and fixes from a bug hunt.
@@ -97,7 +98,7 @@ A target can be snoozed for the month (it asks for nothing and Fund targets skip
 
 **Payees.** Settings > Payees (or the Payees button in Transactions) lists every payee: rename one (its transactions and upcoming ones follow), merge it into another (the one you pick is kept), or hide it from suggestions (its transactions stay). **Category** sets what a new transaction or imported row with that payee is given: **automatic** (the default: the category it usually has, which one odd purchase doesn't change: a different category becomes the usual one only when two of its last three transactions have it; splits, transfers and To categorize don't count), **always** one category, or **don't suggest** one. Renaming or merging a payee keeps its setting; deleting its category moves the setting with the transactions. **Import rules** rename statement payees and/or choose their category when a payee contains some text, e.g. "contains WOOLWORTHS → Woolworths, Groceries". Capitals don't matter, the first matching rule wins, and rules can be edited or removed.
 
-**Home.** MyBudget opens on Home: To budget, a quick **+ Add transaction**, and **Needs attention**: overspent categories (with **Cover**), money in To budget waiting to be assigned (or To budget below $0), upcoming transactions and Planner bills due in the next 7 days (overdue ones too), and imported transactions to review, and a reminder when your budget hasn't been backed up for 14 days (or ever) once it has an account. Tap any of them to go where it's dealt with; the backup reminder opens Settings at Backup, and **Remind me in a week** puts it off for 7 days. When nothing needs you, it says "All set". Below that are your funding progress and your **priority categories**.
+**Home.** MyBudget opens on Home the first time, then on the screen you were last on. Home has To budget, a quick **+ Add transaction** (the round **+** is on every screen too), and **Needs attention**: overspent categories (with **Cover**), money in To budget waiting to be assigned (or To budget below $0), upcoming transactions and Planner bills due in the next 7 days (overdue ones too), and imported transactions to review, and a reminder when your budget hasn't been backed up for 14 days (or ever) once it has an account. Tap any of them to go where it's dealt with; the backup reminder opens Settings at Backup, and **Remind me in a week** puts it off for 7 days. When nothing needs you, it says "All set". Below that are your funding progress and your **priority categories**.
 
 **How To budget is worked out.** Tap the To budget card (Home or Budget) for the sum behind it, which always adds up exactly: the money in your cash and bank accounts (at the end of the month, for a past month), less what categories hold, less what's set aside for card payments, plus what card payment categories are below zero (paid beyond what was set aside), plus cash overspending this month (it comes off next month's To budget instead), less money already assigned in later months. Under it: the month's income and how much was assigned in it.
 
