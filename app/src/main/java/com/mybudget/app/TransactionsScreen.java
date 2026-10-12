@@ -18,12 +18,13 @@ final class TransactionsScreen extends Ui {
     private void upcomingList(){
         if(main.budget.scheduled.isEmpty())return;List<Budget.Scheduled> list=new ArrayList<>(main.budget.scheduled);
         list.sort(Comparator.comparing(s->s.next));
-        if(!main.accountFilter.isEmpty())list.removeIf(s->!s.account.equals(main.accountFilter));if(list.isEmpty())return;
+        if(!main.accountFilter.isEmpty())list.removeIf(s->!s.account.equals(main.accountFilter)&&!s.destination.equals(main.accountFilter));if(list.isEmpty())return; // a transfer shows in both accounts
         sectionHeading("📅","Coming up",count(list.size(),"upcoming","upcoming"));
         for(Budget.Scheduled s:list){
             boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());Budget.Category c=main.budget.category(s.category);
             Budget.Account a=main.budget.account(s.account);String id=s.id;
-            listRow(s.payee,(s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" · "+(a==null?"":a.name)+" · "+pretty(s.next)+" · "+main.forms.repeatLabel(s),
+            Budget.Account to=main.budget.account(s.destination); // a pay-later payment: "Payment 2 of 4 · Shoe shop", from the bank
+            listRow(s.transfer()&&!s.memo.isEmpty()?s.memo:s.payee,(s.transfer()?(a==null?"":a.name)+" → "+(to==null?"":to.name):(s.split()?splitNames(s.splits):s.category.isEmpty()?"To budget":c==null?"":c.name)+" · "+(a==null?"":a.name))+" · "+pretty(s.next)+" · "+main.forms.repeatLabel(s),
                 money(s.amount),amountColour(s.amount),isDue?"Due - tap to enter or skip":null,main.amber,()->main.forms.dueActions(id));}
     }
     /** A section of the screen: an icon, its name (a heading for TalkBack) and a quiet count on the right. */

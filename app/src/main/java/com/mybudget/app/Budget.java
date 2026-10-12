@@ -35,6 +35,9 @@ public final class Budget {
         public long rate,payment;public String frequency="Monthly";
         public BigDecimal ratePercent(){return BigDecimal.valueOf(rate,3);}
         public boolean closed; // only at a zero balance; keeps its transactions
+        // A pay-later plan (Pay in 4, Afterpay, Zip; storage version 9): a credit account whose purchases are paid off in
+        // instalments, which wait as upcoming transfers into it (payLater). Its own payment category sets the money aside.
+        public boolean payLater;
         public Account(String name,String date,long opening) { this.name=name;this.date=date;this.opening=opening; }
     }
     public static final String SPLIT="split",PAY_BY_TRANSFER="Pay a credit card with a transfer to it. Its payment category takes only that card's interest and fees.";
@@ -89,7 +92,9 @@ public final class Budget {
         // An upcoming split (category SPLIT): its parts, as an Entry's; entering it makes a split with the same parts.
         public final List<Split> splits=new ArrayList<>();
         public final List<Reminder> reminders=new ArrayList<>(); // counted from its next date, so they move on with it (Reminder)
+        public String destination=""; // an upcoming transfer (storage version 9): the account it goes to, as an Entry's (a pay-later instalment)
         public boolean split(){return !splits.isEmpty();}
+        public boolean transfer(){return !destination.isEmpty();}
         /** The part of this upcoming transaction that goes to category [id] ("" = To budget). */
         public long amountIn(String id){if(split()){long n=0;for(Split s:splits)if(s.category.equals(id))n+=s.amount;return n;}return category.equals(id)?amount:0;}
         public boolean touches(String id){if(split()){for(Split s:splits)if(s.category.equals(id))return true;return false;}return category.equals(id);}
@@ -146,8 +151,14 @@ public final class Budget {
     public void validate(Scheduled s){
         Account a=account(s.account);if(a==null)throw new IllegalArgumentException("Choose an account.");LocalDate d=LocalDate.parse(s.next);if(s.next.compareTo(a.date)<0)throw new IllegalArgumentException("The date is before this account's opening date.");
         if(d.isAfter(LocalDate.now().plusYears(5)))throw new IllegalArgumentException("Schedule within the next five years.");
-        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");if(a.tracking()&&!s.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
-        if(s.split()||s.category.equals(SPLIT))validateParts(s.category,s.splits,s.amount);
+        if(s.payee.trim().isEmpty()||s.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");
+        if(s.transfer()){Account to=account(s.destination);if(to==null||to==a||s.amount>=0)throw new IllegalArgumentException("Choose a different destination account."); // as an Entry's transfer
+            if(s.next.compareTo(to.date)<0)throw new IllegalArgumentException("Date is before the destination account's opening date.");
+            if(s.split()||s.category.equals(SPLIT))throw new IllegalArgumentException("A transfer can't be split.");
+            if(!a.tracking()&&to.tracking()){if(s.category.isEmpty()||category(s.category)==null)throw new IllegalArgumentException("Choose the category this money comes from: it leaves your budget.");if(category(s.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);}
+            else if(!s.category.isEmpty())throw new IllegalArgumentException("Only a transfer out of your budget to a tracking account has a category.");}
+        else if(a.tracking()&&!s.category.isEmpty())throw new IllegalArgumentException(TRACKING_NO_CATEGORY);
+        else if(s.split()||s.category.equals(SPLIT))validateParts(s.category,s.splits,s.amount);
         else{if(!s.category.isEmpty()&&category(s.category)==null)throw new IllegalArgumentException("Choose a category.");if(!s.category.isEmpty()&&category(s.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);}
         if(!Arrays.asList(Scheduled.REPEATS).contains(s.repeat))throw new IllegalArgumentException("Choose how often it repeats.");
     }
@@ -156,7 +167,7 @@ public final class Budget {
     /** As enter(s), with a photo and the Cleared tick (a new repeating transaction dated today or earlier). */
     public Entry enter(Scheduled s,String photo,boolean cleared){return enter(s,photo,cleared,s.next);}
     /** As enter(s,photo,cleared), dated [date] (hunt 25 B1: a statement row paying it a few days early, before its date comes). */
-    public Entry enter(Scheduled s,String photo,boolean cleared,String date){Entry e=new Entry(s.payee,s.category,s.account,date,s.amount);e.memo=s.memo;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);changed();advance(s);return e;}
+    public Entry enter(Scheduled s,String photo,boolean cleared,String date){Entry e=new Entry(s.payee,s.category,s.account,date,s.amount);e.memo=s.memo;e.destination=s.destination;for(Split p:s.splits){Split c=new Split(p.category,p.amount);c.memo=p.memo;e.splits.add(c);}e.billKey=s.billKey;e.photo=photo;e.cleared=cleared;validate(e);entries.add(0,e);changed();advance(s);return e;}
     /** Skips [s]'s current date without a transaction. */
     public void advance(Scheduled s){LocalDate n=s.after(LocalDate.parse(s.next));if(n==null)scheduled.remove(s);else s.next=n.toString();}
     /** Every date [s] falls on in [m] (from its next date on). In the current month, overdue dates from before it count too: they're still to pay. */
@@ -293,6 +304,49 @@ public final class Budget {
     public Category paymentCategory(Account card){for(Category c:categories)if(card.id.equals(c.cardAccount))return c;return null;}
     /** Adds a credit card owing [owed] (a positive amount) and its payment category. Old debt starts with nothing set aside. */
     public Account addCard(String name,String date,long owed){Account a=new Account(name,date,-owed);a.type="credit";accounts.add(a);Category p=new Category(name);p.group=paymentGroup();p.cardAccount=a.id;categories.add(p);changed();return a;}
+    // Pay later (Pay in 4, Afterpay, Zip): a purchase on a pay-later plan is spending in its category when it's made, as on a
+    // card (the money moves to the plan's payment category); its instalments are transfers into the plan from where they're
+    // paid, those still to come waiting as upcoming transfers. A refund lowers the instalments left, the last ones first.
+    public static final String[] PAY_EVERY={"Weekly","Every 2 weeks","Monthly"};
+    public static final int MAX_INSTALMENTS=24;
+    /** A new pay-later plan: a credit account owing nothing, with its own payment category. */
+    public Account addPayLater(String name,String date){Account a=addCard(name,date,0);a.payLater=true;return a;}
+    /** [total] (cents, above zero) in [count] instalments: equal, with the cents that don't divide on the first (as PayPal does). */
+    public static long[] instalments(long total,int count){if(count<1||total<=0)throw new IllegalArgumentException("Enter the amount and the number of payments.");
+        long[] r=new long[count];long each=total/count;Arrays.fill(r,each);r[0]+=total-each*count;return r;}
+    /** The date of instalment [i] (0 = the first, on [first]) when they're [every] (PAY_EVERY). */
+    public static LocalDate instalmentDate(LocalDate first,String every,int i){return every.equals("Weekly")?first.plusWeeks(i):every.equals("Monthly")?first.plusMonths(i):first.plusWeeks(2L*i);}
+    /**
+     * Records [purchase] (an expense on pay-later plan [purchase.account], today or earlier) and its [count] instalments from
+     * account [from], [every] (PAY_EVERY) from [first] (not before the purchase): those dated today or earlier are paid now
+     * (transfers), the rest wait as upcoming transfers ("Payment 2 of 4 · payee"). Returns the upcoming ones.
+     */
+    public List<Scheduled> payLater(Entry purchase,String from,int count,String every,LocalDate first){
+        Account plan=account(purchase.account),payer=account(from);
+        if(plan==null||!plan.payLater)throw new IllegalArgumentException("Choose a pay-later plan.");
+        if(payer==null||payer==plan||payer.tracking()||payer.closed)throw new IllegalArgumentException("Choose the account the payments come from.");
+        if(purchase.amount>=0)throw new IllegalArgumentException("A pay-later purchase is an expense.");
+        if(count<2||count>MAX_INSTALMENTS)throw new IllegalArgumentException("Choose 2 to "+MAX_INSTALMENTS+" payments.");
+        if(!Arrays.asList(PAY_EVERY).contains(every))throw new IllegalArgumentException("Choose how often the payments are.");
+        if(first.isBefore(LocalDate.parse(purchase.date)))throw new IllegalArgumentException("The first payment can't be before the purchase.");
+        if(purchase.date.compareTo(plan.date)<0&&!usedAccount(plan))plan.date=purchase.date; // a plan made today for yesterday's purchase starts then
+        validate(purchase);long[] sizes=instalments(-purchase.amount,count);LocalDate today=LocalDate.now();String what=purchase.payee.trim();
+        List<Entry> paid=new ArrayList<>();List<Scheduled> later=new ArrayList<>();
+        for(int i=0;i<count;i++){LocalDate d=instalmentDate(first,every,i);String memo=cut("Payment "+(i+1)+" of "+count+" · "+what,PAYEE_MAX);
+            if(!d.isAfter(today)){Entry e=new Entry("Transfer to "+plan.name,"",payer.id,d.toString(),-sizes[i]);e.destination=plan.id;e.memo=memo;validate(e);paid.add(e);}
+            else{Scheduled s=new Scheduled("Transfer to "+plan.name,"",payer.id,d.toString(),-sizes[i],"Never");s.destination=plan.id;s.memo=memo;validate(s);later.add(s);}}
+        entries.add(0,purchase);for(Entry e:paid)entries.add(0,e);scheduled.addAll(later);changed();return later;}
+    /** [plan]'s instalments still to pay: upcoming transfers into it, soonest first. */
+    public List<Scheduled> instalmentsLeft(Account plan){List<Scheduled> list=new ArrayList<>();for(Scheduled s:scheduled)if(s.destination.equals(plan.id))list.add(s);
+        list.sort(Comparator.comparing(s->s.next));return list;}
+    /**
+     * Lowers [plan]'s instalments still to pay by [by] cents, the last ones first (as pay-later plans apply a refund); one
+     * lowered to nothing is removed. Returns how much was taken off: no more than they add up to.
+     */
+    public long lowerInstalments(Account plan,long by){List<Scheduled> left=instalmentsLeft(plan);long done=0;
+        for(int i=left.size()-1;i>=0&&done<by;i--){Scheduled s=left.get(i);long size=-s.amount,cut=Math.min(size,by-done);done+=cut;
+            if(cut==size)scheduled.remove(s);else s.amount=-(size-cut);}
+        if(done>0)changed();return done;}
     /** The group card payment categories are in: "Credit card payments", or what it was renamed to (hunt 26 B4: a new card joins it). */
     String paymentGroup(){for(Category c:categories)if(c.payment())return c.group;return "Credit card payments";}
     /** An account's balance at the end of [m] (a card's is negative while it's owed). */
@@ -686,10 +740,10 @@ public final class Budget {
         List<Category> sorted=new ArrayList<>(categories);sorted.sort(Comparator.comparingInt(c->all.indexOf(c.group))); // stable: each group keeps its order
         categories.clear();categories.addAll(sorted);changed();return true;}
     // Accounts: close at zero, delete only unused.
-    public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id))return true;return false;}
+    public boolean usedAccount(Account a){for(Entry e:entries)if(e.account.equals(a.id)||e.destination.equals(a.id))return true;for(Scheduled s:scheduled)if(s.account.equals(a.id)||s.destination.equals(a.id))return true;return false;}
     /** Renames [a]; its transfers' default payee ("Transfer to <name>") follows. */
-    public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
-    public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a zero balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
+    public void rename(Account a,String name){for(Entry e:entries)if(e.destination.equals(a.id)&&e.payee.equals("Transfer to "+a.name))e.payee="Transfer to "+name;for(Scheduled s:scheduled)if(s.destination.equals(a.id)&&s.payee.equals("Transfer to "+a.name))s.payee="Transfer to "+name;Category p=paymentCategory(a);if(p!=null&&p.name.equals(a.name))p.name=name;a.name=name;}
+    public void close(Account a){if(balance(a,false)!=0)throw new IllegalArgumentException("Move the money out first: an account closes at a zero balance.");for(Scheduled s:scheduled)if(s.account.equals(a.id)||s.destination.equals(a.id))throw new IllegalArgumentException("Move or delete its upcoming transactions first.");a.closed=true;}
     /**
      * What deleting [a] takes with it: {its own transactions, transfers with another account (that side stays there), upcoming
      * transactions}.
@@ -697,7 +751,7 @@ public final class Budget {
     public int[] deleteCounts(Account a){int own=0,kept=0,upcoming=0;
         for(Entry e:entries){boolean from=e.account.equals(a.id),to=e.destination.equals(a.id);if(!from&&!to)continue;
             if(e.transfer()&&account(from?e.destination:e.account)!=null)kept++;else own++;}
-        for(Scheduled s:scheduled)if(s.account.equals(a.id))upcoming++;return new int[]{own,kept,upcoming};}
+        for(Scheduled s:scheduled)if(s.account.equals(a.id)||s.destination.equals(a.id))upcoming++;return new int[]{own,kept,upcoming};}
     /**
      * Deletes [a] (any account: open, closed, card or tracking) with its transactions and upcoming ones. A transfer with another
      * account keeps that account's side as a plain transaction, so its balance stays: money that left [a] becomes money in there
@@ -710,7 +764,7 @@ public final class Budget {
             if(from){if(e.payee.equals("Transfer to "+other.name))e.payee="Transfer from "+a.name;e.account=other.id;e.amount=-e.amount;e.category="";}
             else if(other.tracking())e.category="";
             e.destination="";e.splits.clear();}
-        entries.removeIf(e->e.account.equals(a.id)||e.destination.equals(a.id));scheduled.removeIf(s->s.account.equals(a.id));
+        entries.removeIf(e->e.account.equals(a.id)||e.destination.equals(a.id));scheduled.removeIf(s->s.account.equals(a.id)||s.destination.equals(a.id)); // upcoming transfers into it (instalments) too
         Category p=paymentCategory(a);
         if(p!=null){for(Entry e:entries){if(e.category.equals(p.id))e.category="";for(Split s:e.splits)if(s.category.equals(p.id))s.category="";}
             for(Scheduled s:scheduled){if(s.category.equals(p.id))s.category="";for(Split q:s.splits)if(q.category.equals(p.id))q.category="";}
@@ -734,7 +788,7 @@ public final class Budget {
     // Payees: newest first, and the last transaction with one (for its category). Hidden payees aren't suggested.
     public List<String> payees(){List<String> list=allPayees();list.removeIf(this::hiddenPayee);return list;}
     /** Every payee (hidden ones too), newest first, each once (its newest spelling); upcoming transactions' too. */
-    public List<String> allPayees(){List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));LinkedHashMap<String,String> seen=new LinkedHashMap<>();for(Entry e:ordered)if(!e.transfer())seen.putIfAbsent(key(e.payee),e.payee.trim());for(Scheduled s:scheduled)seen.putIfAbsent(key(s.payee),s.payee.trim());return new ArrayList<>(seen.values());}
+    public List<String> allPayees(){List<Entry> ordered=new ArrayList<>(entries);ordered.sort((a,b)->b.date.compareTo(a.date));LinkedHashMap<String,String> seen=new LinkedHashMap<>();for(Entry e:ordered)if(!e.transfer())seen.putIfAbsent(key(e.payee),e.payee.trim());for(Scheduled s:scheduled)if(!s.transfer())seen.putIfAbsent(key(s.payee),s.payee.trim());return new ArrayList<>(seen.values());}
     private static String key(String payee){return payee.trim().toLowerCase(Locale.ROOT);}
     // Payee tools: rename, merge, hide from suggestions.
     /** Payees left out of suggestions (lower case). Their transactions stay. */
@@ -746,7 +800,7 @@ public final class Budget {
     public int renamePayee(String from,String to){
         String t=to==null?"":to.trim();if(t.isEmpty())throw new IllegalArgumentException("Enter the payee's new name.");if(t.length()>PAYEE_MAX)throw new IllegalArgumentException("Keep a payee's name to "+PAYEE_MAX+" characters.");
         boolean existing=!key(from).equals(key(t))&&allPayees().stream().anyMatch(p->key(p).equals(key(t)));int n=0;
-        for(Entry e:entries)if(!e.transfer()&&key(e.payee).equals(key(from))){if(e.bankPayee.isEmpty())e.bankPayee=statementPayee(e);e.payee=t;n++;}for(Scheduled s:scheduled)if(key(s.payee).equals(key(from))){s.payee=t;n++;}for(Rule r:rules)if(key(r.rename).equals(key(from)))r.rename=t;
+        for(Entry e:entries)if(!e.transfer()&&key(e.payee).equals(key(from))){if(e.bankPayee.isEmpty())e.bankPayee=statementPayee(e);e.payee=t;n++;}for(Scheduled s:scheduled)if(!s.transfer()&&key(s.payee).equals(key(from))){s.payee=t;n++;}for(Rule r:rules)if(key(r.rename).equals(key(from)))r.rename=t;
         if(hiddenPayees.remove(key(from))&&!existing)hiddenPayees.add(key(t));
         String setting=payeeCategories.remove(key(from));if(setting!=null)payeeCategories.putIfAbsent(key(t),setting);return n; // the payee kept keeps its own setting
     }

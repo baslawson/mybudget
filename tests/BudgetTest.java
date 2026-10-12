@@ -38,7 +38,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){
@@ -525,6 +525,59 @@ public class BudgetTest {
         b.rename(wallet,"Purse");same(move.payee,"Transfer to Purse","Transfer payee follows a rename");same(wallet.name,"Purse","Renamed");
     }
     /** Deleting an account (any): its transactions and upcoming ones go; transfers keep the other side; a card takes its payment category. */
+    /** Pay later (Pay in 4, Afterpay): a purchase spent once in its category, instalments as transfers, upcoming ones, refunds. */
+    static void payLater(){
+        LocalDate today=LocalDate.now();YearMonth m=YearMonth.now();
+        long[] p=Budget.instalments(9999,4);equal(p[0],2502,"The odd cents go on the first payment");equal(p[1],2499,"Then equal payments");equal(p[3],2499,"The last");
+        equal(p[0]+p[1]+p[2]+p[3],9999,"Instalments add up to the purchase");equal(Budget.instalments(10000,4)[0],2500,"Even amounts stay even");
+        rejects(()->Budget.instalments(0,4));
+        LocalDate d=LocalDate.of(2026,1,31);
+        if(!Budget.instalmentDate(d,"Every 2 weeks",3).equals(LocalDate.of(2026,3,14)))throw new AssertionError("Fortnightly dates");
+        if(!Budget.instalmentDate(d,"Weekly",2).equals(LocalDate.of(2026,2,14)))throw new AssertionError("Weekly dates");
+        if(!Budget.instalmentDate(d,"Monthly",1).equals(LocalDate.of(2026,2,28)))throw new AssertionError("Monthly dates keep to the month's end");
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank",today.minusMonths(2).toString(),50000);b.accounts.add(bank);
+        Budget.Category shoes=new Budget.Category("Shoes");b.categories.add(shoes);b.assign(shoes,m,10000);
+        Budget.Account plan=b.addPayLater("PayPal Pay in 4",today.toString());b.changed();
+        if(!plan.payLater||!plan.credit()||b.paymentCategory(plan)==null)throw new AssertionError("A plan is a card with a payment category");
+        long readyBefore=b.ready(m);
+        // Bought yesterday on a plan made today: the plan starts on the purchase's date.
+        Budget.Entry buy=new Budget.Entry("Shoe shop",shoes.id,plan.id,today.minusDays(1).toString(),-9999);
+        rejects(()->b.payLater(new Budget.Entry("Shoe shop",shoes.id,bank.id,today.toString(),-9999),bank.id,4,"Every 2 weeks",today)); // not a plan
+        rejects(()->b.payLater(buy,plan.id,4,"Every 2 weeks",today));                         // paid from the plan itself
+        rejects(()->b.payLater(buy,bank.id,1,"Every 2 weeks",today));                         // one payment isn't pay later
+        rejects(()->b.payLater(buy,bank.id,4,"Daily",today));
+        rejects(()->b.payLater(buy,bank.id,4,"Every 2 weeks",today.minusDays(2)));            // before the purchase
+        java.util.List<Budget.Scheduled> later=b.payLater(buy,bank.id,4,"Every 2 weeks",today.minusDays(1));b.changed();
+        equal(plan.date.compareTo(buy.date),0,"The plan starts on the purchase's date");
+        equal(later.size(),3,"Three payments to come");equal(b.instalmentsLeft(plan).size(),3,"Listed as left");
+        Budget.Scheduled next=b.instalmentsLeft(plan).get(0);
+        if(!next.next.equals(today.minusDays(1).plusWeeks(2).toString())||!next.memo.equals("Payment 2 of 4 · Shoe shop")||!next.destination.equals(plan.id)||next.amount!=-2499||!next.category.isEmpty())throw new AssertionError("The second payment: "+next.next+" "+next.memo);
+        equal(b.balance(bank,false),50000-2502,"The first payment left the bank");equal(b.balance(plan,false),-9999+2502,"Owed after the first payment");
+        if(m.equals(YearMonth.from(today.minusDays(1)))){
+            equal(b.available(shoes,m),1,"Spent once, in full, in its category");equal(b.ready(m),readyBefore,"To budget doesn't change");
+            equal(b.available(b.paymentCategory(plan),m),9999-2502,"What's still owed is set aside");}
+        // The next payment entered (from a statement row, say): a transfer into the plan.
+        Budget.Entry paid=b.enter(next,"",true,today.toString());b.changed();
+        if(!paid.transfer()||!paid.destination.equals(plan.id)||paid.amount!=-2499)throw new AssertionError("An entered instalment is a transfer");
+        equal(b.balance(plan,false),-9999+2502+2499,"Owed after two payments");equal(b.instalmentsLeft(plan).size(),2,"Two left");
+        // Validation of upcoming transfers, as a transaction's.
+        Budget.Scheduled bad=new Budget.Scheduled("Transfer to PayPal Pay in 4","",bank.id,today.plusDays(3).toString(),2499,"Never");bad.destination=plan.id;
+        rejects(()->b.validate(bad));bad.amount=-2499;b.validate(bad);bad.destination=bank.id;rejects(()->b.validate(bad));
+        bad.destination=plan.id;bad.category=shoes.id;rejects(()->b.validate(bad));
+        // Accounts: payee lists skip transfers; a rename follows; close refuses; counts include instalments into it.
+        if(b.allPayees().stream().anyMatch(n->n.startsWith("Transfer to")))throw new AssertionError("Transfers aren't payees");
+        rejects(()->b.close(plan));equal(b.deleteCounts(plan)[2],2,"Its instalments count as upcoming");
+        b.rename(plan,"Pay in 4");if(!b.instalmentsLeft(plan).get(0).payee.equals("Transfer to Pay in 4"))throw new AssertionError("A rename follows on upcoming transfers");
+        // A refund of 30.00: the last payments are lowered first; one lowered to nothing goes.
+        equal(b.lowerInstalments(plan,3000),3000,"Lowered by the refund");java.util.List<Budget.Scheduled> left=b.instalmentsLeft(plan);
+        equal(left.size(),1,"The last payment went");equal(left.get(0).amount,-1998,"The one before it was lowered");
+        equal(b.lowerInstalments(plan,5000),1998,"No more than is left");equal(b.instalmentsLeft(plan).size(),0,"Nothing left to pay");
+        // Deleting a plan takes its upcoming payments and its payment category.
+        Budget.Account plan2=b.addPayLater("Afterpay",today.toString());b.payLater(new Budget.Entry("Shop",shoes.id,plan2.id,today.toString(),-4000),bank.id,4,"Every 2 weeks",today);
+        equal(b.instalmentsLeft(plan2).size(),3,"Afterpay's three to come");b.deleteAccount(plan2);
+        if(b.scheduled.stream().anyMatch(s->s.destination.equals(plan2.id))||b.paymentCategory(plan2)!=null)throw new AssertionError("A deleted plan's instalments go");
+        System.out.println("PASS pay later");
+    }
     static void deleteAccounts(){
         Budget b=new Budget();YearMonth feb=YearMonth.of(2025,2);
         Budget.Account bank=new Budget.Account("Bank","2025-01-01",100000),old=new Budget.Account("Old","2025-01-01",20000),house=new Budget.Account("House","2025-01-01",0);

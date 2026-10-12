@@ -132,6 +132,36 @@ final class TransactionForms extends Ui {
         int[] acc={Math.max(0,lastUsed)};TextView accountTitle=label("Account",12,main.muted,true);f.addView(accountTitle);Chips accountChips=chips(f);
         Runnable[] showAccounts={null};showAccounts[0]=()->{List<String> names=new ArrayList<>();for(Budget.Account a:accounts)names.add(a.name);
             accountChips.show(names,acc[0],n->{acc[0]=n;showAccounts[0].run();});};showAccounts[0].run();
+        // Pay later (a new expense only): bought on a pay-later plan (Pay in 4, Afterpay, Zip), paid off in instalments from the
+        // account chosen above (Budget.payLater). The purchase is spent in its category now; the payments are transfers.
+        boolean[] later={false},firstNow={true},remindEach={false};String[] planId={""},every={"Every 2 weeks"};
+        CheckBox laterBox=new CheckBox(main);laterBox.setText("Pay later: Pay in 4, Afterpay, Zip…");laterBox.setTextColor(main.ink);laterBox.setMinHeight(dp(48));
+        LinearLayout laterFields=column();laterFields.setVisibility(View.GONE);if(adding){f.addView(laterBox);f.addView(laterFields);}
+        laterFields.addView(label("Plan",12,main.muted,true));Chips planChips=chips(laterFields,true);
+        laterFields.addView(label("Number of payments",12,main.muted,true));EditText payments=field(laterFields,"Number of payments",false);payments.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);payments.setText("4");
+        laterFields.addView(label("Every",12,main.muted,true));Chips everyChips=chips(laterFields,true); // wrapped: large text fits
+        CheckBox firstToday=new CheckBox(main);firstToday.setText("First payment on the purchase date");firstToday.setChecked(true);firstToday.setTextColor(main.ink);firstToday.setMinHeight(dp(48));laterFields.addView(firstToday);
+        CheckBox remindBox=new CheckBox(main);remindBox.setText("Remind me the day before each payment");remindBox.setTextColor(main.ink);remindBox.setMinHeight(dp(48));laterFields.addView(remindBox);
+        TextView schedule=label("",13,main.ink,false);laterFields.addView(schedule);
+        Runnable[] showLater={null},showPlans={null};
+        showPlans[0]=()->{List<Budget.Account> plans=new ArrayList<>();for(Budget.Account a:main.budget.accounts)if(a.payLater&&!a.closed)plans.add(a);
+            if(main.budget.account(planId[0])==null&&!plans.isEmpty())planId[0]=plans.get(0).id;
+            List<String> names=new ArrayList<>();int on=-1;for(int i=0;i<plans.size();i++){names.add(plans.get(i).name);if(plans.get(i).id.equals(planId[0]))on=i;}names.add("+ New plan…");
+            planChips.show(names,on,n->{if(n<plans.size()){planId[0]=plans.get(n).id;showPlans[0].run();}else newPlan(name->{
+                for(Budget.Account a:main.budget.accounts)if(a.payLater&&a.name.equals(name))planId[0]=a.id;showPlans[0].run();});});};
+        // The payments as they'll be: the first (paid now when it's on or before today), then the rest with their dates.
+        showLater[0]=()->{everyChips.show(Arrays.asList(Budget.PAY_EVERY),Arrays.asList(Budget.PAY_EVERY).indexOf(every[0]),n->{every[0]=Budget.PAY_EVERY[n];showLater[0].run();});
+            accountTitle.setText(later[0]?"Payments come from":"Account");laterFields.setVisibility(later[0]?View.VISIBLE:View.GONE);
+            long total;int n;try{total=Budget.cents(amount.getText().toString());n=Integer.parseInt(payments.getText().toString().trim());}catch(Exception e){schedule.setText("");return;}
+            if(n<2||n>Budget.MAX_INSTALMENTS){schedule.setText("Choose 2 to "+Budget.MAX_INSTALMENTS+" payments.");schedule.setTextColor(main.amber);return;}
+            LocalDate bought=LocalDate.parse((String)day.getTag()),first=firstNow[0]?bought:Budget.instalmentDate(bought,every[0],1);long[] sizes=Budget.instalments(total,n);
+            StringBuilder s=new StringBuilder();for(int i=0;i<n;i++){LocalDate d=Budget.instalmentDate(first,every[0],i); // "$25.02 on 12 Oct (paid now), then $24.99 on 26 Oct, 9 Nov and 23 Nov"
+                s.append(i==0?"":i==1?", then ":i==n-1?" and ":", ").append(i<=1||sizes[i]!=sizes[i-1]?money(sizes[i])+" on ":"").append(pretty(d.toString()))
+                    .append(!d.isAfter(LocalDate.now())?" (paid now)":"");}
+            schedule.setTextColor(main.ink);schedule.setText(s);};
+        laterBox.setOnCheckedChangeListener((v,on)->{later[0]=on;if(on)showPlans[0].run();showLater[0].run();});
+        firstToday.setOnCheckedChangeListener((v,on)->{firstNow[0]=on;showLater[0].run();});remindBox.setOnCheckedChangeListener((v,on)->remindEach[0]=on);
+        onText(payments,()->showLater[0].run());onText(day,()->showLater[0].run());
         // The category's Available after this transaction, in the month of its date: what's left (green) or overspent by (red).
         showPreview[0]=()->{int k=kind.selected();if(k==1||!parts.isEmpty()||cat[0]<0){preview.setVisibility(View.GONE);return;}
             Budget.Category c=fresh(categories.get(cat[0]));long typed;try{typed=Math.max(0,Budget.evaluate(amount.getText().toString()));}catch(Exception e){typed=0;}
@@ -189,13 +219,15 @@ final class TransactionForms extends Ui {
         Runnable adapt=()->{int selected=kind.selected();boolean income=selected==1;
             categoryFields.setVisibility(income?View.GONE:View.VISIBLE);payee.setHint(income?"Income source":selected==2?"Refund from":"Payee");
             guidance.setText(income?"Adds money into To budget.":selected==2?"Returns money to the original spending category.":"Reduces the available money in your category.");
+            laterBox.setVisibility(selected==0?View.VISIBLE:View.GONE);if(selected!=0&&later[0])laterBox.setChecked(false); // pay later: expenses only
             paint.run();showPreview[0].run();};
         adapt.run();kind.changed=adapt;
         amount.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}
             public void afterTextChanged(android.text.Editable s){
                 if(s.length()>0&&(s.charAt(0)=='-'||s.charAt(0)=='−')){kind.picked=true;kind.set(0);s.delete(0,1);return;} // the change re-runs this
                 if(s.length()>0&&s.charAt(0)=='+'){kind.picked=true;if(kind.selected()==0)kind.set(1);s.delete(0,1);return;}
-                if(s.toString().trim().length()>0)lastTime.setVisibility(View.GONE);showPreview[0].run();}});
+                if(s.toString().trim().length()>0)lastTime.setVisibility(View.GONE);showPreview[0].run();showLater[0].run();}});
+        long[] refund={0};String[] refundPlan={""}; // a refund just saved on a pay-later plan (see saved)
         Runnable save=()->{int k=kind.selected();
             if(k!=1&&categories.isEmpty())throw new IllegalArgumentException("Add a category first.");
             boolean isSplit=k!=1&&!parts.isEmpty();
@@ -205,7 +237,18 @@ final class TransactionForms extends Ui {
             String p=required(payee),cat2=k==1||bare?"":isSplit?Budget.SPLIT:categories.get(cat[0]).id,acc2=accounts.get(acc[0]).id,memoText=memo.getText().toString().trim();
             long cents=Budget.cents(amount.getText().toString())*(k==0?-1:1);
             String rep=repeatField==null?"Never":Budget.Scheduled.REPEATS[repeatField.getSelectedItemPosition()];
-            LocalDate when=LocalDate.parse((String)day.getTag());
+            LocalDate when=LocalDate.parse((String)day.getTag());refund[0]=0;
+            if(later[0]&&adding){ // bought on a pay-later plan: the purchase, the payments made now, and the rest as upcoming transfers
+                if(k!=0)throw new IllegalArgumentException("Pay later is for an expense.");
+                if(when.isAfter(LocalDate.now())||!rep.equals("Never"))throw new IllegalArgumentException("A pay-later purchase is dated today or earlier and doesn't repeat.");
+                Budget.Account plan=main.budget.account(planId[0]);if(plan==null||!plan.payLater||plan.closed)throw new IllegalArgumentException("Choose a pay-later plan, or add one with + New plan.");
+                int n;try{n=Integer.parseInt(payments.getText().toString().trim());}catch(NumberFormatException x){throw new IllegalArgumentException("Enter the number of payments.");}
+                Budget.Entry e=new Budget.Entry(p,cat2,plan.id,when.toString(),cents);e.memo=memoText;e.photo=photo[0];e.reminders.addAll(reminders.assignIds(main.budget));
+                if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,-part.amount);s.memo=part.memo;e.splits.add(s);}
+                e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();
+                for(Budget.Scheduled s:main.budget.payLater(e,acc2,n,every[0],firstNow[0]?when:Budget.instalmentDate(when,every[0],1)))
+                    if(remindEach[0])s.reminders.add(new Budget.Reminder(main.budget.newReminderId(),1,"days")); // the day before, at 9:00
+                return;}
             if(old==null&&(sched!=null||when.isAfter(LocalDate.now())||!rep.equals("Never"))){
                 Budget.Scheduled s=new Budget.Scheduled(p,cat2,acc2,when.toString(),cents,rep);s.memo=memoText;s.reminders.addAll(reminders.assignIds(main.budget));
                 if(isSplit)for(Budget.Split part:parts){Budget.Split c=new Budget.Split(part.category,part.amount*(k==0?-1:1));c.memo=part.memo;s.splits.add(c);} // entered later with the same parts
@@ -224,11 +267,14 @@ final class TransactionForms extends Ui {
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
                 e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
             if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
-                if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);};
+                if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);
+            Budget.Account onPlan=main.budget.account(acc2); // a new refund on a pay-later plan with payments left: asked about after the save
+            if(adding&&k==2&&onPlan!=null&&onPlan.payLater&&!main.budget.instalmentsLeft(onPlan).isEmpty()){refund[0]=cents;refundPlan[0]=onPlan.id;}};
         // After a save: which account to start on next time, and a short "Saved" line.
         Runnable saved=()->{if(adding)main.getSharedPreferences("appearance",0).edit().putString("last_account",accounts.get(acc[0]).id).apply();
             long size;try{size=Budget.cents(amount.getText().toString());}catch(Exception e){size=0;}
-            Toast.makeText(main,"Saved: "+payee.getText().toString().trim()+" "+(kind.selected()==0?"−":"+")+money(size),Toast.LENGTH_SHORT).show();};
+            Toast.makeText(main,"Saved: "+payee.getText().toString().trim()+" "+(kind.selected()==0?"−":"+")+money(size),Toast.LENGTH_SHORT).show();
+            if(refund[0]>0){long back=refund[0];refund[0]=0;lowerAfterRefund(refundPlan[0],back);}};
         // Save and add another (new transactions only): the kind, date and account stay; everything else starts afresh.
         Runnable again=!adding?null:()->{payee.setText("",false);amount.setText("");memo.setText("",false);photo[0]="";showPhotoBox[0].run();reminders.list.clear();reminders.show();
             parts.clear();showSplit.run();flag.setSelection(0);cleared.setChecked(false);if(repeatField!=null)repeatField.setSelection(0);
@@ -305,13 +351,42 @@ final class TransactionForms extends Ui {
         boolean isDue=!LocalDate.parse(s.next).isAfter(LocalDate.now());
         List<MoveMenu.Choice> choices=new ArrayList<>();
         if(isDue){choices.add(new MoveMenu.Choice(MoveMenu.ENTER,"Enter it now",false,
-                ()->{if(main.change(()->main.budget.enter(scheduledById(id))))toast("Entered "+s.payee+".");}));
+                ()->{if(main.change(()->main.budget.enter(scheduledById(id))))toast("Entered "+(s.transfer()&&!s.memo.isEmpty()?s.memo:s.payee)+".");}));
             Runnable skip=()->main.change(()->main.budget.advance(scheduledById(id)));
             choices.add(s.repeat.equals("Never")?MoveMenu.Choice.danger(MoveMenu.DELETE,"Skip it (delete)",skip):new MoveMenu.Choice(MoveMenu.SKIP,"Skip this one",false,skip));}
-        choices.add(new MoveMenu.Choice(MoveMenu.EDIT,"Edit",false,()->transaction(null,s)));
-        MoveMenu.sheet(this,s.payee,money(s.amount)+" · "+(isDue?"due ":"next ")+pretty(s.next)+(s.repeat.equals("Never")?"":" · "+s.repeat.toLowerCase(Locale.ROOT)),
+        choices.add(new MoveMenu.Choice(MoveMenu.EDIT,"Edit",false,()->{if(s.transfer())editInstalment(id);else transaction(null,s);}));
+        MoveMenu.sheet(this,s.transfer()&&!s.memo.isEmpty()?s.memo:s.payee,money(s.amount)+" · "+(isDue?"due ":"next ")+pretty(s.next)+(s.repeat.equals("Never")?"":" · "+s.repeat.toLowerCase(Locale.ROOT)),
             Collections.singletonList(choices),null);
     }
+    static final String[] PLAN_NAMES={"PayPal Pay in 4","Afterpay","Zip","Klarna","Humm"};
+    /** A new pay-later plan (Budget.addPayLater): its name, picked from the usual ones or typed; [made] gets the name once saved. */
+    void newPlan(java.util.function.Consumer<String> made){LinearLayout f=form();
+        f.addView(label("A plan is like a small credit card: what you buy on it is spent from its category straight away, and the payments come out of your account over the next weeks.",13,main.muted,false));
+        EditText name=field(f,"Name",false);name.setText(PLAN_NAMES[0]);Chips picks=chips(f,true);
+        java.util.function.IntConsumer[] pick={null};pick[0]=n->{name.setText(PLAN_NAMES[n]);name.setSelection(name.length());picks.show(Arrays.asList(PLAN_NAMES),n,pick[0]);};
+        picks.show(Arrays.asList(PLAN_NAMES),0,pick[0]);
+        String[] saved={null};
+        dialog("New pay-later plan",f,()->{String n=required(name);
+            for(Budget.Account a:main.budget.accounts)if(a.name.equalsIgnoreCase(n))throw new IllegalArgumentException("An account already has that name.");
+            for(Budget.Category c:main.budget.categories)if(c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("A category already has that name. Choose another name for the plan.");
+            main.budget.addPayLater(n,LocalDate.now().toString());saved[0]=n;},()->{if(saved[0]!=null)made.accept(saved[0]);});}
+    /** After a refund on pay-later plan [planId]: asks whether to lower the payments still to come by [cents], the last ones first. */
+    private void lowerAfterRefund(String planId,long cents){Budget.Account plan=main.budget.account(planId);if(plan==null)return;
+        List<Budget.Scheduled> left=main.budget.instalmentsLeft(plan);if(left.isEmpty())return;long owed=0;for(Budget.Scheduled s:left)owed-=s.amount;
+        long by=Math.min(cents,owed);
+        tracked(new AlertDialog.Builder(main).setTitle("Lower the payments left?")
+            .setMessage(plan.name+" has "+count(left.size(),"payment","payments")+" left ("+money(owed)+"). Lower them by the refund, "+money(by)+"? The last payments are lowered first, as pay-later plans usually do"+(by>=owed?": that's all of them.":"."))
+            .setNegativeButton("Not now",null).setPositiveButton("Lower them",(d,w)->{if(main.change(()->main.budget.lowerInstalments(main.accountById(planId),by)))toast("Payments lowered by "+money(by)+".");}));}
+    /** An upcoming transfer (a pay-later payment): its amount, date and reminders, or delete it. */
+    private void editInstalment(String id){Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){toast(e.getMessage());return;}
+        Budget.Account from=main.budget.account(s.account),to=main.budget.account(s.destination);LinearLayout f=form();
+        f.addView(label((from==null?"":"From "+from.name)+(to==null?"":" to "+to.name)+(s.memo.isEmpty()?"":"\n"+s.memo),14,main.ink,true));
+        EditText amount=field(f,"Amount ("+code()+")",true);amount.setText(decimal(-s.amount));signColours(amount,-1);
+        f.addView(label("Date",12,main.muted,true));EditText day=dateField(f,s.next,true);
+        ReminderEditor reminders=new ReminderEditor(main,s.reminders,()->(String)day.getTag());reminders.addTo(f);onText(day,reminders::show);
+        f.addView(button("Delete this payment",()->deleteScheduled(id)));
+        dialog("Edit payment",f,()->{Budget.Scheduled t=scheduledById(id);long cents=Budget.cents(amount.getText().toString());String d=(String)day.getTag(); // a future date (date() allows only up to today)
+            t.amount=-cents;t.next=d;t.day=LocalDate.parse(d).getDayOfMonth();t.reminders.clear();t.reminders.addAll(reminders.assignIds(main.budget));main.budget.validate(t);});}
     String repeatLabel(Budget.Scheduled s){int i=Arrays.asList(Budget.Scheduled.REPEATS).indexOf(s.repeat);return i<=0?"Once":REPEAT_LABELS[i];}
     private void delete(Budget.Entry e){Ui.danger(new AlertDialog.Builder(main).setTitle("Delete transaction?")
             .setMessage("Account and category balances will be recalculated.").setNegativeButton("Cancel",null)

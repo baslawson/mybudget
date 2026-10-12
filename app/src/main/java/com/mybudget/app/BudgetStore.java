@@ -16,7 +16,10 @@ public final class BudgetStore {
     // it on its next save, so it must refuse the data instead. Versions 2 to 6 read with none (every payee automatic).
     // Version 8 adds reminders ("reminders" on transactions and upcoming ones) and "nextReminderId": MyBudget 0.0.15 would drop
     // them on its next save, so it must refuse the data instead. Versions 2 to 7 read with none.
-    public static final int VERSION=8;
+    // Version 9 adds pay-later plans (an account's "payLater") and upcoming transfers (a scheduled transaction's "destination"):
+    // MyBudget 0.0.18 would drop them on its next save (an instalment would turn into money out of the budget), so it must
+    // refuse the data instead. Versions 2 to 8 read with none.
+    public static final int VERSION=9;
     private static final java.util.regex.Pattern PHOTO=java.util.regex.Pattern.compile("[0-9a-f-]{0,40}([.]jpg)?"); // a photo is a file name only: never a path
     // Written out directly (years of transactions made building every JSONObject first slow), exactly as JSONObject would
     // write it: the same keys in the same order, JSONObject's escaping, plain whole numbers, a null string left out.
@@ -26,12 +29,12 @@ public final class BudgetStore {
         for(int i=0;i<b.categories.size();i++){Budget.Category c=b.categories.get(i);open(o,i);put(o,"id",c.id);put(o,"name",c.name);put(o,"group",c.group);put(o,"target",c.target);put(o,"targetType",c.targetType);put(o,"due",c.due);put(o,"hidden",c.hidden);put(o,"snoozed",c.snoozed);put(o,"note",c.note);put(o,"dueDay",c.dueDay);put(o,"cardAccount",c.cardAccount);put(o,"weekday",c.weekday);put(o,"weeklyRefill",c.weeklyRefill);put(o,"dueDate",c.dueDate);put(o,"repeatMonths",c.repeatMonths);put(o,"pinned",c.pinned);
             o.append(",\"assigned\":{");boolean first=true;for(Map.Entry<String,Long> a:c.assigned.entrySet()){if(a.getValue()==null)continue;string(o.append(first?"":","),a.getKey()).append(':').append(a.getValue());first=false;}o.append("}}");}
         o.append("],\"accounts\":[");
-        for(int i=0;i<b.accounts.size();i++){Budget.Account a=b.accounts.get(i);open(o,i);put(o,"id",a.id);put(o,"name",a.name);put(o,"date",a.date);put(o,"opening",a.opening);put(o,"reconciled",a.reconciled);put(o,"closed",a.closed);put(o,"type",a.type);put(o,"liability",a.liability);put(o,"rate",a.rate);put(o,"payment",a.payment);put(o,"frequency",a.frequency);o.append('}');}
+        for(int i=0;i<b.accounts.size();i++){Budget.Account a=b.accounts.get(i);open(o,i);put(o,"id",a.id);put(o,"name",a.name);put(o,"date",a.date);put(o,"opening",a.opening);put(o,"reconciled",a.reconciled);put(o,"closed",a.closed);put(o,"type",a.type);put(o,"liability",a.liability);put(o,"rate",a.rate);put(o,"payment",a.payment);put(o,"frequency",a.frequency);put(o,"payLater",a.payLater);o.append('}');}
         o.append("],\"entries\":[");
         for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);put(o,"reconciled",e.reconciled);
             if(e.split())parts(o,e.splits);reminders(o,e.reminders);o.append('}');}
         o.append("],\"scheduled\":[");
-        for(int i=0;i<b.scheduled.size();i++){Budget.Scheduled s=b.scheduled.get(i);open(o,i);put(o,"id",s.id);put(o,"payee",s.payee);put(o,"category",s.category);put(o,"account",s.account);put(o,"next",s.next);put(o,"repeat",s.repeat);put(o,"day",s.day);put(o,"amount",s.amount);put(o,"memo",s.memo);put(o,"billKey",s.billKey);
+        for(int i=0;i<b.scheduled.size();i++){Budget.Scheduled s=b.scheduled.get(i);open(o,i);put(o,"id",s.id);put(o,"payee",s.payee);put(o,"category",s.category);put(o,"account",s.account);put(o,"next",s.next);put(o,"repeat",s.repeat);put(o,"day",s.day);put(o,"amount",s.amount);put(o,"memo",s.memo);put(o,"billKey",s.billKey);put(o,"destination",s.destination);
             if(s.split())parts(o,s.splits);reminders(o,s.reminders);o.append('}');}
         o.append("],\"billCategories\":{");for(Map.Entry<String,String> m:b.billCategories.entrySet())put(o,m.getKey(),m.getValue());
         o.append("},\"monthNotes\":{");for(Map.Entry<String,String> m:b.monthNotes.entrySet())put(o,m.getKey(),m.getValue());
@@ -66,7 +69,8 @@ public final class BudgetStore {
     // Backup version 3: storage version 6 (upcoming splits, the currency; MyBudget 0.0.7 refuses it as newer). Versions 1 and 2 still restore.
     // Backup version 4: storage version 7 (payee category suggestions; MyBudget 0.0.8 refuses it as newer). Versions 1 to 3 still restore.
     // Backup version 5: storage version 8 (reminders; MyBudget 0.0.15 refuses it as newer). Versions 1 to 4 still restore.
-    public static final int BACKUP_VERSION=5;
+    // Backup version 6: storage version 9 (pay-later plans, upcoming transfers; MyBudget 0.0.18 refuses it as newer). Versions 1 to 5 still restore.
+    public static final int BACKUP_VERSION=6;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
         return new JSONObject(encode(b)).put("app","MyBudget").put("backupVersion",BACKUP_VERSION).put("created",created.withNano(0).toString()).toString(2);
@@ -91,7 +95,8 @@ public final class BudgetStore {
             JSONObject assigned=j.getJSONObject("assigned");Iterator<String> keys=assigned.keys();while(keys.hasNext()){String key=keys.next();YearMonth.parse(key);c.assigned.put(key,assigned.getLong(key));}b.categories.add(c);}
         for(int i=0;i<accounts.length();i++){JSONObject j=accounts.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Account a=new Budget.Account(j.getString("name"),j.getString("date"),j.getLong("opening"));a.id=j.getString("id");a.reconciled=j.optString("reconciled","");a.closed=j.optBoolean("closed",false);a.type=j.optString("type","cash");if(!a.type.equals("cash")&&!a.type.equals("credit")&&!a.type.equals("tracking"))throw new JSONException("Unknown account type.");
             // Tracking accounts and loan terms (added later in version 4): missing reads as an asset with no terms. A MyBudget before them refuses "tracking".
-            a.liability=a.tracking()&&j.optBoolean("liability",false);a.rate=Math.max(0,Math.min(100_000,j.optLong("rate",0)));a.payment=Math.max(0,j.optLong("payment",0));a.frequency=j.optString("frequency","Monthly");if(!Arrays.asList(Budget.FREQUENCIES).contains(a.frequency))a.frequency="Monthly";b.accounts.add(a);}
+            a.liability=a.tracking()&&j.optBoolean("liability",false);a.rate=Math.max(0,Math.min(100_000,j.optLong("rate",0)));a.payment=Math.max(0,j.optLong("payment",0));a.frequency=j.optString("frequency","Monthly");if(!Arrays.asList(Budget.FREQUENCIES).contains(a.frequency))a.frequency="Monthly";
+            a.payLater=a.credit()&&j.optBoolean("payLater",false);b.accounts.add(a);} // a pay-later plan (version 9; missing: an ordinary card)
         for(Budget.Category c:b.categories)if(c.payment()&&(b.account(c.cardAccount)==null||!b.account(c.cardAccount).credit()))throw new JSONException("Payment category without its card.");
         // Transactions look their accounts and categories up by id (the first with each id, as Budget.account and category do).
         Set<Long> reminderIds=new HashSet<>();Map<String,Budget.Account> accountIds=new HashMap<>();for(Budget.Account a:b.accounts)accountIds.putIfAbsent(a.id,a);Map<String,Budget.Category> categoryIds=new HashMap<>();for(Budget.Category c:b.categories)categoryIds.putIfAbsent(c.id,c);
@@ -114,10 +119,12 @@ public final class BudgetStore {
         // Currency (version 6; missing: AUD). An unknown code is damaged data, refused rather than shown as some other money.
         if(version>=6){String code=root.optString("currency",Budget.DEFAULT_CURRENCY);if(!Budget.storableCurrency(code))throw new JSONException("Unknown currency.");b.currency=code;}
         JSONArray scheduled=root.optJSONArray("scheduled");
-        if(scheduled!=null)for(int i=0;i<scheduled.length();i++){JSONObject j=scheduled.getJSONObject(i);LocalDate.parse(j.getString("next"));Budget.Scheduled s=new Budget.Scheduled(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("next"),j.getLong("amount"),j.getString("repeat"));s.id=j.getString("id");s.day=Math.max(0,Math.min(31,j.optInt("day",s.day)));s.memo=j.optString("memo","");s.billKey=j.optString("billKey","");
+        if(scheduled!=null)for(int i=0;i<scheduled.length();i++){JSONObject j=scheduled.getJSONObject(i);LocalDate.parse(j.getString("next"));Budget.Scheduled s=new Budget.Scheduled(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("next"),j.getLong("amount"),j.getString("repeat"));s.id=j.getString("id");s.day=Math.max(0,Math.min(31,j.optInt("day",s.day)));s.memo=j.optString("memo","");s.billKey=j.optString("billKey","");s.destination=j.optString("destination","");
             // Upcoming splits (version 6): parts in known categories (or To budget), adding up to the amount, only with category "split".
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split part=new Budget.Split(p.getString("category"),p.getLong("amount"));part.memo=p.optString("memo","");if(!part.category.isEmpty()&&b.category(part.category)==null)throw new JSONException("Invalid split.");s.splits.add(part);}
             long parted=0;for(Budget.Split p:s.splits)parted+=p.amount;if(s.category.equals(Budget.SPLIT)!=s.split()||(s.split()&&parted!=s.amount))throw new JSONException("Invalid split.");
+            // An upcoming transfer (version 9): into another known account, money out of this one, never split.
+            if(s.transfer()&&(b.account(s.destination)==null||s.destination.equals(s.account)||s.amount>=0||s.split()))throw new JSONException("Invalid scheduled transaction.");
             if(b.account(s.account)==null||(!s.category.isEmpty()&&!s.split()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");readReminders(j,s.reminders,reminderIds);b.scheduled.add(s);}
         long next=1;for(long id:reminderIds)next=Math.max(next,id+1);b.nextReminderId=Math.max(next,root.optLong("nextReminderId",1)); // reminders: version 8
         return b;

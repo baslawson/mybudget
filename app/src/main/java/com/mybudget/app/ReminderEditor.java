@@ -29,7 +29,7 @@ final class ReminderEditor extends Ui {
         ReminderSound def=ReminderSound.setting(main);
         if(!ReminderNotifications.notificationsEnabled(main)){LinearLayout row=new LinearLayout(main);row.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(label("Notifications are off, so reminders won't show.",13,main.red,false),new LinearLayout.LayoutParams(0,-2,1));
-            row.addView(button("Turn on",()->main.askNotifications(this::show)));box.addView(row);}
+            row.addView(button("Turn on",()->main.askNotifications(this::show)),new LinearLayout.LayoutParams(-2,-2));box.addView(row);} // its own width: Ui.button is full width, which left the message none
         box.addView(label("Reminders count from "+Reminders.time(Reminders.START,main)+" on the transaction's date.",12,main.muted,false));
         String hint=alarmHint(ReminderNotifications.exactAlarmsAllowed(main),!list.isEmpty(),ringsAny(def));if(hint!=null)box.addView(label(hint,12,main.muted,false));
         for(Budget.Reminder r:list)box.addView(row(r,day,def));

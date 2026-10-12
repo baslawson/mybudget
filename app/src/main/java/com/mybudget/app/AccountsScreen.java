@@ -31,12 +31,19 @@ final class AccountsScreen extends Ui {
         main.content.addView(label("Checking, savings and cash accounts are pooled for your plan. Transfers change where money lives, not its purpose. Spending on a credit card moves the category's money to the card's payment category, ready to pay it. Moving money from your budget to a tracking account (an extra loan payment, an investment) is spending from a category; money from one into your budget is income to To budget.",14,main.muted,false));
     }
     private void accountCard(Budget.Account a){LinearLayout c=card();
-        head(c,a.credit()?"\uD83D\uDCB3":"\uD83C\uDFE6",heading(a.name+(a.credit()?" · credit card":""),20,main.ink));
+        head(c,a.credit()?"\uD83D\uDCB3":"\uD83C\uDFE6",heading(a.name+(a.payLater?" · pay later":a.credit()?" · credit card":""),20,main.ink));
         if(a.credit()){long owed=-main.budget.balance(a,false);Budget.Category p=main.budget.paymentCategory(a);
             long ready=p==null?0:Math.max(0,main.budget.available(p,main.month));
             TextView debt=label("",28,main.ink,true);debt.setText(owed>0?tint("Owed "+money(owed),money(owed),outColour(owed)):owed<0?tint("In credit "+money(-owed),money(-owed),main.green):"Paid off");c.addView(debt);
             c.addView(label("Set aside for the payment: "+money(ready)+(owed>ready&&owed>0?" ("+money(owed-ready)+" not covered yet)":""),13,owed>ready&&owed>0?main.amber:main.green,true));
-            pair(c,button("Make a payment",()->main.forms.payCard(a.id)),button("Add interest or fee",()->main.forms.cardCharge(a.id,null)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
+            if(a.payLater){List<Budget.Scheduled> left=main.budget.instalmentsLeft(a); // its payments still to come
+                if(!left.isEmpty()){Budget.Scheduled next=left.get(0);boolean due=!LocalDate.parse(next.next).isAfter(LocalDate.now());
+                    TextView line=label("",14,main.ink,true);String size=money(-next.amount);
+                    line.setText(tint((due?"Payment due ":"Next payment ")+size+" on "+pretty(next.next)+" · "+count(left.size(),"payment","payments")+" left",size,main.red));c.addView(line);}
+                else if(owed<=0)c.addView(label("All paid. Close it if you're done with it, or keep it for next time.",13,main.green,true));
+                Button pay=button("Make a payment",()->main.forms.payCard(a.id)),fee=button("Add a late fee",()->main.forms.cardCharge(a.id,null));
+                if(left.isEmpty()&&owed==0)pair(c,pay,button("Close it",()->main.change(()->main.budget.close(main.accountById(a.id)))));else pair(c,pay,fee);}
+            else pair(c,button("Make a payment",()->main.forms.payCard(a.id)),button("Add interest or fee",()->main.forms.cardCharge(a.id,null)));}else{long b=main.budget.balance(a,false);c.addView(label(money(b),28,amountColour(b),true));}
         long cleared=main.budget.balance(a,true),uncleared=main.budget.balance(a,false)-cleared;TextView split=label("",13,main.muted,false);
         split.setText(tint2("Cleared "+money(cleared)+" / Uncleared "+money(uncleared),money(cleared),amountColour(cleared),money(uncleared),amountColour(uncleared)));c.addView(split);
         if(!a.reconciled.isEmpty())c.addView(label("Last reconciled "+pretty(a.reconciled),12,main.green,false));
@@ -53,22 +60,22 @@ final class AccountsScreen extends Ui {
         pair(c,button("View transactions",()->{main.clearFilters();main.accountFilter=id;main.tab="Spending";main.render();}),button("Edit account",()->editAccount(id)));}
     void addAccount(){
         LinearLayout f=form();
-        Spinner type=spinner(f,"Type",new String[]{"Cash, checking or savings","Credit card","Tracking: an asset (savings elsewhere, investments, house, super)","Tracking: a loan or debt (mortgage, car loan)"},0);
+        Spinner type=spinner(f,"Type",new String[]{"Cash, checking or savings","Credit card","Tracking: an asset (savings elsewhere, investments, house, super)","Tracking: a loan or debt (mortgage, car loan)","Pay later (Pay in 4, Afterpay, Zip…)"},0);
         EditText name=field(f,"Account name",false),opening=field(f,"Current cash balance ("+code()+")",true);
         f.addView(label("Opening date",12,main.muted,true));EditText day=dateField(f,LocalDate.now().toString());
         TextView help=label("",13,main.muted,false);f.addView(help);
-        Runnable adapt=()->{int t=type.getSelectedItemPosition();boolean card=t==1;
-            opening.setHint(card?"Amount owed now ("+code()+", 0 if paid off)":t==2?"What it's worth now ("+code()+")":t==3?"Amount owed now ("+code()+")":"Current cash balance ("+code()+")");
-            help.setText(card?"What you owe now is old debt: it gets a payment category with nothing set aside, so assign money to that category to pay it down. New spending on the card moves the category's money there for you.":t>=2?"Off budget: it doesn't change To budget or your categories, only Net worth. Update its balance now and then."+(t==3?" Add the interest rate and payment in Edit account for the payoff planner.":""):"Enter transactions from the opening date onward.");};
+        Runnable adapt=()->{int t=type.getSelectedItemPosition();boolean card=t==1,later=t==4; // later: a pay-later plan (Budget.addPayLater)
+            opening.setHint(later?"Amount owed now ("+code()+", 0 for a new plan)":card?"Amount owed now ("+code()+", 0 if paid off)":t==2?"What it's worth now ("+code()+")":t==3?"Amount owed now ("+code()+")":"Current cash balance ("+code()+")");
+            help.setText(later?"For Pay in 4, Afterpay, Zip and the like. In Add transaction, tick Pay later and choose this plan: the purchase is spent from its category now, and its payments are set up as upcoming transfers from your account.":card?"What you owe now is old debt: it gets a payment category with nothing set aside, so assign money to that category to pay it down. New spending on the card moves the category's money there for you.":t>=2&&t<=3?"Off budget: it doesn't change To budget or your categories, only Net worth. Update its balance now and then."+(t==3?" Add the interest rate and payment in Edit account for the payoff planner.":""):"Enter transactions from the opening date onward.");};
         adapt.run();onPick(type,adapt);
         dialog("Add account",f,()->{String n=required(name);
             for(Budget.Account a:main.budget.accounts)if(a.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That account already exists.");
             long balance=Budget.parse(opening.getText().toString().trim().isEmpty()?"0":opening.getText().toString());
             int t=type.getSelectedItemPosition();
-            if(balance<0)throw new IllegalArgumentException(t==1||t==3?"Enter what you owe as a positive amount.":t==2?"Enter what it's worth as a positive amount.":"Use a nonnegative cash opening balance.");
-            if(t>=2){main.budget.addTracking(n,date(day),balance,t==3);return;}
-            if(t==1){for(Budget.Category c:main.budget.categories)if(c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("A category already has that name. Choose another name for the card.");
-                main.budget.addCard(n,date(day),balance);}
+            if(balance<0)throw new IllegalArgumentException(t==1||t==3||t==4?"Enter what you owe as a positive amount.":t==2?"Enter what it's worth as a positive amount.":"Use a nonnegative cash opening balance.");
+            if(t==2||t==3){main.budget.addTracking(n,date(day),balance,t==3);return;}
+            if(t==1||t==4){for(Budget.Category c:main.budget.categories)if(c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("A category already has that name. Choose another name for the "+(t==4?"plan":"card")+".");
+                Budget.Account card=main.budget.addCard(n,date(day),balance);card.payLater=t==4;}
             else main.budget.accounts.add(new Budget.Account(n,date(day),balance));});
     }
     // A difference can be settled with an adjustment into To budget after the user confirms.

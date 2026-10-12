@@ -38,7 +38,7 @@ final class HomeScreen extends Ui {
         LocalDate today=LocalDate.now();List<Budget.Scheduled> soon=main.budget.dueWithin(today,7);
         for(Budget.Scheduled s:soon.subList(0,Math.min(5,soon.size()))){alerts++;LocalDate d=LocalDate.parse(s.next);
             boolean planner=main.budget.fromPlanner.contains(s);String id=s.id;
-            alert("\uD83D\uDCC5",s.payee+" · "+(planner&&s.amount==0?"no amount yet":money(s.amount)),d.isBefore(today)?main.amber:main.ink,(d.isBefore(today)?"Overdue since "+pretty(s.next):d.equals(today)?"Due today":"Due "+pretty(s.next))+(planner?" · a bill in Planner":" · tap to enter, skip or edit"),planner?()->{main.clearFilters();
+            alert("\uD83D\uDCC5",(s.transfer()&&!s.memo.isEmpty()?s.memo:s.payee)+" · "+(planner&&s.amount==0?"no amount yet":money(s.amount)),d.isBefore(today)?main.amber:main.ink,(d.isBefore(today)?"Overdue since "+pretty(s.next):d.equals(today)?"Due today":"Due "+pretty(s.next))+(planner?" · a bill in Planner":" · tap to enter, skip or edit"),planner?()->{main.clearFilters();
                 main.tab="Spending";main.render();}:()->main.forms.dueActions(id));}
         if(soon.size()>5)main.content.addView(button("All "+soon.size()+" due this week in Transactions",()->{main.clearFilters();
             main.tab="Spending";main.render();}));
