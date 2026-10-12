@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.19
+## Download 0.0.20
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.19/MyBudget-0.0.19.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.19)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.20/MyBudget-0.0.20.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.20)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.19`, version code `22`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.20`, version code `23`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -24,6 +24,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.20**: an account's opening balance (or what a card or plan owed when added) and its opening date can be corrected in Edit account until the account is first reconciled, with what changes shown before saving and Undo after.
 - **0.0.19**: **pay later** (PayPal Pay in 4, Afterpay, Zip and the like): buy on a plan from Add transaction and the purchase comes out of its category once, while its payments are set up as upcoming transfers from your account (with a reminder the day before, if you like); Accounts shows the next payment and how many are left; a refund on a plan offers to lower the payments left. Also: reminders show again when notifications are off. Budgets saved by 0.0.19 can't be opened by 0.0.18 or earlier.
 - **0.0.18**: the round **+** shows as soon as MyBudget opens (in 0.0.17 it could stay hidden until you changed screens).
 - **0.0.17**: the round **+** for Add transaction is on every main screen and can be dragged anywhere (it settles on the nearer side; hold it to move it to the other side or back to the corner); MyBudget opens on the screen you were last on; and Add transaction can make a new category (**+ New category**) and use it straight away.
@@ -134,7 +135,7 @@ With **Hide amounts** on, the new screens hide money too; shares and percentages
 
 **Upcoming transactions.** A new transaction with a future date, or with a repeat (weekly, every 2 weeks, monthly, every 3 months, yearly), becomes upcoming. It isn't money yet: Transactions lists it under Upcoming, Home says when some are due, and on its day you enter it, skip it or edit it; nothing is entered without your tap. A repeating one dated today or earlier is entered at once and its repeats continue; monthly repeats keep their day (31st, then the 28th in February, then the 31st again). Budget shows each category's upcoming bills for the month, and Fund targets also covers them (upcoming bills less what the category has, or the target's need if larger), earliest date first. Editing a transaction keeps Planner's payment id and bill.
 
-Accounts can be renamed (opening balance and date stay fixed; transfers named "Transfer to <account>" follow the new name), closed at a $0 balance (they move to Closed accounts, keep their transactions and can be reopened) or deleted when they have no transactions. Reconcile offers a cleared "Reconciliation adjustment" into To budget when your bank's cleared balance differs. Reconciling locks the account's cleared transactions (transfers in and out too; they show 🔒 Reconciled): opening one later warns that changing its amount, date or account, or deleting it, changes the balance you checked, and asks first. Unticking Cleared unlocks it. Storage version 7 keeps the lock (`reconciled` on transactions); older data reads with none locked. Targets support monthly refill, a fresh monthly contribution, a savings balance with an optional due month, a weekly amount, saving for spending by a date, and a monthly debt payment. Fund Targets assigns existing money in category order, up to the available amount.
+Accounts can be renamed (transfers named "Transfer to <account>" follow the new name), have their opening balance and date corrected until they are first reconciled (Edit account shows what changes in To budget, or what a card owes, and offers Undo; after a reconcile they stay fixed and Reconcile corrects the balance), closed at a $0 balance (they move to Closed accounts, keep their transactions and can be reopened) or deleted when they have no transactions. Reconcile offers a cleared "Reconciliation adjustment" into To budget when your bank's cleared balance differs. Reconciling locks the account's cleared transactions (transfers in and out too; they show 🔒 Reconciled): opening one later warns that changing its amount, date or account, or deleting it, changes the balance you checked, and asks first. Unticking Cleared unlocks it. Storage version 7 keeps the lock (`reconciled` on transactions); older data reads with none locked. Targets support monthly refill, a fresh monthly contribution, a savings balance with an optional due month, a weekly amount, saving for spending by a date, and a monthly debt payment. Fund Targets assigns existing money in category order, up to the available amount.
 
 Budget rows emphasize Available, with Assigned and Activity as secondary details. Targets show their behavior, funding progress and the amount left to fund this month; the target editor explains each type with an example. Bottom navigation includes icons. Transaction forms adapt to Expense, Income and Category refund; income hides the category, and notes are optional.
 
