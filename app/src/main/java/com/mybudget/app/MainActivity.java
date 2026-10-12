@@ -62,7 +62,8 @@ public class MainActivity extends Activity {
             trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;reportYear=state.getInt("reportYear",0);
             String shot=state.getString("cameraFile",null);if(shot!=null)cameraFile=new File(PhotoProvider.dir(this),shot);} // so it's still deleted when the camera returns
         else{File[] left=PhotoProvider.dir(this).listFiles();if(left!=null)for(File f:left)f.delete();} // a fresh start: no capture is in progress
-        load();if(storageReadable){render();cleanupPhotos();if(state==null)openFrom(getIntent());} // a recreated screen has opened it already
+        load();if(state==null&&storageReadable&&!budget.accounts.isEmpty())tab=lastTab(); // opens on the screen it was last on
+        if(storageReadable){render();cleanupPhotos();if(state==null)openFrom(getIntent());} // a recreated screen has opened it already
     }
     // The saved data as this screen last read or wrote it. AddExpenseActivity may save an expense from another app
     // meanwhile: when the saved data differs, it's read in (open forms close, as they show the old budget), so the next save keeps it.
@@ -130,6 +131,12 @@ public class MainActivity extends Activity {
         tab=!ready?"Home":what.equals("budget")?"Plan":what.equals("transactions")?"Spending":"Home";if(tab.equals("Spending"))clearFilters();
         render();if(ready&&what.equals(OPEN_ADD))forms.transaction(null);}
     private void closeSettings(){tab=previousTab;render();}
+    // The main screen last shown, kept on this device (prefs "appearance": last_tab), so MyBudget opens there next time.
+    // Settings isn't kept: left from there, it opens on the screen Settings was opened from.
+    private static final List<String> TABS=Arrays.asList("Home","Plan","Spending","Accounts","Reflect");
+    private String keptTab;
+    private String lastTab(){String t=getSharedPreferences("appearance",0).getString("last_tab","Home");keptTab=t;return TABS.contains(t)?t:"Home";}
+    private void rememberTab(){if(tab.equals(keptTab)||!TABS.contains(tab))return;keptTab=tab;getSharedPreferences("appearance",0).edit().putString("last_tab",tab).apply();}
     @Override public void onBackPressed(){if(tab.equals("Settings"))closeSettings();else super.onBackPressed();}
     // Backup, restore and export go through Android's file picker, so MyBudget needs no storage permission.
     static final int BACKUP=1,RESTORE=2,EXPORT=3,IMPORT=4,AUTO=5,PHOTO=6,CAMERA=7,NOTIFY=8;
@@ -270,6 +277,7 @@ public class MainActivity extends Activity {
         if(getResources().getConfiguration().fontScale>=1.3f)content.addView(top);else root.addView(top); // large text: the header scrolls away with the screen, leaving room for it
         body=new FrameLayout(this);body.addView(scroll,new FrameLayout.LayoutParams(-1,-1));root.addView(body,new LinearLayout.LayoutParams(-1,0,1)); // body: the screen, with room for a floating button over it
         switch(tab){case"Settings":settingsScreen.settings();break;case"Home":homeScreen.home();break;case"Plan":budgetScreen.plan();break;case"Spending":transactionsScreen.spending();break;case"Accounts":accountsScreen.accounts();break;default:reportsScreen.reflect();}
+        if(!tab.equals("Settings")){AddButton.add(this);rememberTab();} // Add transaction in reach on every main screen
         // A new tab fades up into place; another month slides in from the side it came from. A plain re-render (after a save) doesn't move.
         boolean newTab=!tab.equals(shownTab),newMonth=!newTab&&shownMonth!=null&&!month.equals(shownMonth);
         if(Ui.motion()&&shownTab!=null&&(newTab||newMonth)){scroll.setAlpha(0f);if(newTab)scroll.setTranslationY(ui.dp(14));

@@ -77,20 +77,8 @@ final class TransactionsScreen extends Ui {
             for(int k=0;k<col.getChildCount();k++)col.getChildAt(k).setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             c.addView(col,new LinearLayout.LayoutParams(0,-2,1));}
         c.setForeground(null);} // not tappable
-    /** Add transaction: a round + over the bottom right of the screen, always in reach (the list leaves room under its last row). */
-    private void addButton(){Button add=button("+",()->main.forms.transaction(null));add.setTextSize(30);add.setTextColor(Color.WHITE);add.setPadding(0,0,0,dp(3));
-        GradientDrawable round=new GradientDrawable();round.setShape(GradientDrawable.OVAL);round.setColor(main.primary);add.setBackground(round);
-        GradientDrawable mask=new GradientDrawable();mask.setShape(GradientDrawable.OVAL);mask.setColor(Color.WHITE);
-        add.setForeground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(tint(Color.WHITE,70)),null,mask));
-        add.setElevation(dp(6));add.setContentDescription("Add transaction");
-        // Hunt 23 M5: TalkBack reaches it before the list (it is drawn over it, so it would come last).
-        add.setId(View.generateViewId());main.body.getChildAt(0).setAccessibilityTraversalAfter(add.getId());
-        android.widget.FrameLayout.LayoutParams p=new android.widget.FrameLayout.LayoutParams(dp(64),dp(64),Gravity.BOTTOM|Gravity.END);p.setMargins(0,0,dp(4),dp(12));
-        main.body.addView(add,p);main.content.setPadding(0,0,0,dp(88));
-        if(motion()&&main.shownTab!=null&&!main.shownTab.equals("Spending")){add.setScaleX(0f);add.setScaleY(0f); // pops in with the screen
-            add.animate().scaleX(1f).scaleY(1f).setStartDelay(120).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(2f)).start();}}
     void spending(){
-        monthSummary();addButton();
+        monthSummary(); // the round + is on every screen (AddButton)
         int review=main.budget.toReview().size();if(review>0){LinearLayout c=card();
             c.addView(label(count(review,"imported transaction","imported transactions")+" to review",17,main.amber,true));
             c.addView(label("Check each one's payee and category, then approve it.",13,main.muted,false));

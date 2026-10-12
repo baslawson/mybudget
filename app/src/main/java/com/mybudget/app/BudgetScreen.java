@@ -391,8 +391,14 @@ final class BudgetScreen extends Ui {
     private void editCategory(Budget.Category existing){editCategory(existing,"Everyday",null);}
     /** Whether any category (hidden ones too) is in [group]. */
     private boolean hasGroup(String group){for(Budget.Category c:main.budget.categories)if(c.group.equals(group))return true;return false;}
-    /** [newGroup]: the group a new category starts in. [back]: given the category's group when the person leaves the form (saved or not). */
-    private void editCategory(Budget.Category existing,String newGroup,java.util.function.Consumer<String> back){
+    private void editCategory(Budget.Category existing,String newGroup,java.util.function.Consumer<String> back){editCategory(existing,newGroup,back,null);}
+    /** New category from the Add transaction form: [made] gets it once saved (not on Cancel or Back). */
+    void newCategory(java.util.function.Consumer<Budget.Category> made){editCategory(null,"Everyday",null,made);}
+    /**
+     * [newGroup]: the group a new category starts in. [back]: given the category's group when the person leaves the form (saved or not).
+     * [made]: given the new category when it was saved (looked up by id: a save that failed put the old data back, without it).
+     */
+    private void editCategory(Budget.Category existing,String newGroup,java.util.function.Consumer<String> back,java.util.function.Consumer<Budget.Category> made){
         LinearLayout f=form();EditText name=field(f,"Category name",false);
         AutoCompleteTextView group=suggestField(f,"Group (Bills, Everyday, Savings...)",()->main.budget.groups());
         String[] types={"Refill each month","Set aside each month","Save toward a balance","Weekly amount","Save for spending by a date","Monthly debt payment"};
@@ -424,7 +430,7 @@ final class BudgetScreen extends Ui {
         type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,View v,int position,long id){describe.run();}public void onNothingSelected(AdapterView<?> p){}});
         // Groups already in the plan are suggested; a group typed in other capitals is saved in its existing spelling ("bills" -> "Bills").
         // The target amount takes quick maths; starting with + adds to the current target.
-        String[] savedGroup={existing==null?newGroup:existing.group};
+        String[] savedGroup={existing==null?newGroup:existing.group},madeId={null};
         dialog(existing==null?"New category":"Edit category & target",f,()->{
             String n=required(name),g=main.budget.existingGroup(required(group),existing==null?null:main.budget.category(existing.id));
             for(Budget.Category c:main.budget.categories)if((existing==null||!c.id.equals(existing.id))&&c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("That category already exists.");
@@ -441,7 +447,8 @@ final class BudgetScreen extends Ui {
             c.weekday=weekday.getSelectedItemPosition()+1;c.weeklyRefill=weeklyMode.getSelectedItemPosition()==0;
             c.dueDate=t.equals("ByDate")?LocalDate.parse((String)dueDate.getTag()).toString():"";
             c.repeatMonths=t.equals("ByDate")?REPEAT_MONTHS[repeat.getSelectedItemPosition()]:0;
-            c.note=note.getText().toString().trim();if(existing==null)main.budget.categories.add(c);savedGroup[0]=g;},
-            back==null?null:()->back.accept(savedGroup[0]));
+            c.note=note.getText().toString().trim();if(existing==null){main.budget.categories.add(c);madeId[0]=c.id;}savedGroup[0]=g;},
+            back==null&&made==null?null:()->{if(back!=null)back.accept(savedGroup[0]);
+                Budget.Category c=madeId[0]==null?null:main.budget.category(madeId[0]);if(made!=null&&c!=null)made.accept(c);});
     }
 }

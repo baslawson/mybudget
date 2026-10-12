@@ -18,7 +18,7 @@ import java.util.*;
  */
 final class MoveMenu {
     static final int TOP=0,UP=1,DOWN=2,BOTTOM=3,RESET=4,EDIT=5,MONEY=6,SWAP=7,LIST=8,PIN=9,SNOOZE=10,HIDE=11,SHOW=12,DELETE=13,
-        COVER=14,ENTER=15,SKIP=16,CAMERA=17,GALLERY=18,MERGE=19,TAG=20,CHECKED=21,GEAR=22,SUN=23,MOON=24,AUTO=25,NONE=-1;
+        COVER=14,ENTER=15,SKIP=16,CAMERA=17,GALLERY=18,MERGE=19,TAG=20,CHECKED=21,GEAR=22,SUN=23,MOON=24,AUTO=25,LEFT=26,RIGHT=27,NONE=-1;
     /** One choice: its icon, words and action; [quiet] ones come last, under a line, in the muted colour; [danger] ones in red. */
     static final class Choice {
         final int icon;final String text;final boolean quiet,danger;final Runnable action;
@@ -190,6 +190,8 @@ final class MoveMenu {
                 case MOON:{Path disc=new Path();disc.addCircle(x,y,7*u,Path.Direction.CW);Path bite=new Path();bite.addCircle(x+4.5f*u,y-3.5f*u,6*u,Path.Direction.CW);
                     disc.op(bite,Path.Op.DIFFERENCE);c.drawPath(disc,solid);}break;
                 case AUTO:c.drawCircle(x,y,7*u,pen);p.addArc(new RectF(x-7*u,y-7*u,x+7*u,y+7*u),90,180);p.close();c.drawPath(p,solid);break; // half light, half dark
+                case LEFT:case RIGHT:{float dir=kind==LEFT?-1:1,tip=x+dir*5*u;c.drawLine(x-dir*7*u,y,tip,y,pen); // an arrow to the side, up to a bar
+                    p.moveTo(tip-dir*5*u,y-5*u);p.lineTo(tip,y);p.lineTo(tip-dir*5*u,y+5*u);c.drawPath(p,pen);c.drawLine(x+dir*8*u,y-7*u,x+dir*8*u,y+7*u,pen);}break;
                 default:break;}}
     }
 }

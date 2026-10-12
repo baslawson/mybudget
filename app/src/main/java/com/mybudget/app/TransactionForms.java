@@ -83,10 +83,15 @@ final class TransactionForms extends Ui {
         Runnable[] showPreview={()->{}},showCategories={null};
         showCategories[0]=()->{shown.clear();shown.addAll(top);
             if(cat[0]>=0&&!top.contains(categories.get(cat[0]))){if(shown.size()<CATEGORY_CHIPS)shown.add(categories.get(cat[0]));else shown.set(CATEGORY_CHIPS-1,categories.get(cat[0]));}
-            List<String> names=new ArrayList<>();for(Budget.Category c:shown)names.add(c.name);names.add("All categories…");
+            List<String> names=new ArrayList<>();for(Budget.Category c:shown)names.add(c.name);names.add("All categories…");names.add("+ New category");
+            // A new category (Budget's form): once saved it joins the list and is the one chosen; what was typed here stays.
+            Runnable newCategory=()->main.budgetScreen.newCategory(c->{if(!categories.contains(c))categories.add(c);
+                cat[0]=categories.indexOf(c);categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();});
             categoryChips.show(names,cat[0]<0?-1:shown.indexOf(categories.get(cat[0])),n->{
                 if(n<shown.size()){cat[0]=categories.indexOf(shown.get(n));categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();return;}
+                if(n>shown.size()){newCategory.run();return;}
                 YearMonth m=YearMonth.now();List<MoveMenu.Choice> all=new ArrayList<>();
+                all.add(new MoveMenu.Choice(MoveMenu.COVER,"New category…",false,newCategory).sub("Name it, pick its group, a target if you like"));
                 for(int k=0;k<categories.size();k++){int i=k;Budget.Category c=categories.get(k);
                     all.add(categoryPick(c,main.budget.available(fresh(c),m),()->{cat[0]=i;categoryChosen[0]=true;showCategories[0].run();showPreview[0].run();}).selected(cat[0]==k));}
                 MoveMenu.sheet(this,"Choose a category","Available this month",Collections.singletonList(all),null);});};
