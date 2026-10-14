@@ -12,6 +12,78 @@ import java.util.Arrays;
 public class BudgetTest {
     // Bug hunt 27 (2026-10-14): M2 reversed amounts, M4 statement date and amount kept, M6 past-month moves, M8 dates with a time,
     // M9 today in any time zone.
+    // The features of 14 Oct: the balance forecast, repeating charges, money owed between people and the month in review.
+    // Bug hunt 28: repeating charges leave out Planner's bills (M1) and tracking accounts (M2) and keep the usual day (M3);
+    // money owed can be corrected and deleted (M6) and a large balance settled (M7).
+    static void hunt28(){
+        LocalDate today=LocalDate.of(2026,10,14);Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",0);b.accounts.add(bank);
+        Budget.Account car=b.addTracking("Car","2025-01-01",2000000,false);
+        for(String d:new String[]{"2026-07-05","2026-08-05","2026-09-05"}){Budget.Entry e=new Budget.Entry("Electricity","",bank.id,d,-15000);e.billKey="bill-1";e.externalId="pay-"+d;b.entries.add(e);
+            b.entries.add(new Budget.Entry("Balance update","",car.id,d,-20000));b.entries.add(new Budget.Entry("Water","",bank.id,d,-4000));}
+        b.fromPlanner.add(new Budget.Scheduled("Water","","","2026-10-05",-4000,"Never"));
+        equal(b.repeatingCharges(today,new java.util.HashSet<>()).size(),0,"M1/M2 Planner bills and tracking value updates aren't charges");
+        Budget c=new Budget();Budget.Account acc=new Budget.Account("Bank","2025-01-01",0);c.accounts.add(acc);
+        for(String d:new String[]{"2026-07-31","2026-08-31","2026-09-30"})c.entries.add(new Budget.Entry("Rent","",acc.id,d,-100000));
+        Budget.Repeat rent=c.repeatingCharges(today,new java.util.HashSet<>()).get(0);same(rent.next.toString(),"2026-10-31","M3 the usual day, not the latest payment's");
+        Budget.Scheduled s=c.makeUpcoming(rent);equal(s.day,31,"M3 kept on the 31st");same(s.after(LocalDate.of(2026,11,30)).toString(),"2026-12-31","M3 the 31st again after a shorter month");
+        Budget o=new Budget();Budget.Owed w=o.addOwed("Sam",3000,"2026-10-01","Dinner","");o.editOwed(w.id,-2500,"2026-10-02","Tickets");
+        same(o.owedBalances(false).toString(),"{Sam=-2500}","M6 corrected");same(o.owed.get(0).note,"Tickets","M6 note");
+        o.editOwed(w.id,0,"","");equal(o.owed.size(),0,"M6 deleted");same(o.owedBalances(true).toString(),"{}","M6 the name goes too");
+        o.addOwed("Kim",Budget.OWED_MAX,"2026-10-01","","");o.addOwed("Kim",Budget.OWED_MAX,"2026-10-02","","");
+        if(o.settle("Kim","2026-10-03")==null)throw new AssertionError("M7 settled");same(o.owedBalances(false).toString(),"{}","M7 nothing left");
+    }
+    static void features14Oct(){
+        LocalDate today=LocalDate.of(2026,10,14);
+        // Forecast: today's balance, a future-dated transaction, a monthly bill (one overdue counts today), a transfer on both
+        // sides; a card isn't a cash account; Planner's bills on their own.
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",50000),save=new Budget.Account("Savings","2026-01-01",0);
+        b.accounts.add(bank);b.accounts.add(save);b.addCard("Card","2026-01-01",0);Budget.Category rent=new Budget.Category("Rent");b.categories.add(rent);
+        b.entries.add(new Budget.Entry("Shop",rent.id,bank.id,"2026-10-10",-5000));
+        b.entries.add(new Budget.Entry("Later",rent.id,bank.id,"2026-10-20",-1000));
+        b.scheduled.add(new Budget.Scheduled("Landlord",rent.id,bank.id,"2026-10-01",-40000,"Monthly"));
+        Budget.Scheduled move=new Budget.Scheduled("To savings","",bank.id,"2026-10-16",-2000,"Never");move.destination=save.id;b.scheduled.add(move);
+        Budget.Scheduled bill=new Budget.Scheduled("Power","","","2026-10-18",-9000,"Never");b.fromPlanner.add(bill);
+        List<Budget.Forecast> f=b.forecast(today,30);equal(f.size(),2,"forecast: cash accounts only");
+        Budget.Forecast fb=f.get(0),fs=f.get(1);
+        equal(fb.daily[0],50000-5000-40000,"forecast: today has the overdue rent");equal(fb.daily[2],3000,"forecast: the transfer out");
+        equal(fs.daily[2],2000,"forecast: the transfer in");equal(fb.daily[6],2000,"forecast: the future-dated one");
+        equal(fb.daily[18],2000-40000,"forecast: next month's rent");equal(fb.belowZero,18,"forecast: first day below zero");equal(fb.lowDay,18,"forecast: lowest");
+        long[] p=b.plannerForecast(today,30);equal(p[3],0,"planner: not yet");equal(p[4],-9000,"planner: from its day on");equal(p[30],-9000,"planner: once");
+
+        // Repeating charges: monthly with a small price change, weekly, yearly (two is enough), and ones that aren't.
+        Budget r=new Budget();Budget.Account acc=new Budget.Account("Bank","2025-01-01",0);r.accounts.add(acc);
+        for(String d:new String[]{"2026-07-03","2026-08-03","2026-09-03","2026-10-03"})r.entries.add(new Budget.Entry("Netflix","",acc.id,d,d.startsWith("2026-10")?-2499:-2299));
+        for(String d:new String[]{"2026-09-23","2026-09-30","2026-10-07","2026-10-14"})r.entries.add(new Budget.Entry("Gym","",acc.id,d,-1500));
+        for(String d:new String[]{"2024-11-01","2025-11-01"})r.entries.add(new Budget.Entry("Domain","",acc.id,d,-2000));
+        for(String d:new String[]{"2026-08-01","2026-08-09","2026-10-01"})r.entries.add(new Budget.Entry("Cafe","",acc.id,d,-500)); // uneven
+        for(String d:new String[]{"2026-01-05","2026-02-05","2026-03-05"})r.entries.add(new Budget.Entry("Old","",acc.id,d,-999)); // stopped
+        for(String d:new String[]{"2026-08-10","2026-09-10","2026-10-10"})r.entries.add(new Budget.Entry("Shop","",acc.id,d,d.endsWith("09-10")?-9000:-3000)); // amounts vary
+        List<Budget.Repeat> found=r.repeatingCharges(today,new java.util.HashSet<>());StringBuilder names=new StringBuilder();
+        for(Budget.Repeat x:found)names.append(x.payee).append(' ').append(x.repeat).append(' ').append(x.next).append(';');
+        same(names.toString(),"Gym Weekly 2026-10-21;Netflix Monthly 2026-11-03;Domain Yearly 2026-11-01;","repeating charges");
+        Budget.Repeat netflix=found.get(1);equal(netflix.yearly(),2499*12,"a year of it");
+        equal(r.repeatingCharges(today,new java.util.HashSet<>(java.util.Collections.singletonList("gym"))).size(),2,"a dismissed one is left out");
+        Budget.Scheduled made=r.makeUpcoming(netflix);same(made.next,"2026-11-03","made upcoming");same(made.repeat,"Monthly","its repeat");
+        equal(r.repeatingCharges(today,new java.util.HashSet<>()).size(),2,"an upcoming one isn't offered again");equal(r.upcomingYearly(),2499*12,"upcoming in a year");
+
+        // Money owed: balances whatever the capitals, settling up, refusals.
+        Budget o=new Budget();o.addOwed("Sam",3000,"2026-10-01","Dinner","");o.addOwed("sam ",-1000,"2026-10-02","","");o.addOwed("Kim",-2500,"2026-10-03","Tickets","");
+        same(o.owedBalances(false).toString(),"{Sam=2000, Kim=-2500}","owed balances");same(o.owed.get(1).person,"Sam","one spelling");
+        Budget.Owed s=o.settle("SAM","2026-10-05");equal(s.amount,-2000,"settled what was left");same(o.owedBalances(false).toString(),"{Kim=-2500}","settled people left out");
+        equal(o.owedBalances(true).get("Sam"),0,"still listed with all");if(o.settle("Sam","2026-10-06")!=null)throw new AssertionError("nothing left to settle");
+        equal(o.owedBy("sam").size(),3,"Sam's records");
+        for(String[] bad:new String[][]{{"","100"},{"Sam","0"}}){boolean refused=false;try{o.addOwed(bad[0],Long.parseLong(bad[1]),"2026-10-07","","");}catch(IllegalArgumentException e){refused=true;}if(!refused)throw new AssertionError("refused: "+Arrays.toString(bad));}
+
+        // Month in review: spending against assigned, overspent, the biggest rise and fall.
+        Budget m=new Budget();Budget.Account cash=new Budget.Account("Cash","2026-08-01",100000);m.accounts.add(cash);
+        Budget.Category food=new Budget.Category("Food"),fun=new Budget.Category("Fun");m.categories.add(food);m.categories.add(fun);
+        food.assigned.put("2026-09",30000L);fun.assigned.put("2026-09",5000L);
+        m.entries.add(new Budget.Entry("Shop",food.id,cash.id,"2026-08-10",-10000));m.entries.add(new Budget.Entry("Bar",fun.id,cash.id,"2026-08-12",-9000));
+        m.entries.add(new Budget.Entry("Shop",food.id,cash.id,"2026-09-10",-25000));m.entries.add(new Budget.Entry("Bar",fun.id,cash.id,"2026-09-12",-6000));
+        Budget.Review rv=m.review(YearMonth.of(2026,9));equal(rv.spending,31000,"review spending");equal(rv.assigned,35000,"review assigned");
+        same(((Budget.Category)rv.spent.get(0)[0]).name,"Food","most spent first");equal(rv.overspent.size(),1,"Fun overspent");same(rv.overspent.get(0).name,"Fun","overspent");
+        same(((Budget.Category)rv.rises.get(0)[0]).name,"Food","biggest rise");same(((Budget.Category)rv.falls.get(0)[0]).name,"Fun","biggest fall");
+    }
     static void hunt27(){
         Budget b=new Budget();Budget.Account card=new Budget.Account("Card","2025-01-01",0);card.type="credit";b.accounts.add(card);
         List<List<String>> rows=new ArrayList<>();rows.add(Arrays.asList("05/01/2025","Cafe","12.50"));rows.add(Arrays.asList("06/01/2025","Payment","-100.00"));
@@ -73,7 +145,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){
@@ -1250,7 +1322,7 @@ public class BudgetTest {
         if(!"b,a,c,d".equals(CardOrder.save(java.util.Arrays.asList("b","a","c","d"),all)))throw new AssertionError("A moved order is kept");
         // Only b and d on screen (a and c hidden this time): moving d above b leaves a and c where they were.
         if(!CardOrder.moved(all,java.util.Arrays.asList("d","b")).equals(java.util.Arrays.asList("a","d","c","b")))throw new AssertionError("Hidden sections keep their places");
-        if(!CardOrder.REPORTS.equals(CardOrder.order("nonsense",CardOrder.REPORTS))||CardOrder.HOME.size()!=6)throw new AssertionError("Screens' default orders");
+        if(!CardOrder.REPORTS.equals(CardOrder.order("nonsense",CardOrder.REPORTS))||CardOrder.HOME.size()!=7)throw new AssertionError("Screens' default orders");
         // Move to top / bottom and one step, from the sheet: clamped at the ends, an unknown key changes nothing.
         java.util.List<String> four=java.util.Arrays.asList("a","b","c","d");
         if(!CardOrder.place(four,"c",0).equals(java.util.Arrays.asList("c","a","b","d")))throw new AssertionError("Move to top");

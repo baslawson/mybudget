@@ -209,7 +209,9 @@ final class TransactionForms extends Ui {
         if(sched!=null){cleared.setVisibility(View.GONE);payee.setText(sched.payee,false);amount.setText(decimal(Math.abs(sched.amount)));
             memo.setText(sched.memo,false);f.addView(button("Delete upcoming transaction",()->deleteScheduled(sched.id)));}
         if(old!=null){payee.setText(old.payee,false);amount.setText(decimal(Math.abs(old.amount)));memo.setText(old.memo,false);
-            cleared.setChecked(old.cleared);f.addView(button("Delete transaction",()->delete(old)));}
+            cleared.setChecked(old.cleared);f.addView(button("Delete transaction",()->delete(old)));
+            // Money owed between people (Budget.Owed): part of this paid for someone else.
+            if(old.amount<0&&!old.transfer())f.addView(button("Someone owes part of this",()->main.accountsScreen.owedFor(old)));}
         boolean used=old!=null&&(!old.memo.isEmpty()||!old.photo.isEmpty()||old.flag>0)||sched!=null&&(!sched.memo.isEmpty()||!sched.repeat.equals("Never"));
         boolean[] open={used};Runnable showMore=()->{more.setVisibility(open[0]?View.VISIBLE:View.GONE);
             moreButton.setText((open[0]?"▾ ":"▸ ")+"More: note, photo, flag, cleared"+(old==null?", repeat":""));

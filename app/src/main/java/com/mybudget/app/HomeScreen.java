@@ -13,7 +13,7 @@ final class HomeScreen extends Ui {
         // Home's parts, in the order they were held and dragged into (Movable; Default order puts them back).
         new Movable(this,"order_home","Home",CardOrder.HOME).build(key->{switch(key){
             case "ready":main.budgetScreen.readyCard();main.content.addView(primary("+ Add transaction",()->main.forms.transaction(null)));break;
-            case "start":start();break;case "attention":attention();break;case "progress":progress();break;case "ahead":monthAheadCard();break;default:pinned();}});
+            case "start":start();break;case "attention":attention();break;case "review":reviewCard();break;case "progress":progress();break;case "ahead":monthAheadCard();break;default:pinned();}});
     }
     private void start(){
         if(main.budget.accounts.isEmpty()){LinearLayout c=card();c.addView(heading("Start with the money you have",21,main.ink));
@@ -42,6 +42,16 @@ final class HomeScreen extends Ui {
                 main.tab="Spending";main.render();}:()->main.forms.dueActions(id));}
         if(soon.size()>5)main.content.addView(button("All "+soon.size()+" due this week in Transactions",()->{main.clearFilters();
             main.tab="Spending";main.render();}));
+        // The balance forecast (Reports): an account that would go below zero in the next 30 days.
+        String[] below=main.reportsScreen.belowZeroSoon();
+        // Bug hunt 28: below[2] "now" (already under zero), "soon" (one account) or "bills" (Planner's bills, which name no
+        // account, would take the accounts together under zero, M5); with Hide amounts, one wording for all (M8, as hunt 25 C4).
+        if(below!=null){alerts++;String title=main.hideAmounts?"Check the balance forecast":below[2].equals("now")?below[0]+" is below zero":
+                below[2].equals("bills")?"Your accounts may not cover Planner's bills by "+below[1]:below[0]+" may go below zero on "+below[1];
+            alert("⚠",title,main.hideAmounts?main.blue:main.red,"From what's upcoming and dated later. See the balance forecast in Reports.",()->{main.tab="Reflect";main.render();});}
+        // Payments that look like they repeat (Reports, Regular charges), not yet upcoming.
+        int repeats=main.reportsScreen.repeats().size();
+        if(repeats>0){alerts++;alert("🔁",count(repeats,"repeating charge","repeating charges")+" spotted",main.blue,"Make them upcoming to plan for them. See Regular charges in Reports.",()->{main.tab="Reflect";main.render();});}
         int review=main.budget.toReview().size();
         if(review>0){alerts++;
             alert("\uD83D\uDCE5",count(review,"imported transaction","imported transactions")+" to review",main.amber,"Check each one's payee and category, then approve it.",main.transactionsScreen::review);}
@@ -53,6 +63,20 @@ final class HomeScreen extends Ui {
         if(alerts==0){TextView t=(TextView)empty("✅","All set: nothing needs your attention.",null,null).getChildAt(1);
             t.setTextColor(main.green);t.setTypeface(null,android.graphics.Typeface.BOLD);}
     }
+    /** Last month in review (Reports.reviewDialog), on the 1st to the 10th of the month, until dismissed. */
+    private void reviewCard(){LocalDate today=LocalDate.now();YearMonth last=YearMonth.from(today).minusMonths(1);
+        // Bug hunt 28 M9: only for a month the budget was in use: a transaction dated in it or before.
+        String end=last.atEndOfMonth().toString();boolean used=false;for(Budget.Entry e:main.budget.entries)if(e.date.compareTo(end)<=0){used=true;break;}
+        if(today.getDayOfMonth()>10||last.toString().equals(main.prefs().getString("review_dismissed",""))||!used)return;
+        Budget.Review r=main.budget.review(last);String name=last.format(java.time.format.DateTimeFormatter.ofPattern("MMMM"));
+        LinearLayout card=card();LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        top.addView(badge("📊",main.blue));TextView h=heading(name+" in review",19,main.ink);h.setPadding(dp(12),0,0,0);
+        top.addView(h,new LinearLayout.LayoutParams(0,-2,1));card.addView(top);
+        card.addView(greyLine("Spent "+money(r.spending)+" of "+money(r.assigned)+" assigned",money(r.spending),outColour(r.spending),15));
+        if(!r.overspent.isEmpty())card.addView(label(count(r.overspent.size(),"category","categories")+" overspent",14,main.red,true));
+        pair(card,button("See the review",()->main.reportsScreen.reviewDialog(last)),
+            button("Dismiss",()->{main.prefs().edit().putString("review_dismissed",last.toString()).apply();main.render();}));
+        card.setOnClickListener(v->main.reportsScreen.reviewDialog(last));}
     private void progress(){
         long need=0;for(Budget.Category c:main.budget.categories)if(!c.hidden)need+=main.budget.fundNeed(c,main.month);
         LinearLayout progress=card();LinearLayout top=new LinearLayout(main);top.setGravity(android.view.Gravity.CENTER_VERTICAL);

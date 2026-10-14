@@ -1003,4 +1003,155 @@ public final class Budget {
         for(Split p:parts){if(p.amount==0)throw new IllegalArgumentException("Give every part of the split an amount.");if(!p.category.isEmpty()&&category(p.category)==null)throw new IllegalArgumentException("Choose a category for every part.");if(!p.category.isEmpty()&&category(p.category).payment())throw new IllegalArgumentException(PAY_BY_TRANSFER);sum+=p.amount;}
         if(sum!=amount)throw new IllegalArgumentException("The parts of the split must add up to the total.");
     }
+
+    // Bug hunt 28 M10: the forecast and repeating charges are worked out once between changes while month maths are cached
+    // (Home and Reports ask on every render); a change (changed(), a new Sums) starts again. Callers mustn't change what they get.
+    private Object extrasFor;private final Map<String,Object> extras=new HashMap<>();
+    @SuppressWarnings("unchecked") private <T> T extra(String key,java.util.function.Supplier<T> make){
+        if(!caching)return make.get();Sums now=sums();if(extrasFor!=now){extras.clear();extrasFor=now;}
+        Object have=extras.get(key);if(have==null){have=make.get();extras.put(key,have);}return (T)have;}
+
+    // ---- Balance forecast (user, 14 Oct) ----
+    /** One open cash account's balance day by day (forecast): [daily][0] is today's, [lowDay] its lowest, [belowZero] the first day under zero (-1: none). */
+    public static final class Forecast { public final Account account;public final long[] daily;public int lowDay;public int belowZero=-1;
+        Forecast(Account account,int days){this.account=account;daily=new long[days+1];}
+        public long low(){return daily[lowDay];} }
+    /**
+     * Each open cash, checking or savings account's balance from [today] for [days] days: today's balance (transactions dated up
+     * to today), then each later day's transactions dated then and upcoming ones due then (repeats included; one already due
+     * counts today), a transfer on both of its sides. Planner's bills name no account: they're in plannerForecast, and the
+     * total of the two is what the budget's cash would be.
+     */
+    public List<Forecast> forecast(LocalDate today,int days){return extra("forecast "+today+" "+days,()->workOutForecast(today,days));}
+    private List<Forecast> workOutForecast(LocalDate today,int days){
+        List<Forecast> out=new ArrayList<>();Map<String,Integer> index=new HashMap<>();
+        for(Account a:accounts)if(a.cash()&&!a.closed){Forecast f=new Forecast(a,days);f.daily[0]=balanceOn(a,today.toString());index.put(a.id,out.size());out.add(f);}
+        long[][] change=new long[out.size()][days+1];String first=today.toString(),last=today.plusDays(days).toString();
+        for(Entry e:entries){if(e.date.compareTo(first)<=0||e.date.compareTo(last)>0)continue;int day=(int)ChronoUnit.DAYS.between(today,LocalDate.parse(e.date));
+            Integer from=index.get(e.account),to=index.get(e.destination);if(from!=null)change[from][day]+=e.amount;if(to!=null)change[to][day]-=e.amount;}
+        for(Scheduled s:scheduled)for(int day:forecastDays(s,today,days)){Integer from=index.get(s.account),to=index.get(s.destination);
+            if(from!=null)change[from][day]+=s.amount;if(to!=null)change[to][day]-=s.amount;}
+        for(int i=0;i<out.size();i++){Forecast f=out.get(i);f.daily[0]+=change[i][0];
+            for(int d=1;d<=days;d++)f.daily[d]=f.daily[d-1]+change[i][d];
+            for(int d=0;d<=days;d++){if(f.daily[d]<f.daily[f.lowDay])f.lowDay=d;if(f.belowZero<0&&f.daily[d]<0)f.belowZero=d;}}
+        return out;
+    }
+    /** Planner's bills over the same days (forecast): what they'll have taken by each day, as a negative running total. */
+    public long[] plannerForecast(LocalDate today,int days){long[] out=new long[days+1];
+        for(Scheduled s:fromPlanner)for(int day:forecastDays(s,today,days))for(int d=day;d<=days;d++)out[d]+=s.amount;return out;}
+    // The days from [today] (0) to [days] an upcoming transaction falls on; one already due counts today.
+    private static List<Integer> forecastDays(Scheduled s,LocalDate today,int days){List<Integer> out=new ArrayList<>();
+        LocalDate d=LocalDate.parse(s.next),end=today.plusDays(days);
+        for(int i=0;d!=null&&!d.isAfter(end)&&i<5000;i++){out.add(d.isBefore(today)?0:(int)ChronoUnit.DAYS.between(today,d));d=s.after(d);}return out;}
+
+    // ---- Repeating charges (user, 14 Oct) ----
+    /** Money out to the same payee at a steady interval, not yet an upcoming transaction (repeatingCharges). */
+    public static final class Repeat { public final String payee,category,account,repeat;public final long amount;public final LocalDate last,next;public final int day;
+        Repeat(String payee,String category,String account,String repeat,long amount,LocalDate last,LocalDate next,int day){this.payee=payee;this.category=category;this.account=account;this.repeat=repeat;this.amount=amount;this.last=last;this.next=next;this.day=day;}
+        /** About what it costs in a year (a positive amount). */
+        public long yearly(){return -amount*timesAYear(repeat);} }
+    static int timesAYear(String repeat){switch(repeat){case"Weekly":return 52;case"Every 2 weeks":return 26;case"Monthly":return 12;case"Every 3 months":return 4;case"Yearly":return 1;default:return 0;}}
+    // The repeat a gap of [days] between payments is, or null.
+    private static String repeatFor(long days){return days>=6&&days<=8?"Weekly":days>=13&&days<=15?"Every 2 weeks":days>=26&&days<=35?"Monthly":days>=84&&days<=98?"Every 3 months":days>=350&&days<=380?"Yearly":null;}
+    /**
+     * Charges that look like subscriptions or regular bills: at least three payments to one payee (two for a yearly one), the
+     * same repeat between each (weekly to yearly), each amount within 10% of the latest, the latest recent enough that the
+     * next isn't long overdue. Payees with an upcoming transaction already, hidden payees and [dismissed] ones (lower case)
+     * are left out. Splits and transfers aren't charges. The most recently paid first.
+     */
+    public List<Repeat> repeatingCharges(LocalDate today,Set<String> dismissed){StringBuilder bills=new StringBuilder();for(Scheduled s:fromPlanner)bills.append(s.payee).append('|'); // re-read on every render, without changed()
+        return extra("repeats "+today+" "+new TreeSet<>(dismissed)+" "+bills,()->workOutRepeats(today,dismissed));}
+    private List<Repeat> workOutRepeats(LocalDate today,Set<String> dismissed){
+        Map<String,List<Entry>> byPayee=new HashMap<>();
+        for(Entry e:entries){if(e.amount>=0||e.transfer()||e.split()||!e.approved||e.payee==null||e.payee.trim().isEmpty()||e.date.compareTo(today.toString())>0)continue;
+            // Bug hunt 28 M1/M2: Planner's bills (Planner plans them already), reconcile adjustments and tracking accounts' value
+            // updates aren't charges.
+            if(!e.billKey.isEmpty()||!e.externalId.isEmpty()||e.payee.equals("Reconciliation adjustment"))continue;
+            Account a=account(e.account);if(a==null||a.tracking())continue;
+            byPayee.computeIfAbsent(e.payee.trim().toLowerCase(Locale.ROOT),k->new ArrayList<>()).add(e);}
+        Set<String> upcoming=new HashSet<>();for(Scheduled s:planned())if(s.payee!=null)upcoming.add(s.payee.trim().toLowerCase(Locale.ROOT));
+        List<Repeat> out=new ArrayList<>();
+        for(Map.Entry<String,List<Entry>> p:byPayee.entrySet()){String key=p.getKey();if(upcoming.contains(key)||dismissed.contains(key)||hiddenPayee(key))continue;
+            List<Entry> list=p.getValue();list.sort(Comparator.comparing(e->e.date));List<Entry> recent=list.subList(Math.max(0,list.size()-6),list.size());
+            if(recent.size()<2)continue;Entry latest=recent.get(recent.size()-1);String repeat=null;boolean steady=true;
+            for(int i=1;i<recent.size()&&steady;i++){String r=repeatFor(ChronoUnit.DAYS.between(LocalDate.parse(recent.get(i-1).date),LocalDate.parse(recent.get(i).date)));
+                if(r==null||(repeat!=null&&!repeat.equals(r)))steady=false;repeat=r;}
+            if(!steady||repeat==null||(recent.size()<3&&!repeat.equals("Yearly")))continue;
+            for(Entry e:recent)if(Math.abs(e.amount-latest.amount)*10>Math.abs(latest.amount))steady=false;
+            if(!steady)continue;
+            LocalDate last=LocalDate.parse(latest.date);Scheduled step=new Scheduled(latest.payee,latest.category,latest.account,latest.date,latest.amount,repeat);
+            // Bug hunt 28 M3: the day of the month it's usually paid (the later one on a tie), not the latest payment's: a bill
+            // due on the 31st last paid on 30 September stays on the 31st (the month's last day where shorter).
+            Map<Integer,Integer> days=new HashMap<>();for(Entry e:recent)days.merge(LocalDate.parse(e.date).getDayOfMonth(),1,Integer::sum);
+            int usual=0,seen=0;for(Map.Entry<Integer,Integer> d:days.entrySet())if(d.getValue()>seen||(d.getValue()==seen&&d.getKey()>usual)){usual=d.getKey();seen=d.getValue();}
+            step.day=usual;LocalDate next=step.after(last);
+            long gap=ChronoUnit.DAYS.between(last,next);if(ChronoUnit.DAYS.between(last,today)>gap*3/2)continue; // stopped, most likely
+            while(next.isBefore(today))next=step.after(next);
+            out.add(new Repeat(latest.payee.trim(),latest.category,latest.account,repeat,latest.amount,last,next,usual));}
+        out.sort((a,b)->b.last.compareTo(a.last));return out;
+    }
+    /** [r] as an upcoming transaction from its next date, with the same payee, category, account and amount. */
+    public Scheduled makeUpcoming(Repeat r){if(account(r.account)==null)throw new IllegalArgumentException("Its account was deleted.");
+        Category c=category(r.category);Scheduled s=new Scheduled(r.payee,c==null||c.payment()?"":r.category,r.account,r.next.toString(),r.amount,r.repeat);
+        s.day=r.day;scheduled.add(s);changed();return s;}
+    /** What the repeating upcoming transactions cost in a year (positive), money out only. */
+    public long upcomingYearly(){long n=0;for(Scheduled s:scheduled)if(s.amount<0&&!s.transfer())n+=-s.amount*timesAYear(s.repeat);return n;}
+
+    // ---- Money owed between people (user, 14 Oct; storage version 11) ----
+    /**
+     * A record of money owed: [amount] positive when [person] owes you, negative when you owe them; settling up is a record
+     * that brings their balance back to zero. [entry] is the transaction it came from, if any. Only a record: it isn't money
+     * in an account and changes no category (when they pay you back, enter that as income too).
+     */
+    public static final class Owed { public String id=Budget.id(),person,date,note="",entry="";public long amount;
+        public Owed(String person,long amount,String date){this.person=person;this.amount=amount;this.date=date;} }
+    public final List<Owed> owed=new ArrayList<>();
+    public static final int PERSON_MAX=60;
+    public static final long OWED_MAX=10_000_000_000L;
+    /** Each person's balance (positive: they owe you), by name whatever its capitals, in the spelling first used; people settled up left out unless [all]. */
+    public LinkedHashMap<String,Long> owedBalances(boolean all){Map<String,String> names=new LinkedHashMap<>();Map<String,Long> sums=new HashMap<>();
+        for(Owed o:owed){String k=o.person.trim().toLowerCase(Locale.ROOT);names.putIfAbsent(k,o.person.trim());sums.merge(k,o.amount,Long::sum);}
+        LinkedHashMap<String,Long> out=new LinkedHashMap<>();for(Map.Entry<String,String> n:names.entrySet()){long v=sums.get(n.getKey());if(all||v!=0)out.put(n.getValue(),v);}return out;}
+    /** [person]'s records, newest first. */
+    public List<Owed> owedBy(String person){String k=person.trim().toLowerCase(Locale.ROOT);List<Owed> out=new ArrayList<>();
+        for(Owed o:owed)if(o.person.trim().toLowerCase(Locale.ROOT).equals(k))out.add(o);out.sort((a,b)->b.date.compareTo(a.date));return out;}
+    public Owed addOwed(String person,long amount,String date,String note,String entry){String name=person==null?"":person.trim();
+        if(name.isEmpty())throw new IllegalArgumentException("Enter who it is.");if(name.length()>PERSON_MAX)throw new IllegalArgumentException("Use a shorter name.");
+        if(amount==0)throw new IllegalArgumentException("Enter an amount.");if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
+        for(String known:owedBalances(true).keySet())if(known.equalsIgnoreCase(name))name=known;
+        Owed o=new Owed(name,amount,date);o.note=cut(note==null?"":note.trim(),200);o.entry=entry==null?"":entry;owed.add(o);changed();return o;}
+    /** Settles [person] up on [date]: one record of what's left, so their balance is zero. Null when there's nothing to settle. */
+    public Owed settle(String person,String date){String name=null;long left=0;
+        for(Map.Entry<String,Long> b:owedBalances(true).entrySet())if(b.getKey().equalsIgnoreCase(person.trim())){name=b.getKey();left=b.getValue();}
+        if(name==null||left==0)return null;LocalDate.parse(date);
+        // Bug hunt 28 M7: straight in, not through addOwed's limit: a balance over one record's limit can still be settled.
+        Owed o=new Owed(name,-left,date);o.note="Settled up";owed.add(o);changed();return o;}
+    /** Bug hunt 28 M6: a record corrected (amount, date, note) or, with [amount] 0, deleted. */
+    public void editOwed(String id,long amount,String date,String note){Owed o=null;for(Owed w:owed)if(w.id.equals(id))o=w;
+        if(o==null)throw new IllegalArgumentException("That record was deleted.");
+        if(amount==0){owed.remove(o);changed();return;}
+        if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
+        o.amount=amount;o.date=date;o.note=cut(note==null?"":note.trim(),200);changed();}
+
+    // ---- Month in review (user, 14 Oct) ----
+    /** A month looked back on (review). */
+    public static final class Review { public final YearMonth month;public long income,spending,assigned,toBudget;
+        public final List<Category> overspent=new ArrayList<>();
+        // (category, spent, assigned); and the biggest rises and falls in spending: (category, spent, spent the month before).
+        public final List<Object[]> spent=new ArrayList<>(),rises=new ArrayList<>(),falls=new ArrayList<>();
+        Review(YearMonth month){this.month=month;} }
+    /**
+     * [m] in review: income, spending and what was assigned; To budget at its end; the categories it overspent; each
+     * category's spending against what was assigned, the most first; and the three biggest rises and falls in spending from
+     * the month before.
+     */
+    public Review review(YearMonth m){Review r=new Review(m);r.income=income(m);r.spending=spending(m);r.assigned=assignedIn(m);r.toBudget=ready(m);
+        List<Object[]> changes=new ArrayList<>();
+        for(Category c:categories){if(c.payment())continue;long spent=spent(c,m),before=spent(c,m.minusMonths(1)),assigned=assigned(c,m);
+            if(available(c,m)<0)r.overspent.add(c);if(spent>0||assigned!=0)r.spent.add(new Object[]{c,spent,assigned});if(spent!=before)changes.add(new Object[]{c,spent,before});}
+        r.spent.sort((a,b)->Long.compare((Long)b[1],(Long)a[1]));
+        changes.sort((a,b)->Long.compare((Long)b[1]-(Long)b[2],(Long)a[1]-(Long)a[2]));
+        for(Object[] c:changes)if((Long)c[1]>(Long)c[2]&&r.rises.size()<3)r.rises.add(c);
+        for(int i=changes.size()-1;i>=0;i--){Object[] c=changes.get(i);if((Long)c[1]<(Long)c[2]&&r.falls.size()<3)r.falls.add(c);}
+        return r;}
 }

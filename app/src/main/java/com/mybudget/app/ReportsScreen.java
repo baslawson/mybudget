@@ -11,14 +11,14 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/** Reports (tab key "Reflect"): cash flow, spending breakdown and trends, income and expenses, net worth, money age. */
+/** Reports (tab key "Reflect"): cash flow, the balance forecast, regular charges, last month in review, spending breakdown and trends, income and expenses, net worth, money age. */
 final class ReportsScreen extends Ui {
     ReportsScreen(MainActivity main){super(main);}
     void reflect(){
         // The cards, in the order they were held and dragged into (Movable; Default order puts them back).
         new Movable(this,"order_reports","Reports",CardOrder.REPORTS).build(key->{switch(key){case "cash":cashCard();break;case "breakdown":breakdownCard();break;
             case "trends":trendsCard();break;case "flow":flowCard();break;case "table":incomeExpenseTable();break;case "year":yearCard();break;
-            case "worth":worthCard();break;default:ageCard();}});
+            case "worth":worthCard();break;case "forecast":forecastCard();break;case "repeats":repeatsCard();break;case "review":reviewCard();break;default:ageCard();}});
         main.content.addView(heading("Last six months",20,main.ink));for(int i=5;i>=0;i--){YearMonth m=main.month.minusMonths(i);
             TextView line=label("",13,main.muted,false);line.setText(inOut(m.format(DateTimeFormatter.ofPattern("MMM yyyy"))+"   In ",main.budget.income(m),"   Out ",main.budget.spending(m)));main.content.addView(line);}
         main.content.addView(label(code()+" / Saved on this device. Back up or export it in Settings. Bank sync is not included.",12,main.muted,false));
@@ -56,6 +56,88 @@ final class ReportsScreen extends Ui {
         TextView moved=label("",13,main.muted,false);String by=main.hideAmounts?"Changed by ":change>=0?"Up ":"Down "; // hunt 26 C7: hidden, no direction
         moved.setText(tint(by+money(Math.abs(change))+" since the end of last month",money(Math.abs(change)),amountColour(change)));worth.addView(moved);
     }
+    // ---- 14 Oct: the balance forecast, regular charges and the month in review ----
+    private int forecastDays=30;
+    /**
+     * The balance forecast (Budget.forecast): the cash in the budget's accounts over the next 30 or 90 days, as a line, with
+     * each account's lowest point and a warning when one would go below zero.
+     */
+    private void forecastCard(){LinearLayout card=card();card.addView(heading("Balance forecast",20,main.ink));LinearLayout body=column();card.addView(body);fillForecast(body);}
+    private void fillForecast(LinearLayout body){
+        body.removeAllViews();LocalDate today=LocalDate.now();int days=forecastDays;
+        List<Budget.Forecast> list=main.budget.forecast(today,days);long[] planner=main.budget.plannerForecast(today,days);
+        if(list.isEmpty()){body.addView(label("Add a cash, checking or savings account to see where its balance is heading.",14,main.muted,false));return;}
+        LinearLayout pick=new LinearLayout(main);
+        for(int d:new int[]{30,90}){Button b=button(d+" days",()->{forecastDays=d;fillForecast(body);});b.setContentDescription("Next "+d+" days"+(d==days?", selected":""));
+            if(d==days){b.setBackground(bg(main.primary));b.setTextColor(Color.WHITE);}
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2,-2);lp.setMargins(0,0,dp(8),0);pick.addView(b,lp);}
+        body.addView(pick);
+        long[] total=new long[days+1];for(Budget.Forecast f:list)for(int d=0;d<=days;d++)total[d]+=f.daily[d];for(int d=0;d<=days;d++)total[d]+=planner[d];
+        int low=0;for(int d=0;d<=days;d++)if(total[d]<total[low])low=d;
+        String lowDate=pretty(today.plusDays(low).toString());
+        body.addView(label("In "+days+" days: "+money(total[days]),18,amountColour(total[days]),true));
+        body.addView(label("Now "+money(total[0])+" · lowest "+money(total[low])+" on "+lowDate,14,total[low]<0&&!main.hideAmounts?main.red:main.muted,false));
+        if(main.hideAmounts)body.addView(label("The line is hidden while amounts are hidden.",12,main.muted,false));
+        else{ForecastChart chart=new ForecastChart(main,total,main.primary,main.red,main.muted);body.addView(chart,new LinearLayout.LayoutParams(-1,-2));}
+        for(Budget.Forecast f:list){long lowest=f.low();
+            body.addView(greyLine(f.account.name+": lowest "+money(lowest)+" on "+pretty(today.plusDays(f.lowDay).toString()),money(lowest),amountColour(lowest),14));
+            // Bug hunt 28 M4: already under zero says so; M8: not with Hide amounts (it would tell the sign).
+            if(f.belowZero>=0&&!main.hideAmounts)body.addView(label(f.belowZero==0?"⚠ "+f.account.name+" is below zero now. Move money in, or change what's due."
+                :"⚠ "+f.account.name+" goes below zero on "+pretty(today.plusDays(f.belowZero).toString())+". Move money in before then, or change what's due.",13,main.red,true));}
+        if(planner[days]!=0)body.addView(greyLine("Planner's bills: "+money(-planner[days])+" by "+pretty(today.plusDays(days).toString())+", from whichever account pays them",money(-planner[days]),main.red,13));
+        body.addView(label("From today's balances, transactions dated later and upcoming ones, repeats included. Card spending counts once you pay the card.",12,main.muted,false));
+    }
+    /**
+     * The forecast's warning for Home: the first account that is or would go below zero in the next 30 days, as (name, date,
+     * "now" or "soon"); else, when Planner's bills would take the accounts together below zero, (null, date, "bills") (bug
+     * hunt 28 M5: Reports' total counts them, so Home does too); null if neither.
+     */
+    String[] belowZeroSoon(){LocalDate today=LocalDate.now();List<Budget.Forecast> list=main.budget.forecast(today,30);
+        for(Budget.Forecast f:list)if(f.belowZero>=0)return new String[]{f.account.name,pretty(today.plusDays(f.belowZero).toString()),f.belowZero==0?"now":"soon"};
+        long[] planner=main.budget.plannerForecast(today,30);if(list.isEmpty()||planner[30]==0)return null;
+        for(int d=0;d<=30;d++){long total=planner[d];for(Budget.Forecast f:list)total+=f.daily[d];
+            if(total<0)return new String[]{null,pretty(today.plusDays(d).toString()),"bills"};}
+        return null;}
+
+    /** Regular charges: what the repeating upcoming transactions cost in a year, and payments that look like they repeat (Budget.repeatingCharges). */
+    private void repeatsCard(){
+        LinearLayout card=card();card.addView(heading("Regular charges",20,main.ink));long yearly=main.budget.upcomingYearly();
+        if(yearly>0)card.addView(greyLine("Your repeating upcoming transactions: about "+money(yearly)+" a year",money(yearly),main.red,14));
+        List<Budget.Repeat> found=repeats();
+        if(found.isEmpty()){card.addView(label("No new ones spotted. MyBudget looks for payments to the same payee at a steady interval, such as subscriptions.",13,main.muted,false));return;}
+        card.addView(label("These look like they repeat. Make one upcoming to plan for it (and add a reminder if you like), or tell MyBudget it isn't a repeat.",13,main.muted,false));
+        for(Budget.Repeat r:found){
+            card.addView(greyLine(r.payee+" · "+money(-r.amount)+" "+r.repeat.toLowerCase(Locale.ROOT)+" · next about "+pretty(r.next.toString())+" · "+money(r.yearly())+" a year",money(-r.amount),main.red,14));
+            pair(card,button("Make upcoming",()->{try{main.commit(()->main.budget.makeUpcoming(r));toast(r.payee+" is upcoming from "+pretty(r.next.toString())+".");main.render();}catch(Exception e){toast(e.getMessage());}}),
+                button("Not a repeat",()->{dismissRepeat(r.payee);main.render();}));}
+    }
+    List<Budget.Repeat> repeats(){return main.budget.repeatingCharges(LocalDate.now(),dismissedRepeats());}
+    private Set<String> dismissedRepeats(){return new HashSet<>(main.prefs().getStringSet("repeat_dismissed",Collections.emptySet()));}
+    private void dismissRepeat(String payee){Set<String> s=dismissedRepeats();s.add(payee.trim().toLowerCase(Locale.ROOT));main.prefs().edit().putStringSet("repeat_dismissed",s).apply();}
+
+    /** Last month in review (Budget.review), with the whole review a tap away. */
+    private void reviewCard(){YearMonth m=main.month.minusMonths(1);Budget.Review r=main.budget.review(m);
+        LinearLayout card=card();card.addView(heading(m.format(DateTimeFormatter.ofPattern("MMMM yyyy"))+" in review",20,main.ink));
+        card.addView(greyLine("Spent "+money(r.spending)+" of "+money(r.assigned)+" assigned",money(r.spending),outColour(r.spending),15));
+        if(!r.overspent.isEmpty())card.addView(label(count(r.overspent.size(),"category","categories")+" overspent",14,main.red,true));
+        card.addView(button("See the review",()->reviewDialog(m)));card.setOnClickListener(v->reviewDialog(m));}
+    /** [m] in review: what came in and went out, spending against what was assigned, overspent categories and the biggest changes. */
+    void reviewDialog(YearMonth m){Budget.Review r=main.budget.review(m);LinearLayout f=form();String name=m.format(DateTimeFormatter.ofPattern("MMMM"));
+        TextView flow=label("",15,main.ink,false);flow.setText(inOut("Income ",r.income,"   Spending ",r.spending));f.addView(flow);
+        f.addView(greyLine("Assigned "+money(r.assigned),money(r.assigned),main.ink,14));
+        f.addView(greyLine("To budget at the end of "+name+": "+money(r.toBudget),money(r.toBudget),amountColour(r.toBudget),14));
+        if(!r.overspent.isEmpty()){section(f,"Overspent");for(Budget.Category c:r.overspent){long over=-main.budget.available(c,m);f.addView(greyLine(c.name+" by "+money(over),money(over),main.red,14));}}
+        if(!r.rises.isEmpty()){section(f,"Spent more than in "+m.minusMonths(1).format(DateTimeFormatter.ofPattern("MMMM")));
+            for(Object[] x:r.rises){long by=(Long)x[1]-(Long)x[2];f.addView(greyLine(((Budget.Category)x[0]).name+": up "+money(by),money(by),main.hideAmounts?main.ink:main.red,14));}}
+        if(!r.falls.isEmpty()){section(f,"Spent less");
+            for(Object[] x:r.falls){long by=(Long)x[2]-(Long)x[1];f.addView(greyLine(((Budget.Category)x[0]).name+": down "+money(by),money(by),main.hideAmounts?main.ink:main.green,14));}}
+        section(f,"Spending by category");if(r.spent.isEmpty())f.addView(label("Nothing spent.",14,main.muted,false));
+        for(Object[] x:r.spent.subList(0,Math.min(15,r.spent.size()))){long spent=(Long)x[1],assigned=(Long)x[2];
+            f.addView(greyLine(((Budget.Category)x[0]).name+": "+money(spent)+" of "+money(assigned)+" assigned",money(spent),spent>assigned&&!main.hideAmounts?main.red:main.ink,14));} // bug hunt 28 M8: plain with Hide amounts
+        if(r.spent.size()>15)f.addView(label("And "+(r.spent.size()-15)+" more.",13,main.muted,false));
+        ScrollView scroll=new ScrollView(main);scroll.addView(f);
+        new AlertDialog.Builder(main).setTitle(name+" in review").setView(scroll).setNegativeButton("Close",null)
+            .setPositiveButton("Open "+name+" in Budget",(d,w)->{main.month=m;main.tab="Plan";main.render();}).show();}
     private void ageCard(){
         LinearLayout age=card();LocalDate until=main.month.isBefore(YearMonth.now())?main.month.atEndOfMonth():LocalDate.now();
         int days=main.budget.ageOfMoney(until);age.addView(heading("Money age",20,main.ink));

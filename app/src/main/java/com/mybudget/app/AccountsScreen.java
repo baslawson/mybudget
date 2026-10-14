@@ -28,6 +28,7 @@ final class AccountsScreen extends Ui {
             c.addView(button("View transactions",()->{main.clearFilters();main.accountFilter=a.id;main.tab="Spending";main.render();}));
             Button reopen=button("Reopen account",()->main.change(()->main.accountById(a.id).closed=false)),delete=button("Delete account",()->confirmDelete(a.id));
             pair(c,reopen,delete);}
+        owedSection();
         main.content.addView(label("Checking, savings and cash accounts are pooled for your plan. Transfers change where money lives, not its purpose. Spending on a credit card moves the category's money to the card's payment category, ready to pay it. Moving money from your budget to a tracking account (an extra loan payment, an investment) is spending from a category; money from one into your budget is income to To budget.",14,main.muted,false));
     }
     private void accountCard(Budget.Account a){LinearLayout c=card();
@@ -221,4 +222,53 @@ final class AccountsScreen extends Ui {
     private String payoffText(Budget.Payoff p){if(!p.covers)return "This payment doesn't cover the interest: the loan would never be paid off.";
         if(!p.finished)return "At this payment it takes over 100 years to pay off.";
         return "Paid off by "+YearMonth.now().plusMonths(p.months).format(DateTimeFormatter.ofPattern("MMMM yyyy"))+" ("+Budget.duration(p.months)+"), with "+money(p.interest)+" interest";}
+    // ---- Money owed between people (user, 14 Oct; Budget.Owed) ----
+    /** Who owes you and whom you owe, each tapped for their records, Add and Settle up. Only a record: no account or category changes. */
+    private void owedSection(){
+        main.content.addView(heading("Owed between people",18,main.blue));LinkedHashMap<String,Long> people=main.budget.owedBalances(false);
+        if(people.isEmpty())main.content.addView(label("Keep track of money a friend owes you, or you owe them: a shared bill, a loan, tickets bought for others.",13,main.muted,false));
+        for(Map.Entry<String,Long> p:people.entrySet()){String name=p.getKey();long v=p.getValue();LinearLayout c=card();
+            c.addView(label(name,17,main.ink,true));
+            c.addView(greyLine(v>0?name+" owes you "+money(v):"You owe "+name+" "+money(-v),money(Math.abs(v)),amountColour(v),15)); // bug hunt 28 M8: plain with Hide amounts
+            c.setOnClickListener(x->person(name));}
+        main.content.addView(button("+ Add money owed",()->addOwed("")));
+    }
+    /** [name]'s records, newest first, each tapped to correct or delete it (bug hunt 28 M6), with Add and Settle up. */
+    void person(String name){LinearLayout f=form();long left=main.budget.owedBalances(true).getOrDefault(name,0L);
+        f.addView(label(left==0?"All settled.":left>0?name+" owes you "+money(left):"You owe "+name+" "+money(-left),17,left==0?main.muted:amountColour(left),true));
+        section(f,"Records");AlertDialog[] shown={null};
+        for(Budget.Owed o:main.budget.owedBy(name)){
+            String what=(o.amount>0?"They owe ":"You owe ")+money(Math.abs(o.amount));if(o.note.equals("Settled up"))what=(o.amount>0?"You paid ":"They paid ")+money(Math.abs(o.amount))+" · settled up";
+            TextView line=greyLine(pretty(o.date)+" · "+what+(o.note.isEmpty()||o.note.equals("Settled up")?"":" · "+o.note),money(Math.abs(o.amount)),main.ink,14);
+            line.setMinHeight(dp(48));line.setGravity(android.view.Gravity.CENTER_VERTICAL);pressable(line);line.setContentDescription(line.getText()+". Double tap to change or delete it.");
+            String id=o.id;line.setOnClickListener(v->{if(shown[0]!=null)shown[0].dismiss();editRecord(id);});f.addView(line);}
+        f.addView(label("Tap a record to change or delete it. A record only: it doesn't change an account or a category. When they pay you back, also enter it as income.",12,main.muted,false));
+        ScrollView scroll=new ScrollView(main);scroll.addView(f);
+        AlertDialog.Builder b=new AlertDialog.Builder(main).setTitle(name).setView(scroll).setNegativeButton("Close",null).setNeutralButton("Add",(d,w)->addOwed(name));
+        if(left!=0)b.setPositiveButton("Settle up",(d,w)->{try{main.commit(()->main.budget.settle(name,LocalDate.now().toString()));toast(name+" is settled up.");main.render();}catch(Exception x){toast(x.getMessage());}});
+        shown[0]=b.show();}
+    /** A record corrected (which way, amount, date, note) or deleted (bug hunt 28 M6). */
+    private void editRecord(String id){Budget.Owed o=null;for(Budget.Owed w:main.budget.owed)if(w.id.equals(id))o=w;if(o==null)return;String name=o.person;
+        LinearLayout f=form();Spinner way=spinner(f,"Which way",new String[]{"They owe me","I owe them"},o.amount>0?0:1);
+        EditText amount=field(f,"Amount ("+code()+")",true);amount.setText(decimal(Math.abs(o.amount)));EditText note=field(f,"What for (optional)",false);note.setText(o.note);
+        EditText date=dateField(f,o.date);
+        f.addView(button("Delete this record",()->Ui.danger(new AlertDialog.Builder(main).setTitle("Delete this record?").setMessage("Only the record goes: no account or category changes.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->{try{main.commit(()->main.budget.editOwed(id,0,"",""));for(AlertDialog e:new ArrayList<>(main.editors))e.dismiss();main.render();person(name);}catch(Exception x){toast(x.getMessage());}}).show())));
+        dialog("Money owed",f,()->{long cents=Budget.parse(amount.getText().toString());if(cents<=0)throw new IllegalArgumentException("Enter an amount above zero.");
+            main.budget.editOwed(id,way.getSelectedItemPosition()==0?cents:-cents,date(date),note.getText().toString());},()->person(name));}
+    /** A new record: who, which way, how much, when and what for. */
+    void addOwed(String who){LinearLayout f=form();
+        AutoCompleteTextView person=suggestField(f,"Who",()->new ArrayList<>(main.budget.owedBalances(true).keySet()));person.setText(who);
+        Spinner way=spinner(f,"Which way",new String[]{"They owe me","I owe them"},0);EditText amount=field(f,"Amount ("+code()+")",true),note=field(f,"What for (optional)",false);
+        EditText date=dateField(f,LocalDate.now().toString());
+        dialog("Money owed",f,()->{long cents=Budget.parse(amount.getText().toString());if(cents<=0)throw new IllegalArgumentException("Enter an amount above zero.");
+            main.budget.addOwed(person.getText().toString(),way.getSelectedItemPosition()==0?cents:-cents,date(date),note.getText().toString(),"");});}
+    /** From a transaction (its editor): someone owes part of it; half to start with, the payee as the note, linked to it. */
+    void owedFor(Budget.Entry e){LinearLayout f=form();
+        AutoCompleteTextView person=suggestField(f,"Who owes you",()->new ArrayList<>(main.budget.owedBalances(true).keySet()));
+        EditText amount=field(f,"Their part ("+code()+")",true);amount.setText(decimal(Math.abs(e.amount)/2));EditText note=field(f,"What for",false);note.setText(e.payee);
+        f.addView(label("Of "+money(-e.amount)+" on "+pretty(e.date)+". A record only: the transaction stays as it is.",12,main.muted,false));
+        String id=e.id,day=e.date;
+        dialog("Someone owes part of this",f,()->{long cents=Budget.parse(amount.getText().toString());if(cents<=0)throw new IllegalArgumentException("Enter an amount above zero.");
+            main.budget.addOwed(person.getText().toString(),cents,day,note.getText().toString(),id);});}
 }

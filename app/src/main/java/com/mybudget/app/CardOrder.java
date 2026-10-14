@@ -9,8 +9,8 @@ import java.util.*;
 public final class CardOrder {
     private CardOrder(){}
     /** Reports, Home: every section in the default order. Accounts use the accounts' ids, in the budget's order. */
-    public static final List<String> REPORTS=Collections.unmodifiableList(Arrays.asList("cash","breakdown","trends","flow","table","year","worth","age")),
-        HOME=Collections.unmodifiableList(Arrays.asList("ready","start","attention","progress","ahead","pinned"));
+    public static final List<String> REPORTS=Collections.unmodifiableList(Arrays.asList("cash","forecast","repeats","review","breakdown","trends","flow","table","year","worth","age")),
+        HOME=Collections.unmodifiableList(Arrays.asList("ready","start","attention","review","progress","ahead","pinned"));
     /** [all] in [saved] order (null or empty: the default order). */
     public static List<String> order(String saved,List<String> all){
         LinkedHashSet<String> keys=new LinkedHashSet<>();

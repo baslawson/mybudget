@@ -22,7 +22,9 @@ public final class BudgetStore {
     // Version 10 (bug hunt 27, M4) adds an entry's "bankDate" and "bankAmount": the statement row's own date and amount, which
     // a re-import matches on even after the row was edited here. MyBudget 0.0.20 would drop them on its next save, so it must
     // refuse the data instead. Versions 2 to 9 read with none ("" and 0: matched by the entry's own date and amount, as before).
-    public static final int VERSION=10;
+    // Version 11 adds "owed": records of money owed between people (Budget.Owed). MyBudget 0.0.21 would drop them on its next
+    // save, so it must refuse the data instead. Versions 2 to 10 read with none.
+    public static final int VERSION=11;
     private static final java.util.regex.Pattern PHOTO=java.util.regex.Pattern.compile("[0-9a-f-]{0,40}([.]jpg)?"); // a photo is a file name only: never a path
     // Written out directly (years of transactions made building every JSONObject first slow), exactly as JSONObject would
     // write it: the same keys in the same order, JSONObject's escaping, plain whole numbers, a null string left out.
@@ -45,7 +47,9 @@ public final class BudgetStore {
         o.append("],\"hiddenPayees\":[");int n=0;for(String p:b.hiddenPayees){o.append(n++>0?",":"");if(p==null)o.append("null");else string(o,p);}
         o.append("],\"rules\":[");for(int i=0;i<b.rules.size();i++){Budget.Rule r=b.rules.get(i);open(o,i);put(o,"contains",r.contains);put(o,"rename",r.rename);put(o,"category",r.category);o.append('}');}
         o.append("],\"payeeCategories\":{");for(Map.Entry<String,String> m:b.payeeCategories.entrySet())put(o,m.getKey(),m.getValue());
-        o.append('}');put(o,"currency",b.currency);put(o,"nextReminderId",b.nextReminderId);return o.append('}').toString();
+        o.append('}');put(o,"currency",b.currency);put(o,"nextReminderId",b.nextReminderId);
+        o.append(",\"owed\":[");for(int i=0;i<b.owed.size();i++){Budget.Owed w=b.owed.get(i);open(o,i);put(o,"id",w.id);put(o,"person",w.person);put(o,"amount",w.amount);put(o,"date",w.date);put(o,"note",w.note);put(o,"entry",w.entry);o.append('}');}
+        return o.append("]}").toString();
     }
     private static void open(StringBuilder o,int i){o.append(i>0?",{":"{");}
     /** ,"key":value (no comma straight after an opening brace); a null string is left out, as JSONObject.put(key,null) does. */
@@ -74,7 +78,8 @@ public final class BudgetStore {
     // Backup version 5: storage version 8 (reminders; MyBudget 0.0.15 refuses it as newer). Versions 1 to 4 still restore.
     // Backup version 6: storage version 9 (pay-later plans, upcoming transfers; MyBudget 0.0.18 refuses it as newer). Versions 1 to 5 still restore.
     // Backup version 7: storage version 10 (statement date and amount on imported rows; MyBudget 0.0.20 refuses it as newer). Versions 1 to 6 still restore.
-    public static final int BACKUP_VERSION=7;
+    // Backup version 8: storage version 11 (money owed between people; MyBudget 0.0.21 refuses it as newer). Versions 1 to 7 still restore.
+    public static final int BACKUP_VERSION=8;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
         return new JSONObject(encode(b)).put("app","MyBudget").put("backupVersion",BACKUP_VERSION).put("created",created.withNano(0).toString()).toString(2);
@@ -131,6 +136,11 @@ public final class BudgetStore {
             if(s.transfer()&&(b.account(s.destination)==null||s.destination.equals(s.account)||s.amount>=0||s.split()))throw new JSONException("Invalid scheduled transaction.");
             if(b.account(s.account)==null||(!s.category.isEmpty()&&!s.split()&&b.category(s.category)==null)||!Arrays.asList(Budget.Scheduled.REPEATS).contains(s.repeat))throw new JSONException("Invalid scheduled transaction.");readReminders(j,s.reminders,reminderIds);b.scheduled.add(s);}
         long next=1;for(long id:reminderIds)next=Math.max(next,id+1);b.nextReminderId=Math.max(next,root.optLong("nextReminderId",1)); // reminders: version 8
+        // Money owed between people (version 11; missing: none). A record MyBudget can't show (no name, no amount) is damaged data.
+        if(root.has("owed")&&root.optJSONArray("owed")==null)throw new JSONException("Invalid money owed."); // bug hunt 28 M10: not a list is damaged data
+        JSONArray owed=root.optJSONArray("owed");if(owed!=null)for(int i=0;i<owed.length();i++){JSONObject j=owed.getJSONObject(i);String person=j.getString("person").trim();long amount=j.getLong("amount");String date=j.getString("date");LocalDate.parse(date);
+            if(person.isEmpty()||person.length()>Budget.PERSON_MAX||amount==0||Math.abs(amount)>10_000_000_000L)throw new JSONException("Invalid money owed.");
+            Budget.Owed w=new Budget.Owed(person,amount,date);w.id=j.optString("id",w.id);w.note=Budget.cut(j.optString("note",""),200);w.entry=j.optString("entry","");b.owed.add(w);}
         return b;
     }
     private static Budget migrate(JSONObject root)throws JSONException {
