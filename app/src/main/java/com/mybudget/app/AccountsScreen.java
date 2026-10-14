@@ -80,14 +80,17 @@ final class AccountsScreen extends Ui {
     }
     // A difference can be settled with an adjustment into To budget after the user confirms.
     private void reconcile(Budget.Account a){
-        LinearLayout f=form();f.addView(label("Cleared balance: "+money(main.budget.balance(a,true)),18,main.ink,true));
-        f.addView(label("Compare with your bank's cleared balance, excluding pending transactions. Mark transactions cleared in Transactions first. Reconciling locks the cleared ones: changing one later asks first.",14,main.muted,false));
-        EditText value=field(f,"Bank's cleared balance ("+code()+")",true);
+        // Bug hunt 27 (M1): a card is reconciled in what's owed, as its card and forms show it (typing the statement's
+        // "owed" figure into a signed balance box offered an adjustment of twice the debt).
+        boolean card=a.credit();long cleared=main.budget.balance(a,true);
+        LinearLayout f=form();f.addView(label(card?(cleared<=0?"Cleared, owed: "+money(-cleared):"Cleared, in credit: "+money(cleared)):"Cleared balance: "+money(cleared),18,main.ink,true));
+        f.addView(label((card?"Compare with what your statement says you owe, excluding pending transactions (in credit: type it with a minus). ":"Compare with your bank's cleared balance, excluding pending transactions. ")+"Mark transactions cleared in Transactions first. Reconciling locks the cleared ones: changing one later asks first.",14,main.muted,false));
+        EditText value=field(f,card?"Owed on the statement ("+code()+")":"Bank's cleared balance ("+code()+")",true);
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Reconcile "+a.name)
             .setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Reconcile",null).create();
         main.editors.add(d);d.setOnDismissListener(v->main.editors.remove(d));
         d.setOnShowListener(v->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
-            long bank;try{bank=Budget.parse(value.getText().toString());}catch(Exception e){toast(e.getMessage());return;}
+            long bank;try{long typed=Budget.parse(value.getText().toString());bank=card?-typed:typed;}catch(Exception e){toast(e.getMessage());return;}
             String today=LocalDate.now().toString();Budget.Entry adjust=main.budget.adjustment(main.accountById(a.id),bank,today);
             if(adjust==null){int[] n={0};if(main.change(()->{Budget.Account acc=main.accountById(a.id);acc.reconciled=today;n[0]=main.budget.lockReconciled(acc);})){d.dismiss();toast("Reconciled."+(n[0]>0?" "+count(n[0],"cleared transaction is","cleared transactions are")+" locked now.":""));}return;}
             new AlertDialog.Builder(main).setTitle("Balances differ by "+money(adjust.amount))

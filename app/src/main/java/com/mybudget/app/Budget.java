@@ -71,6 +71,10 @@ public final class Budget {
         public boolean approved=true; // false: imported from a statement and still to review
         public String bankPayee=""; // imported rows: the statement's own payee text (before rules or renames), so a re-import still spots them
         public boolean reconciled; // cleared and part of a balance checked against the bank (Reconcile): editing it asks first
+        // Bug hunt 27 (M4; storage 10): the statement row this transaction is (imported, or entered here and matched to it): its
+        // own date and amount, so importing the statement again finds it even after its date or amount was changed here.
+        // "" and 0: none (entered here, or imported before version 10).
+        public String bankDate="";public long bankAmount;
         // A split (category SPLIT) spreads [amount] over parts, each with a category ("" = To budget).
         public final List<Split> splits=new ArrayList<>();
         public final List<Reminder> reminders=new ArrayList<>(); // counted from its date (Reminder)
@@ -378,8 +382,11 @@ public final class Budget {
      * outflow to To budget or overspending can have used [m]'s spare money), up to now or the last month with money assigned. */
     public long spendableFrom(YearMonth m){long n=spendable(m);YearMonth last=YearMonth.now();for(Category c:categories)for(String k:c.assigned.keySet()){YearMonth a=YearMonth.parse(k);if(a.isAfter(last))last=a;}
         for(YearMonth k=m.plusMonths(1);!k.isAfter(last);k=k.plusMonths(1))n=Math.min(n,spendable(k));return n;}
-    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendableFrom(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,available(c,m)))throw new IllegalArgumentException("You cannot return more than this category has available.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
-    public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);assignedChanged(from);assignedChanged(to);}
+    /** Bug hunt 27 (M6): what [c] can give up in [m]: taken out in [m], it's gone from every later month too, so it has to be
+     * available in each of them up to now (a later month may have spent it). */
+    public long availableFrom(Category c,YearMonth m){long n=available(c,m);for(YearMonth k=m.plusMonths(1);!k.isAfter(YearMonth.now());k=k.plusMonths(1))n=Math.min(n,available(c,k));return n;}
+    public void assign(Category c,YearMonth m,long amount){if(amount>0&&amount>spendableFrom(m))throw new IllegalArgumentException("Not enough unassigned money; check future months too.");if(amount<0&&-amount>Math.max(0,availableFrom(c,m)))throw new IllegalArgumentException(-amount>Math.max(0,available(c,m))?"You cannot return more than this category has available.":"A later month has spent some of this money. Return less, or return it in a later month.");if(m.isAfter(YearMonth.now())&&assigned(c,m)+amount<0)throw new IllegalArgumentException("Move carried-over money in the current month, or return only this future month's assignment.");c.assigned.put(m.toString(),assigned(c,m)+amount);assignedChanged(c);}
+    public void move(Category from,Category to,YearMonth m,long amount){if(from==to||amount<=0||amount>available(from,m))throw new IllegalArgumentException("Choose different categories and an amount available in the source.");if(amount>availableFrom(from,m))throw new IllegalArgumentException("A later month has spent some of "+from.name+"'s money. Move less, or move it in a later month.");if(m.isAfter(YearMonth.now())&&assigned(from,m)-amount<0)throw new IllegalArgumentException("Move carried-over money in the current month.");from.assigned.put(m.toString(),assigned(from,m)-amount);to.assigned.put(m.toString(),assigned(to,m)+amount);assignedChanged(from);assignedChanged(to);}
     public long needed(Category c,YearMonth m){Long ask=ask(c,m);return ask==null?0:Math.max(0,ask-assigned(c,m));}
     /** What [c]'s target asks for in [m] before anything is assigned in [m] (needed is this less [m]'s Assigned); 0 without one. */
     public long targetAsk(Category c,YearMonth m){Long ask=ask(c,m);return ask==null?0:ask;}
@@ -961,9 +968,12 @@ public final class Budget {
     }
     // A spreadsheet runs text starting with = + - @ as a formula: a leading ' keeps it text. Quoted when needed.
     static String cell(String s){if(s==null)s="";if(!s.isEmpty()&&"=+-@\t\r".indexOf(s.charAt(0))>=0)s="'"+s;return s.matches("(?s).*[,\"\r\n].*")?"\""+s.replace("\"","\"\"")+"\"":s;}
+    /** Bug hunt 27 (M9): today somewhere on Earth (UTC+14 is the first to reach a date): a transaction dated today before a
+     * flight west, where it's still yesterday, can still be saved again (and imported) rather than counting as future. */
+    public static LocalDate latestToday(){LocalDate here=LocalDate.now(),ahead=LocalDate.now(java.time.ZoneOffset.ofHours(14));return ahead.isAfter(here)?ahead:here;}
     public void validate(Entry e){
         Account a=account(e.account);if(a==null)throw new IllegalArgumentException("Choose an account.");LocalDate date=LocalDate.parse(e.date);
-        if(date.isAfter(LocalDate.now()))throw new IllegalArgumentException("Use today or a past date.");if(e.date.compareTo(a.date)<0)throw new IllegalArgumentException("Transaction date is before this account's opening date.");
+        if(date.isAfter(latestToday()))throw new IllegalArgumentException("Use today or a past date.");if(e.date.compareTo(a.date)<0)throw new IllegalArgumentException("Transaction date is before this account's opening date.");
         if(e.payee.trim().isEmpty()||e.amount==0)throw new IllegalArgumentException("Enter a payee and a nonzero amount.");
         if(e.transfer()){Account to=account(e.destination);if(to==null||to==a||e.amount>=0)throw new IllegalArgumentException("Choose a different destination account.");if(e.date.compareTo(to.date)<0)throw new IllegalArgumentException("Date is before the destination account's opening date.");
             if(e.split()||e.category.equals(SPLIT))throw new IllegalArgumentException("A transfer can't be split.");

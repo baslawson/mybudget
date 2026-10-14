@@ -19,7 +19,10 @@ public final class BudgetStore {
     // Version 9 adds pay-later plans (an account's "payLater") and upcoming transfers (a scheduled transaction's "destination"):
     // MyBudget 0.0.18 would drop them on its next save (an instalment would turn into money out of the budget), so it must
     // refuse the data instead. Versions 2 to 8 read with none.
-    public static final int VERSION=9;
+    // Version 10 (bug hunt 27, M4) adds an entry's "bankDate" and "bankAmount": the statement row's own date and amount, which
+    // a re-import matches on even after the row was edited here. MyBudget 0.0.20 would drop them on its next save, so it must
+    // refuse the data instead. Versions 2 to 9 read with none ("" and 0: matched by the entry's own date and amount, as before).
+    public static final int VERSION=10;
     private static final java.util.regex.Pattern PHOTO=java.util.regex.Pattern.compile("[0-9a-f-]{0,40}([.]jpg)?"); // a photo is a file name only: never a path
     // Written out directly (years of transactions made building every JSONObject first slow), exactly as JSONObject would
     // write it: the same keys in the same order, JSONObject's escaping, plain whole numbers, a null string left out.
@@ -31,7 +34,7 @@ public final class BudgetStore {
         o.append("],\"accounts\":[");
         for(int i=0;i<b.accounts.size();i++){Budget.Account a=b.accounts.get(i);open(o,i);put(o,"id",a.id);put(o,"name",a.name);put(o,"date",a.date);put(o,"opening",a.opening);put(o,"reconciled",a.reconciled);put(o,"closed",a.closed);put(o,"type",a.type);put(o,"liability",a.liability);put(o,"rate",a.rate);put(o,"payment",a.payment);put(o,"frequency",a.frequency);put(o,"payLater",a.payLater);o.append('}');}
         o.append("],\"entries\":[");
-        for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);put(o,"reconciled",e.reconciled);
+        for(int i=0;i<b.entries.size();i++){Budget.Entry e=b.entries.get(i);open(o,i);put(o,"id",e.id);put(o,"payee",e.payee);put(o,"category",e.category);put(o,"account",e.account);put(o,"destination",e.destination);put(o,"date",e.date);put(o,"amount",e.amount);put(o,"memo",e.memo);put(o,"cleared",e.cleared);put(o,"externalId",e.externalId);put(o,"billKey",e.billKey);put(o,"photo",e.photo);put(o,"flag",e.flag);put(o,"approved",e.approved);put(o,"bankPayee",e.bankPayee);put(o,"reconciled",e.reconciled);put(o,"bankDate",e.bankDate);put(o,"bankAmount",e.bankAmount);
             if(e.split())parts(o,e.splits);reminders(o,e.reminders);o.append('}');}
         o.append("],\"scheduled\":[");
         for(int i=0;i<b.scheduled.size();i++){Budget.Scheduled s=b.scheduled.get(i);open(o,i);put(o,"id",s.id);put(o,"payee",s.payee);put(o,"category",s.category);put(o,"account",s.account);put(o,"next",s.next);put(o,"repeat",s.repeat);put(o,"day",s.day);put(o,"amount",s.amount);put(o,"memo",s.memo);put(o,"billKey",s.billKey);put(o,"destination",s.destination);
@@ -70,7 +73,8 @@ public final class BudgetStore {
     // Backup version 4: storage version 7 (payee category suggestions; MyBudget 0.0.8 refuses it as newer). Versions 1 to 3 still restore.
     // Backup version 5: storage version 8 (reminders; MyBudget 0.0.15 refuses it as newer). Versions 1 to 4 still restore.
     // Backup version 6: storage version 9 (pay-later plans, upcoming transfers; MyBudget 0.0.18 refuses it as newer). Versions 1 to 5 still restore.
-    public static final int BACKUP_VERSION=6;
+    // Backup version 7: storage version 10 (statement date and amount on imported rows; MyBudget 0.0.20 refuses it as newer). Versions 1 to 6 still restore.
+    public static final int BACKUP_VERSION=7;
     public static final class Backup { public final Budget budget; public final String created; Backup(Budget budget,String created){this.budget=budget;this.created=created;} }
     public static String backup(Budget b,LocalDateTime created) throws JSONException {
         return new JSONObject(encode(b)).put("app","MyBudget").put("backupVersion",BACKUP_VERSION).put("created",created.withNano(0).toString()).toString(2);
@@ -100,7 +104,7 @@ public final class BudgetStore {
         for(Budget.Category c:b.categories)if(c.payment()&&(b.account(c.cardAccount)==null||!b.account(c.cardAccount).credit()))throw new JSONException("Payment category without its card.");
         // Transactions look their accounts and categories up by id (the first with each id, as Budget.account and category do).
         Set<Long> reminderIds=new HashSet<>();Map<String,Budget.Account> accountIds=new HashMap<>();for(Budget.Account a:b.accounts)accountIds.putIfAbsent(a.id,a);Map<String,Budget.Category> categoryIds=new HashMap<>();for(Budget.Category c:b.categories)categoryIds.putIfAbsent(c.id,c);
-        for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");e.photo=j.optString("photo","");e.flag=Math.max(0,Math.min(Budget.FLAGS.length-1,j.optInt("flag",0)));e.approved=j.optBoolean("approved",true);e.bankPayee=j.optString("bankPayee","").trim();e.bankPayee=Budget.cut(e.bankPayee,80);e.reconciled=j.optBoolean("reconciled",false)&&e.cleared;if(!PHOTO.matcher(e.photo).matches())throw new JSONException("Invalid photo name."); // a file name only: never a path (reconciled: version 7, missing = not reconciled)
+        for(int i=0;i<entries.length();i++){JSONObject j=entries.getJSONObject(i);LocalDate.parse(j.getString("date"));Budget.Entry e=new Budget.Entry(j.getString("payee"),j.getString("category"),j.getString("account"),j.getString("date"),j.getLong("amount"));e.id=j.getString("id");e.destination=j.getString("destination");e.memo=j.getString("memo");e.cleared=j.getBoolean("cleared");e.externalId=j.optString("externalId","");e.billKey=j.optString("billKey","");e.photo=j.optString("photo","");e.flag=Math.max(0,Math.min(Budget.FLAGS.length-1,j.optInt("flag",0)));e.approved=j.optBoolean("approved",true);e.bankPayee=j.optString("bankPayee","").trim();e.bankPayee=Budget.cut(e.bankPayee,80);e.reconciled=j.optBoolean("reconciled",false)&&e.cleared;e.bankDate=j.optString("bankDate","");if(!e.bankDate.isEmpty())LocalDate.parse(e.bankDate);e.bankAmount=j.optLong("bankAmount",0);if(!PHOTO.matcher(e.photo).matches())throw new JSONException("Invalid photo name."); // a file name only: never a path (reconciled: version 7, missing = not reconciled)
             JSONArray parts=j.optJSONArray("splits");if(parts!=null)for(int k=0;k<parts.length();k++){JSONObject p=parts.getJSONObject(k);Budget.Split s=new Budget.Split(p.getString("category"),p.getLong("amount"));s.memo=p.optString("memo","");if(!s.category.isEmpty()&&categoryIds.get(s.category)==null)throw new JSONException("Invalid split.");e.splits.add(s);}
             long parted=0;for(Budget.Split s:e.splits)parted+=s.amount;if(e.category.equals(Budget.SPLIT)!=e.split()||(e.split()&&parted!=e.amount))throw new JSONException("Invalid split."); // the parts add up to the total
             // Rows imported before bankPayee was kept (0.0.6) matched re-imports by payee: keep that text, so renaming them later doesn't import them again.

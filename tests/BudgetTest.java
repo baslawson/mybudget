@@ -5,8 +5,43 @@ import com.mybudget.app.CardOrder;
 import java.time.YearMonth;
 import java.time.LocalDate;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public class BudgetTest {
+    // Bug hunt 27 (2026-10-14): M2 reversed amounts, M4 statement date and amount kept, M6 past-month moves, M8 dates with a time,
+    // M9 today in any time zone.
+    static void hunt27(){
+        Budget b=new Budget();Budget.Account card=new Budget.Account("Card","2025-01-01",0);card.type="credit";b.accounts.add(card);
+        List<List<String>> rows=new ArrayList<>();rows.add(Arrays.asList("05/01/2025","Cafe","12.50"));rows.add(Arrays.asList("06/01/2025","Payment","-100.00"));
+        CsvImport.Result r=CsvImport.run(b,rows,false,0,1,2,-1,"dd/MM/uuuu",card,true);equal(r.added,2,"M2 imported");
+        long cafe=0,pay=0;for(Budget.Entry e:r.entries){if(e.payee.equals("Cafe"))cafe=e.amount;else pay=e.amount;}
+        equal(cafe,-1250,"M2 a purchase shown positive is spending");equal(pay,10000,"M2 a payment shown negative is money in");
+        // M4: an imported row keeps the statement's date and amount; edited here since, importing the statement again adds
+        // nothing, while a real second purchase (same payee and amount a day later) is still new.
+        Budget c=new Budget();Budget.Account bank=new Budget.Account("Bank","2025-01-01",0);c.accounts.add(bank);
+        List<List<String>> st=new ArrayList<>();st.add(Arrays.asList("07/01/2025","WOOLWORTHS 123","-45.00"));st.add(Arrays.asList("07/01/2025","CAFE","-4.50"));
+        CsvImport.Result first=CsvImport.run(c,st,false,0,1,2,-1,"d/M/uuuu",bank);equal(first.added,2,"M4 first import");
+        for(Budget.Entry e:first.entries){same(e.bankDate,"2025-01-07","M4 statement date kept");if(e.payee.equals("CAFE"))e.amount=-500;else e.date="2025-01-05";}
+        CsvImport.Result again=CsvImport.run(c,st,false,0,1,2,-1,"d/M/uuuu",bank);equal(again.added,0,"M4 edited rows not added again");equal(again.duplicates,2,"M4 both already there");
+        st.add(Arrays.asList("08/01/2025","CAFE","-4.50"));CsvImport.Result third=CsvImport.run(c,st,false,0,1,2,-1,"d/M/uuuu",bank);
+        equal(third.added,1,"M4 the next day's coffee is new");equal(third.duplicates,2,"M4 the rest already there");
+        // M8: a time after the date is read past.
+        same(CsvImport.date("05/10/2026 10:23","dd/MM/uuuu").toString(),"2026-10-05","M8 date with a time");
+        same(CsvImport.date("2026-10-05T10:23:00Z","uuuu-MM-dd").toString(),"2026-10-05","M8 ISO date-time");
+        List<List<String>> timed=new ArrayList<>();timed.add(Arrays.asList("05/10/2026 9:05 AM","x","1"));
+        same(String.valueOf(CsvImport.detectDateFormat(timed,0,false)),"d/M/uuuu","M8 format found");
+        // M6: Jan's Food money spent in Feb can't be moved out of Jan.
+        YearMonth jan=YearMonth.of(2025,1),feb=jan.plusMonths(1);Budget d=new Budget();Budget.Account cash=new Budget.Account("Cash","2025-01-01",10000);d.accounts.add(cash);
+        Budget.Category food=new Budget.Category("Food"),rent=new Budget.Category("Rent");d.categories.add(food);d.categories.add(rent);
+        d.assign(food,jan,10000);Budget.Entry shop=new Budget.Entry("Shop",food.id,cash.id,"2025-02-03",-10000);d.validate(shop);d.entries.add(shop);
+        rejects(()->d.move(food,rent,jan,10000));rejects(()->d.assign(food,jan,-10000));equal(d.availableFrom(food,jan),0,"M6 nothing spare from Jan");
+        // M9: today in the furthest-ahead time zone is not the future.
+        if(Budget.latestToday().isBefore(LocalDate.now()))throw new AssertionError("M9 latest today");
+        Budget.Entry today=new Budget.Entry("x",food.id,cash.id,Budget.latestToday().toString(),-1);d.validate(today);
+        rejects(()->d.validate(new Budget.Entry("x",food.id,cash.id,Budget.latestToday().plusDays(1).toString(),-1)));
+    }
     static void equal(long actual,long expected,String message){if(actual!=expected)throw new AssertionError(message+": "+actual+" != "+expected);}
     static void rejects(Runnable action){try{action.run();}catch(IllegalArgumentException e){return;}throw new AssertionError("Expected rejection");}
     public static void main(String[] args){
@@ -38,7 +73,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){

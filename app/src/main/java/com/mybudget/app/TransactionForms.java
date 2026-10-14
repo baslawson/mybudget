@@ -184,7 +184,8 @@ final class TransactionForms extends Ui {
         Spinner flag=spinner(flagBox,"Flag",flagChoices(),old!=null?old.flag:0);
         if(sched!=null)flagBox.setVisibility(View.GONE); // upcoming transactions have no flag
         // A photo (e.g. a receipt), kept on this phone. Picking one leaves this form open (see onRestart).
-        String[] photo={old!=null?old.photo:""};LinearLayout photoBox=column();if(sched==null)more.addView(photoBox);
+        // Bug hunt 27 (M5): a photo that came back after Android closed MyBudget (and its form) starts a new transaction.
+        String[] photo={old!=null?old.photo:sched==null&&main.recoveredPhoto!=null?main.recoveredPhoto:""};if(old==null&&sched==null)main.recoveredPhoto=null;LinearLayout photoBox=column();if(sched==null)more.addView(photoBox);
         Runnable[] showPhotoBox=new Runnable[1];
         showPhotoBox[0]=()->{photoBox.removeAllViews();
             // Take a photo (the camera app) or choose one from the gallery; either is copied into photos at most 1600 px.
@@ -266,7 +267,7 @@ final class TransactionForms extends Ui {
             Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];e.reminders.addAll(reminders.assignIds(main.budget));
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
                 e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
-            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
+            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.bankDate=old.bankDate;e.bankAmount=old.bankAmount;e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
                 if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);
             Budget.Account onPlan=main.budget.account(acc2); // a new refund on a pay-later plan with payments left: asked about after the save
             if(adding&&k==2&&onPlan!=null&&onPlan.payLater&&!main.budget.instalmentsLeft(onPlan).isEmpty()){refund[0]=cents;refundPlan[0]=onPlan.id;}};
@@ -371,11 +372,13 @@ final class TransactionForms extends Ui {
             for(Budget.Category c:main.budget.categories)if(c.name.equalsIgnoreCase(n))throw new IllegalArgumentException("A category already has that name. Choose another name for the plan.");
             main.budget.addPayLater(n,LocalDate.now().toString());saved[0]=n;},()->{if(saved[0]!=null)made.accept(saved[0]);});}
     /** After a refund on pay-later plan [planId]: asks whether to lower the payments still to come by [cents], the last ones first. */
-    private void lowerAfterRefund(String planId,long cents){Budget.Account plan=main.budget.account(planId);if(plan==null)return;
+    private void lowerAfterRefund(String planId,long cents){lowerLeft(planId,cents,"refund");}
+    /** Asks whether to lower plan [planId]'s payments still to come by [cents] ([what]: the refund or payment it comes from). */
+    private void lowerLeft(String planId,long cents,String what){Budget.Account plan=main.budget.account(planId);if(plan==null)return;
         List<Budget.Scheduled> left=main.budget.instalmentsLeft(plan);if(left.isEmpty())return;long owed=0;for(Budget.Scheduled s:left)owed-=s.amount;
         long by=Math.min(cents,owed);
         tracked(new AlertDialog.Builder(main).setTitle("Lower the payments left?")
-            .setMessage(plan.name+" has "+count(left.size(),"payment","payments")+" left ("+money(owed)+"). Lower them by the refund, "+money(by)+"? The last payments are lowered first, as pay-later plans usually do"+(by>=owed?": that's all of them.":"."))
+            .setMessage(plan.name+" has "+count(left.size(),"payment","payments")+" left ("+money(owed)+"). Lower them by the "+what+", "+money(by)+"? The last payments are lowered first, as pay-later plans usually do"+(by>=owed?": that's all of them.":"."))
             .setNegativeButton("Not now",null).setPositiveButton("Lower them",(d,w)->{if(main.change(()->main.budget.lowerInstalments(main.accountById(planId),by)))toast("Payments lowered by "+money(by)+".");}));}
     /** An upcoming transfer (a pay-later payment): its amount, date and reminders, or delete it. */
     private void editInstalment(String id){Budget.Scheduled s;try{s=scheduledById(id);}catch(Exception e){toast(e.getMessage());return;}
@@ -416,12 +419,22 @@ final class TransactionForms extends Ui {
             if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile.");
             Budget.Entry e=new Budget.Entry(required(payee),pc.id,card.id,date(day),Budget.cents(amount.getText().toString())*(kind.selected()==0?-1:1));
             e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();
-            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.flag=old.flag;e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;e.reminders.addAll(old.reminders);}
+            if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.bankDate=old.bankDate;e.bankAmount=old.bankAmount;e.flag=old.flag;e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;e.reminders.addAll(old.reminders);}
             main.budget.validate(e);if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});}
     void transfer(){editTransfer(null,null,0);}
     /** A card payment: a transfer from a cash account to the card, for what's set aside (or what's owed, if less). */
     void payCard(String id){Budget.Account card=main.budget.account(id);if(card==null)return;
+        // Bug hunt 27 (M3): a pay-later plan with payments to come pays the next one (entered now, so it isn't paid again
+        // when its date comes), not everything owed beside them.
+        if(card.payLater){List<Budget.Scheduled> left=main.budget.instalmentsLeft(card);if(!left.isEmpty()){payNextInstalment(card,left.get(0));return;}}
         editTransfer(null,id,main.budget.toPay(card));} // what's set aside now, whatever month is on screen
+    private void payNextInstalment(Budget.Account plan,Budget.Scheduled next){String id=next.id,planId=plan.id;
+        Budget.Account from=main.budget.account(next.account);
+        tracked(new AlertDialog.Builder(main).setTitle("Pay "+plan.name)
+            .setMessage("Pay the next payment, "+money(-next.amount)+(from==null?"":" from "+from.name)+", today? It comes off the payments to come. To pay a different amount, choose Another amount: what you pay can then be taken off the payments left.")
+            .setNegativeButton("Cancel",null)
+            .setNeutralButton("Another amount",(d,w)->editTransfer(null,planId,-next.amount))
+            .setPositiveButton("Pay it now",(d,w)->{if(main.change(()->main.budget.enter(scheduledById(id),"",false,LocalDate.now().toString())))toast("Paid "+money(-next.amount)+".");}));}
     private void editTransfer(Budget.Entry old){editTransfer(old,null,0);}
     private void editTransfer(Budget.Entry old,String toId,long preset){
         List<Budget.Account> accounts=old==null?main.openAccounts():main.openAccounts(main.budget.account(old.account),main.budget.account(old.destination));
@@ -444,13 +457,17 @@ final class TransactionForms extends Ui {
         EditText day=dateField(f,old==null?LocalDate.now().toString():old.date);CheckBox cleared=new CheckBox(main);
         cleared.setText("Cleared in both accounts");f.addView(cleared);if(old!=null){amount.setText(decimal(-old.amount));
             cleared.setChecked(old.cleared);f.addView(button("Delete transfer",()->delete(old)));}
+        long[] paidPlan={0};String[] paidPlanId={null};
         dialog(old!=null?"Edit transfer":toIndex>=0?"Pay "+main.budget.account(toId).name:"Transfer money",f,()->{
             if(old!=null&&main.budget.entries.stream().noneMatch(t->t.id.equals(old.id)))throw new IllegalArgumentException("This transaction was removed meanwhile."); // hunt 24 C1
             Budget.Account a=accounts.get(from.getSelectedItemPosition()),b=accounts.get(to.getSelectedItemPosition());
             boolean out=!a.tracking()&&b.tracking();if(out&&cats.isEmpty())throw new IllegalArgumentException("Add a category first.");
             Budget.Entry e=new Budget.Entry("Transfer to "+b.name,out?cats.get(Math.max(0,category.getSelectedItemPosition())).id:"",a.id,date(day),-Budget.cents(amount.getText().toString()));
-            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.reminders.addAll(old.reminders);e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account)&&e.destination.equals(old.destination);}
-            main.budget.validate(e);if(old!=null)e.id=old.id;if(old==null||!put(old.id,e))main.budget.entries.add(0,e);});
+            e.destination=b.id;e.cleared=cleared.isChecked();if(old!=null){e.memo=old.memo;e.reminders.addAll(old.reminders);e.flag=old.flag;e.bankPayee=Budget.statementPayee(old);e.bankDate=old.bankDate;e.bankAmount=old.bankAmount;e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account)&&e.destination.equals(old.destination);}
+            main.budget.validate(e);if(old!=null)e.id=old.id;if(old==null||!put(old.id,e))main.budget.entries.add(0,e);
+            // Bug hunt 27 (M3): a new payment into a pay-later plan with payments to come: offered off those payments after.
+            if(old==null&&b.payLater&&!main.budget.instalmentsLeft(b).isEmpty()){paidPlan[0]=-e.amount;paidPlanId[0]=b.id;}},
+            ()->{if(paidPlan[0]>0){long paid=paidPlan[0];paidPlan[0]=0;lowerLeft(paidPlanId[0],paid,"payment");}});
 
     }
     /** Edits a tracking account's transaction: no category (it's off budget). */
@@ -465,7 +482,7 @@ final class TransactionForms extends Ui {
         f.addView(button("Delete transaction",()->delete(old)));
         dialog("Edit transaction",f,()->{Budget.Entry e=new Budget.Entry(required(payee),"",accountId,date(day),Budget.parse(amount.getText().toString()));
             e.id=old.id;e.memo=memo.getText().toString().trim();e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();e.photo=old.photo;e.reconciled=old.reconciled&&e.cleared;
-            e.bankPayee=Budget.statementPayee(old);e.reminders.addAll(old.reminders);main.budget.validate(e); // its reminders stay (set in the main form)
+            e.bankPayee=Budget.statementPayee(old);e.bankDate=old.bankDate;e.bankAmount=old.bankAmount;e.reminders.addAll(old.reminders);main.budget.validate(e); // its reminders stay (set in the main form)
             if(!put(old.id,e))throw new IllegalArgumentException("This transaction was removed meanwhile.");});
     }
 }

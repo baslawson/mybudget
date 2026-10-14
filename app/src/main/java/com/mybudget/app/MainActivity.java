@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
         Budget fresh;try{fresh=BudgetStore.decode(raw);}catch(Exception e){throw new IllegalStateException("Could not reload your budget.");}
         fresh.fromPlanner.addAll(budget.fromPlanner);budget=fresh;loaded=raw;return true;}
     boolean pickingPhoto;java.util.function.Consumer<Uri> photoTarget;AlertDialog photoForm;
+    String recoveredPhoto; // Bug hunt 27 (M5): see photoWithoutForm
     /**
      * Back from the photo picker: data saved meanwhile is read in, but the form the photo is for stays open (with what was
      * typed and the photo). Its save looks records up by id, so it saves on the latest data; any other open form closes.
@@ -156,12 +157,18 @@ public class MainActivity extends Activity {
     android.content.SharedPreferences prefs(){return getSharedPreferences("budget",0);}
     void pick(Intent intent,int request){intent.addCategory(Intent.CATEGORY_OPENABLE);
         try{startActivityForResult(intent,request);}catch(android.content.ActivityNotFoundException e){ui.toast("No app on this device can save or open files.");}}
+    // Bug hunt 27 (M5): Android closed MyBudget while the camera or gallery was open, so the form that asked for the photo is
+    // gone. The photo isn't thrown away: it's kept and a new Add transaction form opens with it, to fill in again.
+    private void photoWithoutForm(Uri uri){if(!storageReadable)return;
+        try{recoveredPhoto=copyPhoto(uri);}catch(Exception e){ui.toast("Could not add that photo.");return;}
+        forms.transaction(null);ui.toast("MyBudget was closed while the photo was taken, so the form was lost. The photo is on this new transaction.");}
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);Uri uri=data==null?null:data.getData();
         if(request==PHOTO){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;
-            if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);photoReturned();return;}
+            if(result==RESULT_OK&&uri!=null&&target!=null)target.accept(uri);else if(result==RESULT_OK&&uri!=null)photoWithoutForm(uri);photoReturned();return;}
         if(request==CAMERA){java.util.function.Consumer<Uri> target=photoTarget;photoTarget=null;File shot=cameraFile;cameraFile=null;
             if(result==RESULT_OK&&shot!=null&&shot.length()>0&&target!=null)target.accept(Uri.fromFile(shot)); // copied into photos like a picked one
+            else if(result==RESULT_OK&&shot!=null&&shot.length()>0)photoWithoutForm(Uri.fromFile(shot));
             if(shot!=null)shot.delete();photoReturned();return;} // the capture itself never stays, taken or cancelled
         if(result!=RESULT_OK||uri==null||!storageReadable)return;
         if(request==AUTO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);}catch(Exception e){ui.toast("MyBudget couldn't keep access to that folder. Choose another.");
@@ -370,11 +377,19 @@ public class MainActivity extends Activity {
     /** Categories to spend from (not hidden, not a card payment), plus [keep] (an old transaction's category) even when hidden. */
     List<Budget.Category> visibleCategories(Budget.Category keep){List<Budget.Category> list=new ArrayList<>();
         for(Budget.Category c:budget.categories)if((!c.hidden&&!c.payment())||c==keep)list.add(c);return list;}
+    // Bug hunt 27 (M10): the budget as it was before the version-4 upgrade is kept in a file of its own, not beside "data" in
+    // the preferences, which are written whole (and read on start) every time anything is saved.
+    private java.io.File legacyFile(){return new java.io.File(getFilesDir(),"legacy_backup.json");}
+    private boolean writeLegacyBackup(String raw){android.util.AtomicFile f=new android.util.AtomicFile(legacyFile());java.io.FileOutputStream out=null;
+        try{out=f.startWrite();out.write(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));f.finishWrite(out);return true;}
+        catch(Exception e){if(out!=null)f.failWrite(out);return false;}}
+    private void moveLegacyBackup(){android.content.SharedPreferences p=getSharedPreferences("budget",0);String old=p.getString("legacy_backup",null);
+        if(old!=null&&writeLegacyBackup(old))p.edit().remove("legacy_backup").commit();}
     void load(){
-        String raw=getSharedPreferences("budget",0).getString("data",null);loaded=raw;
+        String raw=getSharedPreferences("budget",0).getString("data",null);loaded=raw;moveLegacyBackup();
         if(raw==null){budget.addStarter(Budget.starterGroups());return;} // the starter categories (Budget.STARTER), saved with the first change
         try{budget=BudgetStore.decode(raw);if(!raw.contains("\"version\"")){String updated=BudgetStore.encode(budget);
-                if(!getSharedPreferences("budget",0).edit().putString("legacy_backup",raw).putString("data",updated).commit())throw new IllegalStateException("Migration could not be saved.");
+                if(!writeLegacyBackup(raw)||!getSharedPreferences("budget",0).edit().putString("data",updated).commit())throw new IllegalStateException("Migration could not be saved.");
                 loaded=updated;BudgetWidget.refresh(this);ui.toast("Budget upgraded. Existing balances preserved; monthly assignments begin this month.");}}
         catch(Exception e){storageReadable=false;new AlertDialog.Builder(this).setTitle("Unable to load budget")
                 .setMessage("Your saved data has been preserved. Close the app to avoid changes.").setPositiveButton("Close",(d,w)->finish())

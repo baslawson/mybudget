@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.net.Uri;
 import java.io.*;
 import android.text.*;
+import android.view.View;
 import android.widget.*;
 import java.time.*;
 import java.util.*;
@@ -178,6 +179,11 @@ final class SettingsScreen extends Ui {
         CheckBox hasHeader=new CheckBox(main);hasHeader.setText("The first row is column names");hasHeader.setChecked(header);
         hasHeader.setMinHeight(dp(48));f.addView(hasHeader);
         Spinner dateCol=spinner(f,"Date",names,date),payeeCol=spinner(f,"Payee or description",names,payee),amountCol=spinner(f,"Amount (or money in)",names,amount),outCol=spinner(f,"Money out (if it's a separate column)",withNone,out+1),account=spinner(f,"Into account",accounts.stream().map(a->a.name).toArray(String[]::new),0);
+        // Bug hunt 27 (M2): many card statements list purchases as positive amounts in their one Amount column; kept per set of
+        // column names, like the columns.
+        CheckBox reversed=new CheckBox(main);reversed.setText("Spending is shown as a positive amount (many card statements)");reversed.setMinHeight(dp(48));
+        String headers=String.join("\u0002",first);reversed.setChecked(header&&("1\u0001"+headers).equals(main.prefs().getString("import_reversed","")));f.addView(reversed);
+        Runnable signed=()->reversed.setVisibility(outCol.getSelectedItemPosition()==0?View.VISIBLE:View.GONE);signed.run();onPick(outCol,signed);
         f.addView(label("Imported rows are marked cleared and wait for you to review them. Import rules (Settings > Payees) apply first. A row with the same amount as a transaction already here, dated within a week, is matched to it instead of added. Dates in the future or before the account opened are skipped.",12,main.muted,false));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);AlertDialog d=new AlertDialog.Builder(main).setTitle("Import transactions")
             .setView(scroll).setNegativeButton("Cancel",null).setPositiveButton("Import",null).create();
@@ -187,8 +193,9 @@ final class SettingsScreen extends Ui {
             String format=CsvImport.detectDateFormat(rows,dc,h);
             if(format==null){toast("MyBudget can't read the dates in that column. Check the Date column.");return;}
             Budget.Account a=accounts.get(account.getSelectedItemPosition());CsvImport.Result[] r=new CsvImport.Result[1];
-            if(!main.change(()->r[0]=CsvImport.run(main.budget,rows,h,dc,pc,ac,oc,format,main.accountById(a.id))))return;
-            if(h)main.prefs().edit().putString("import_columns",String.join("\u0002",first)+"\u0001"+dc+"\u0001"+pc+"\u0001"+ac+"\u0001"+oc).apply();
+            if(!main.change(()->r[0]=CsvImport.run(main.budget,rows,h,dc,pc,ac,oc,format,main.accountById(a.id),oc<0&&reversed.isChecked())))return;
+            if(h)main.prefs().edit().putString("import_columns",String.join("\u0002",first)+"\u0001"+dc+"\u0001"+pc+"\u0001"+ac+"\u0001"+oc)
+                .putString("import_reversed",(oc<0&&reversed.isChecked()?"1":"0")+"\u0001"+headers).apply();
             d.dismiss();CsvImport.Result x=r[0];List<String> skipped=new ArrayList<>();if(x.duplicates>0)skipped.add(x.duplicates+" already there");
             if(x.future>0)skipped.add(x.future+" in the future");if(x.beforeOpening>0)skipped.add(x.beforeOpening+" before the account opened");
             if(x.unreadable>0)skipped.add(x.unreadable+" unreadable");

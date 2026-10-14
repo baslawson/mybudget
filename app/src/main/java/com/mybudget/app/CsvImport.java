@@ -142,7 +142,9 @@ public final class CsvImport {
     private static final Pattern DECIMAL_COMMA=Pattern.compile("-?(?:\\d{1,3}(?:\\.\\d{3})+|\\d+),\\d{1,2}");
     private static final Pattern TRANSFER=Pattern.compile("(?i)\\b(?:transfer|tfr|trf|xfer)\\b"); // a statement's word for a transfer
     private static final Pattern CODE=Pattern.compile("(?<![A-Z])[A-Z]{3}(?![A-Z])"); // three letters on their own: a currency code when it's a known one
-    public static LocalDate date(String s,String format){return LocalDate.parse(s.trim(),new java.time.format.DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(format).toFormatter(Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));} // "05 OCT 2026", "5 oct 2026" (hunt 26 B2)
+    // Bug hunt 27 (M8): a time after the date ("05/10/2026 10:23", "2026-10-05T10:23:00", "5/10/2026 9:05 AM") is left off.
+    private static final java.util.regex.Pattern TIME_AFTER=java.util.regex.Pattern.compile("[ T]+\\d{1,2}:\\d{2}(:\\d{2}(\\.\\d+)?)?\\s*([AaPp]\\.?[Mm]\\.?)?\\s*(Z|[+-]\\d{2}:?\\d{2})?\\s*$");
+    public static LocalDate date(String s,String format){return LocalDate.parse(TIME_AFTER.matcher(s.trim()).replaceFirst(""),new java.time.format.DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(format).toFormatter(Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT));} // "05 OCT 2026", "5 oct 2026" (hunt 26 B2)
     /**
      * The date format of [column] (after the header row when [header]): the first that reads every non-empty value, else the one
      * reading the most, if at least half (hunt 26 B2: a footer, an opening or closing balance or a "Pending" row then counts as
@@ -164,12 +166,15 @@ public final class CsvImport {
      * otherwise [amountColumn] holds money in and [outflowColumn] money out.
      */
     public static Result run(Budget budget,List<List<String>> rows,boolean header,int dateColumn,int payeeColumn,int amountColumn,int outflowColumn,String dateFormat,Budget.Account account){
+        return run(budget,rows,header,dateColumn,payeeColumn,amountColumn,outflowColumn,dateFormat,account,false);}
+    /** Bug hunt 27 (M2): [reversed]: the one signed amount column shows spending as positive (many card statements). */
+    public static Result run(Budget budget,List<List<String>> rows,boolean header,int dateColumn,int payeeColumn,int amountColumn,int outflowColumn,String dateFormat,Budget.Account account,boolean reversed){
         // Each row already in the account matches one imported row: two identical rows in one statement are two transactions.
         Result r=new Result();Map<String,Integer> existing=new HashMap<>();
         // An imported row is known by the statement's own payee text (bankPayee), so renaming or merging its payee later doesn't hide it; others by their payee.
-        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
+        for(Budget.Entry e:budget.entries)if(e.account.equals(account.id))existing.merge(statementKey(e),1,Integer::sum);
         // Hunt 26 B3: of those, the ones a statement brought in: a duplicate row is one of these first, and only otherwise an entry made here.
-        Map<String,Integer> imported=new HashMap<>();for(Budget.Entry e:budget.entries)if(e.account.equals(account.id)&&!Budget.statementPayee(e).isEmpty())imported.merge(key(e.date,e.amount,e.bankPayee.isEmpty()?e.payee:e.bankPayee),1,Integer::sum);
+        Map<String,Integer> imported=new HashMap<>();for(Budget.Entry e:budget.entries)if(e.account.equals(account.id)&&!Budget.statementPayee(e).isEmpty())imported.merge(statementKey(e),1,Integer::sum);
         // Hunt 23: transfers made in MyBudget, in or out of this account, by date and amount: the statement names them its own way
         // ("TFR to savings" for MyBudget's "Transfer to Savings"), so a row that says it is a transfer matches one of them.
         Map<String,Integer> transfers=new HashMap<>();
@@ -185,18 +190,18 @@ public final class CsvImport {
         for(int i=header?1:0;i<rows.size();i++){List<String> row=rows.get(i);
             LocalDate d;long cents;String payee;
             try{d=date(cell(row,dateColumn),dateFormat);payee=cell(row,payeeColumn);
-                if(outflowColumn<0)cents=amount(cell(row,amountColumn));
+                if(outflowColumn<0){cents=amount(cell(row,amountColumn));if(reversed)cents=-cents;}
                 else{String in=cell(row,amountColumn),out=cell(row,outflowColumn);cents=(in.isEmpty()?0:Math.abs(amount(in)))-(out.isEmpty()?0:Math.abs(amount(out)));}
             }catch(Exception e){r.unreadable++;continue;}
             if(cents==0){r.unreadable++;continue;}if(payee.isEmpty())payee="(no payee)";payee=Budget.cut(payee,80);
-            if(d.isAfter(today)){r.future++;continue;}if(d.toString().compareTo(account.date)<0){r.beforeOpening++;continue;}
+            if(d.isAfter(Budget.latestToday())){r.future++;continue;}if(d.toString().compareTo(account.date)<0){r.beforeOpening++;continue;}
             // A rule's new name counts for duplicates too: the row may have been imported (and renamed) before.
             Budget.Rule rule=budget.rule(payee);String named=rule==null||rule.rename.isEmpty()?payee:rule.rename;Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             String k=key(d.toString(),cents,payee),k2=key(d.toString(),cents,named);if(existing.getOrDefault(k,0)<=0)k=k2;if(existing.getOrDefault(k,0)>0){existing.merge(k,-1,Integer::sum);r.duplicates++;
                 // That transaction is this row. Hunt 24 B1: one entered here remembers the statement's payee (and is cleared), so a
                 // later statement's row never takes it as well; it's out of matching for good.
                 if(imported.getOrDefault(k,0)>0)imported.merge(k,-1,Integer::sum);
-                else for(Iterator<Budget.Entry> it=unmatched.iterator();it.hasNext();){Budget.Entry e=it.next();if(key(e.date,e.amount,e.payee).equals(k)){it.remove();e.bankPayee=payee;e.cleared=true;break;}}
+                else for(Iterator<Budget.Entry> it=unmatched.iterator();it.hasNext();){Budget.Entry e=it.next();if(key(e.date,e.amount,e.payee).equals(k)){it.remove();e.bankPayee=payee;e.bankDate=d.toString();e.bankAmount=cents;e.cleared=true;break;}}
                 continue;}
             String moved=key(d.toString(),cents,"");if(TRANSFER.matcher(payee).find()&&transfers.getOrDefault(moved,0)>0){transfers.merge(moved,-1,Integer::sum);r.duplicates++;continue;}
             pending.add(new Object[]{d,cents,payee,rule,named});
@@ -225,7 +230,7 @@ public final class CsvImport {
             Budget.Category ruled=rule==null?null:budget.category(rule.category);if(ruled!=null&&ruled.payment())ruled=null;
             Budget.Entry match=takes[p];
             if(match!=null&&taken.contains(match)){String was=key(match.date,match.amount,match.payee);if(existing.getOrDefault(was,0)>0)existing.merge(was,-1,Integer::sum);}
-            if(match!=null){match.date=d.toString();match.cleared=true;match.bankPayee=payee;budget.changed();r.matched++;r.matches.add(match);continue;}
+            if(match!=null){match.date=d.toString();match.cleared=true;match.bankPayee=payee;match.bankDate=d.toString();match.bankAmount=cents;budget.changed();r.matched++;r.matches.add(match);continue;}
             if(rule!=null)r.matchedRules++;String bank=payee;payee=named;
             // A statement payee imported before takes that row's payee as it's named now (a rule's rename comes first), and its category.
             Budget.Entry seen=budget.lastForBankPayee(bank);if(seen!=null&&(rule==null||rule.rename.isEmpty()))payee=seen.payee.trim();
@@ -237,11 +242,13 @@ public final class CsvImport {
             else if(cents>0)category=known!=null&&last!=null&&last.amount>0?known.id:""; // money in: a refund only when the payee's last one was
             else if(known!=null)category=known.id;
             else{if(toCategorize==null)toCategorize=toCategorize(budget);category=toCategorize.id;}
-            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.approved=false;e.memo=Budget.IMPORTED;e.bankPayee=bank;budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
+            Budget.Entry e=new Budget.Entry(payee,category,account.id,d.toString(),cents);e.cleared=true;e.approved=false;e.memo=Budget.IMPORTED;e.bankPayee=bank;e.bankDate=d.toString();e.bankAmount=cents;budget.validate(e);budget.entries.add(0,e);r.entries.add(e);r.added++;
         }
         return r;
     }
     private static String cell(List<String> row,int i){return i>=0&&i<row.size()?row.get(i):"";}
+    /** Bug hunt 27 (M4): the statement row [e] is: its statement date, amount and payee when it has them (version 10), else its own. */
+    private static String statementKey(Budget.Entry e){return key(e.bankDate.isEmpty()?e.date:e.bankDate,e.bankAmount==0?e.amount:e.bankAmount,e.bankPayee.isEmpty()?e.payee:e.bankPayee);}
     private static String key(String date,long cents,String payee){return date+"|"+cents+"|"+payee.trim().toLowerCase(Locale.ROOT);}
     private static Budget.Category toCategorize(Budget b){for(Budget.Category c:b.categories)if(c.name.equalsIgnoreCase(TO_CATEGORIZE)&&!c.payment())return c;Budget.Category c=new Budget.Category(TO_CATEGORIZE);c.group="Everyday";b.categories.add(0,c);return c;}
 }
