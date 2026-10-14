@@ -2,15 +2,15 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.21
+## Download 0.0.22
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.21/MyBudget-0.0.21.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.21)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.22/MyBudget-0.0.22.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.22)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.21`, version code `24`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.22`, version code `25`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
 This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
@@ -26,6 +26,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.22**: a **balance forecast** in Reports (each account over the next 30 or 90 days, its lowest point, and a warning on Home before one would go below zero); **regular charges** spotted from payments that repeat, to make upcoming in one tap; **money owed between people** (Accounts, or "Someone owes part of this" on a transaction), with Settle up; **last month in review** on Home early in the month and in Reports; and fixes from a bug hunt of these. Saved-data version 11, which 0.0.21 can't open.
 - **0.0.21**: fixes from a bug hunt: Reconcile on a card asks what the statement says you owe; an import option for card statements that show spending as positive amounts; Make a payment on a pay-later plan pays the next payment (so it isn't paid twice); importing a statement again no longer adds a row whose date or amount you changed (imported rows keep the statement's date and amount: saved-data version 10, which 0.0.20 can't open); a photo taken while Android closed MyBudget is kept; moving money in a past month checks later months; dates with a time import.
 - **0.0.20**: an account's opening balance (or what a card or plan owed when added) and its opening date can be corrected in Edit account until the account is first reconciled, with what changes shown before saving and Undo after.
 - **0.0.19**: **pay later** (PayPal Pay in 4, Afterpay, Zip and the like): buy on a plan from Add transaction and the purchase comes out of its category once, while its payments are set up as upcoming transfers from your account (with a reminder the day before, if you like); Accounts shows the next payment and how many are left; a refund on a plan offers to lower the payments left. Also: reminders show again when notifications are off. Budgets saved by 0.0.19 can't be opened by 0.0.18 or earlier.
