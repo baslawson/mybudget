@@ -18,9 +18,11 @@ This release uses local device storage, manual entries, CSV imports, and expense
 
 All accounts, payees, amounts and transactions shown below are fictional demo data from a separate preview installation.
 
-<img src="docs/screenshots/home-dark.png" width="220" alt="Home with fictional funding progress in dark theme"> <img src="docs/screenshots/plan-dark.png" width="220" alt="Monthly plan with grouped categories and funding targets">
+<img src="docs/screenshots/home-dark.png" width="220" alt="Home with To budget and repeating charges spotted, in dark theme"> <img src="docs/screenshots/plan-dark.png" width="220" alt="Monthly plan with grouped categories and funding targets">
 
-<img src="docs/screenshots/spending-dark.png" width="220" alt="Fictional spending transactions"> <img src="docs/screenshots/accounts-dark.png" width="220" alt="Fictional cash accounts"> <img src="docs/screenshots/settings-light.png" width="220" alt="Light theme appearance settings">
+<img src="docs/screenshots/spending-dark.png" width="220" alt="Fictional spending transactions with upcoming ones"> <img src="docs/screenshots/accounts-dark.png" width="220" alt="Fictional cash accounts"> <img src="docs/screenshots/reports-dark.png" width="220" alt="Reports with the balance forecast for the next 30 days">
+
+<img src="docs/screenshots/settings-light.png" width="220" alt="Light theme appearance settings">
 
 ## Versions
 

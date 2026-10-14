@@ -19,11 +19,13 @@ public class ForecastChart extends View {
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     @Override protected void onMeasure(int w,int h){setMeasuredDimension(MeasureSpec.getSize(w),(int)dp(120));}
     @Override protected void onDraw(Canvas canvas){
-        if(daily.length<2)return;long highest=0,lowest=0;for(long v:daily){highest=Math.max(highest,v);lowest=Math.min(lowest,v);}
-        final long min=lowest,span=Math.max(1,highest-lowest);
+        if(daily.length<2)return;long highest=Long.MIN_VALUE,lowest=Long.MAX_VALUE;for(long v:daily){highest=Math.max(highest,v);lowest=Math.min(lowest,v);}
+        // Above zero all the way: scaled to its own range (a quarter of it spare below), so the changes show; reaching zero or
+        // below: from the lowest point, with the zero line drawn.
+        final long min=lowest>0?Math.max(0,lowest-Math.max(1,highest-lowest)/4):lowest,span=Math.max(1,highest-min);
         float w=getWidth(),top=dp(6),bottom=getHeight()-dp(6),step=w/(daily.length-1);
         java.util.function.LongFunction<Float> y=v->bottom-(bottom-top)*(v-min)/(float)span;
-        paint.setStyle(Paint.Style.FILL);paint.setColor(axis);float zero=y.apply(0);canvas.drawRect(0,zero,w,zero+dp(1),paint);
+        paint.setStyle(Paint.Style.FILL);paint.setColor(axis);float zero=y.apply(0);if(min<=0)canvas.drawRect(0,zero,w,zero+dp(1),paint);
         Path path=new Path();for(int i=0;i<daily.length;i++){float x=step*i,v=y.apply(daily[i]);if(i==0)path.moveTo(x,v);else path.lineTo(x,v);}
         paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(2.5f));paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(line);canvas.drawPath(path,paint);
         // Below zero: the same line again, clipped to under the zero line.
