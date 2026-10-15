@@ -139,7 +139,7 @@ public final class BudgetStore {
         // Money owed between people (version 11; missing: none). A record MyBudget can't show (no name, no amount) is damaged data.
         if(root.has("owed")&&root.optJSONArray("owed")==null)throw new JSONException("Invalid money owed."); // bug hunt 28 M10: not a list is damaged data
         JSONArray owed=root.optJSONArray("owed");if(owed!=null)for(int i=0;i<owed.length();i++){JSONObject j=owed.getJSONObject(i);String person=j.getString("person").trim();long amount=j.getLong("amount");String date=j.getString("date");LocalDate.parse(date);
-            if(person.isEmpty()||person.length()>Budget.PERSON_MAX||amount==0||Math.abs(amount)>10_000_000_000L)throw new JSONException("Invalid money owed.");
+            if(person.isEmpty()||person.length()>Budget.PERSON_MAX||amount==0||Math.abs(amount)>Budget.OWED_LOAD_MAX)throw new JSONException("Invalid money owed."); // bug hunt 32: a settling up can be over one record's limit
             Budget.Owed w=new Budget.Owed(person,amount,date);w.id=j.optString("id",w.id);w.note=Budget.cut(j.optString("note",""),200);w.entry=j.optString("entry","");b.owed.add(w);}
         return b;
     }

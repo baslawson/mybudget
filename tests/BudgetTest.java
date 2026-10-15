@@ -15,6 +15,16 @@ public class BudgetTest {
     // The features of 14 Oct: the balance forecast, repeating charges, money owed between people and the month in review.
     // Bug hunt 28: repeating charges leave out Planner's bills (M1) and tracking accounts (M2) and keep the usual day (M3);
     // money owed can be corrected and deleted (M6) and a large balance settled (M7).
+    /** Bug hunt 32: notes that already say "Settled up" stay as they are and can be corrected; a large settling up can be. */
+    static void hunt32(){
+        Budget b=new Budget();Budget.Owed old=b.addOwed("Sam",1000,"2026-10-01","Lunch","");old.note="settled UP"; // typed in an older version
+        b.editOwed(old.id,1200,"2026-10-02","settled up");same(old.note,"settled UP","an older typed note kept as it was");equal(old.amount,1200,"and corrected");
+        boolean refused=false;try{b.editOwed(old.id,1200,"2026-10-02","Settled Up ");}catch(IllegalArgumentException e){refused=true;}if(refused)throw new AssertionError("same note in another case is fine");
+        Budget.Owed lunch=b.addOwed("Sam",500,"2026-10-03","Lunch","");refused=false;try{b.editOwed(lunch.id,500,"2026-10-03","SETTLED UP");}catch(IllegalArgumentException e){refused=true;}if(!refused)throw new AssertionError("changing a note to it refused");
+        Budget.Owed s=b.settle("Sam","2026-10-04");b.editOwed(s.id,s.amount,"2026-10-05","settled up");same(s.note,"Settled up","a settling up's note stays exact");
+        b.addOwed("Kim",Budget.OWED_MAX,"2026-10-01","","");b.addOwed("Kim",Budget.OWED_MAX,"2026-10-02","","");Budget.Owed k=b.settle("Kim","2026-10-03");
+        b.editOwed(k.id,k.amount,"2026-10-04",Budget.SETTLED);same(k.date,"2026-10-04","a large settling up can be corrected");
+    }
     /** Bug hunt 31: a record that can't be traced makes it To budget; open since the balance was last zero; hidden; the note. */
     static void hunt31(){
         Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);
@@ -174,7 +184,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();hunt31();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();hunt31();hunt32();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){

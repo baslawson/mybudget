@@ -1108,6 +1108,8 @@ public final class Budget {
     public final List<Owed> owed=new ArrayList<>();
     public static final int PERSON_MAX=60;
     public static final long OWED_MAX=10_000_000_000L;
+    /** The largest record loading accepts (bug hunt 32): a settling up can be the sum of many records of up to OWED_MAX. */
+    public static final long OWED_LOAD_MAX=1_000_000_000_000_000L;
     /** Each person's balance (positive: they owe you), by name whatever its capitals, in the spelling first used; people settled up left out unless [all]. */
     public LinkedHashMap<String,Long> owedBalances(boolean all){Map<String,String> names=new LinkedHashMap<>();Map<String,Long> sums=new HashMap<>();
         for(Owed o:owed){String k=o.person.trim().toLowerCase(Locale.ROOT);names.putIfAbsent(k,o.person.trim());sums.merge(k,o.amount,Long::sum);}
@@ -1138,7 +1140,7 @@ public final class Budget {
     /** Settles [person] up on [date]: one record of what's left, so their balance is zero. Null when there's nothing to settle. */
     public Owed settle(String person,String date){String name=null;long left=0;
         for(Map.Entry<String,Long> b:owedBalances(true).entrySet())if(b.getKey().equalsIgnoreCase(person.trim())){name=b.getKey();left=b.getValue();}
-        if(name==null||left==0)return null;LocalDate.parse(date);
+        if(name==null||left==0)return null;LocalDate.parse(date);if(Math.abs(left)>OWED_LOAD_MAX)throw new IllegalArgumentException("That balance is too large to settle in one step.");
         // Bug hunt 28 M7: straight in, not through addOwed's limit: a balance over one record's limit can still be settled.
         Owed o=new Owed(name,-left,date);o.note=SETTLED;owed.add(o);changed();return o;}
     public static final String SETTLED="Settled up",SETTLED_NOTE="\"Settled up\" is kept for Settle up. Use another note.";
@@ -1146,8 +1148,11 @@ public final class Budget {
     public void editOwed(String id,long amount,String date,String note){Owed o=null;for(Owed w:owed)if(w.id.equals(id))o=w;
         if(o==null)throw new IllegalArgumentException("That record was deleted.");
         if(amount==0){owed.remove(o);changed();return;}
-        if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
-        String typed=note==null?"":note.trim();if(SETTLED.equalsIgnoreCase(typed)&&!o.note.equals(SETTLED))throw new IllegalArgumentException(SETTLED_NOTE);
+        // Bug hunt 32: a settling up may be over one record's limit (M7); it can be corrected up to its own size.
+        if(Math.abs(amount)>Math.max(OWED_MAX,Math.abs(o.amount)))throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
+        // Bug hunt 32: a note that already says it (a settling up, or typed in an older version, any case) stays exactly as it
+        // was, so its date and amount can still be corrected; only changing a note to it is refused.
+        String typed=note==null?"":note.trim();if(SETTLED.equalsIgnoreCase(typed)){if(!SETTLED.equalsIgnoreCase(o.note.trim()))throw new IllegalArgumentException(SETTLED_NOTE);typed=o.note;}
         o.amount=amount;o.date=date;o.note=cut(typed,200);changed();}
 
     // ---- Month in review (user, 14 Oct) ----
