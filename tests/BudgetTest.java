@@ -15,6 +15,22 @@ public class BudgetTest {
     // The features of 14 Oct: the balance forecast, repeating charges, money owed between people and the month in review.
     // Bug hunt 28: repeating charges leave out Planner's bills (M1) and tracking accounts (M2) and keep the usual day (M3);
     // money owed can be corrected and deleted (M6) and a large balance settled (M7).
+    /** Bug hunt 31: a record that can't be traced makes it To budget; open since the balance was last zero; hidden; the note. */
+    static void hunt31(){
+        Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);
+        Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        Budget.Entry dinner=new Budget.Entry("Diner",food.id,bank.id,"2026-10-01",-6000);b.entries.add(dinner);
+        b.addOwed("Sam",3000,"2026-10-01","Dinner",dinner.id);same(b.owedCategory("Sam"),food.id,"linked only");
+        b.addOwed("Sam",500,"2026-10-01","Taxi","");if(b.owedCategory("Sam")!=null)throw new AssertionError("an untraced record: To budget");
+        // Brought to zero by hand: what came before doesn't count.
+        b.addOwed("Sam",-3500,"2026-10-02","Even","");if(b.owedCategory("Sam")!=null)throw new AssertionError("nothing open");
+        b.addOwed("Sam",2000,"2026-10-03","Dinner again",dinner.id);same(b.owedCategory("Sam"),food.id,"after a zero by hand");
+        food.hidden=true;if(b.owedCategory("Sam")!=null)throw new AssertionError("hidden: To budget");food.hidden=false;
+        // A split or deleted transaction: To budget.
+        b.entries.remove(dinner);if(b.owedCategory("Sam")!=null)throw new AssertionError("deleted: To budget");
+        boolean refused=false;try{b.addOwed("Kim",100,"2026-10-03"," settled UP ","");}catch(IllegalArgumentException e){refused=true;}if(!refused)throw new AssertionError("typed Settled up refused");
+        Budget.Owed s=b.settle("Sam","2026-10-04");b.editOwed(s.id,s.amount,"2026-10-05","Settled up");same(s.date,"2026-10-05","its own note kept");
+    }
     /** Bug hunt 30 B7: paid back for part of a transaction, it goes back to that transaction's category. */
     static void hunt30(){
         Budget b=new Budget();Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);
@@ -23,7 +39,7 @@ public class BudgetTest {
         Budget.Entry film=new Budget.Entry("Cinema",fun.id,bank.id,"2026-10-02",-3000);b.entries.add(film);
         if(b.owedCategory("Sam")!=null)throw new AssertionError("B7 nothing owed");
         b.addOwed("Sam",3000,"2026-10-01","Dinner",dinner.id);same(b.owedCategory("sam"),food.id,"B7 from the dinner's category");
-        b.addOwed("Sam",500,"2026-10-01","Taxi","");same(b.owedCategory("Sam"),food.id,"B7 a record with no transaction doesn't change it");
+        b.addOwed("Sam",-500,"2026-10-01","I owe a taxi","");same(b.owedCategory("Sam"),food.id,"B7 what you owe them doesn't change it");
         b.addOwed("Sam",1500,"2026-10-02","Film",film.id);if(b.owedCategory("Sam")!=null)throw new AssertionError("B7 two categories: none");
         b.settle("Sam","2026-10-03");if(b.owedCategory("Sam")!=null)throw new AssertionError("B7 settled: only records since");
         b.addOwed("Sam",1500,"2026-10-04","Film again",film.id);same(b.owedCategory("Sam"),fun.id,"B7 after settling up, the new one");
@@ -158,7 +174,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();hunt31();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){

@@ -251,7 +251,8 @@ final class AccountsScreen extends Ui {
             else main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString()));});
         shown[0]=b.show();}
     /**
-     * Settling up with someone who owed you [cents] (2026-10-15): also enter what they paid back as income to To budget, into
+     * Settling up with someone who owed you [cents] (2026-10-15): also enter what they paid back as income (to the category it
+     * was spent from, see Budget.owedCategory, or To budget), into
      * the account it went to, or settle up only. Either way one change, which the Undo bar takes back whole.
      */
     private void settleWithIncome(String name,long cents){

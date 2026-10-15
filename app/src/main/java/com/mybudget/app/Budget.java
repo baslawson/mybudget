@@ -1101,7 +1101,7 @@ public final class Budget {
     /**
      * A record of money owed: [amount] positive when [person] owes you, negative when you owe them; settling up is a record
      * that brings their balance back to zero. [entry] is the transaction it came from, if any. Only a record: it isn't money
-     * in an account and changes no category (when they pay you back, enter that as income too).
+     * in an account and changes no category (Settle up can enter what they paid back as income, see owedCategory).
      */
     public static final class Owed { public String id=Budget.id(),person,date,note="",entry="";public long amount;
         public Owed(String person,long amount,String date){this.person=person;this.amount=amount;this.date=date;} }
@@ -1118,17 +1118,21 @@ public final class Budget {
     public Owed addOwed(String person,long amount,String date,String note,String entry){String name=person==null?"":person.trim();
         if(name.isEmpty())throw new IllegalArgumentException("Enter who it is.");if(name.length()>PERSON_MAX)throw new IllegalArgumentException("Use a shorter name.");
         if(amount==0)throw new IllegalArgumentException("Enter an amount.");if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
+        if(SETTLED.equalsIgnoreCase(note==null?"":note.trim()))throw new IllegalArgumentException(SETTLED_NOTE); // bug hunt 31: that note marks a settling up
         for(String known:owedBalances(true).keySet())if(known.equalsIgnoreCase(name))name=known;
         Owed o=new Owed(name,amount,date);o.note=cut(note==null?"":note.trim(),200);o.entry=entry==null?"":entry;owed.add(o);changed();return o;}
     /**
-     * The category what [person] owes you came from, when every open record linked to a transaction (since the last
-     * settling up) came from the same one, not a card's payment category; null otherwise (bug hunt 30 B7: paid back,
-     * it goes back there, not to To budget).
+     * The category what [person] owes you came from, when every open record of theirs that says they owe you came from a
+     * transaction in that one category (not split, not a transfer, not a card's payment category, not hidden); null
+     * otherwise, and the money paid back goes to To budget (bug hunt 30 B7). Bug hunt 31: open records are those since
+     * their balance was last zero, whatever the notes say, and one record that can't be traced makes it To budget, so
+     * a category never gets money that came from elsewhere.
      */
-    public String owedCategory(String person){String k=person.trim().toLowerCase(Locale.ROOT);String found=null;
-        for(int i=owed.size()-1;i>=0;i--){Owed o=owed.get(i);if(!o.person.trim().toLowerCase(Locale.ROOT).equals(k))continue;if(o.note.equals("Settled up"))break;
-            if(o.amount<=0||o.entry.isEmpty())continue;Entry e=null;for(Entry x:entries)if(x.id.equals(o.entry)){e=x;break;}
-            if(e==null||e.split()||e.transfer())continue;Category c=category(e.category);if(c==null||c.payment())continue;
+    public String owedCategory(String person){String k=person.trim().toLowerCase(Locale.ROOT);List<Owed> open=new ArrayList<>();long balance=0;
+        for(Owed o:owed){if(!o.person.trim().toLowerCase(Locale.ROOT).equals(k))continue;open.add(o);balance+=o.amount;if(balance==0)open.clear();}
+        String found=null;
+        for(Owed o:open){if(o.amount<=0)continue;if(o.entry.isEmpty())return null;Entry e=null;for(Entry x:entries)if(x.id.equals(o.entry)){e=x;break;}
+            if(e==null||e.split()||e.transfer())return null;Category c=category(e.category);if(c==null||c.payment()||c.hidden)return null;
             if(found==null)found=c.id;else if(!found.equals(c.id))return null;}
         return found;}
     /** Settles [person] up on [date]: one record of what's left, so their balance is zero. Null when there's nothing to settle. */
@@ -1136,13 +1140,15 @@ public final class Budget {
         for(Map.Entry<String,Long> b:owedBalances(true).entrySet())if(b.getKey().equalsIgnoreCase(person.trim())){name=b.getKey();left=b.getValue();}
         if(name==null||left==0)return null;LocalDate.parse(date);
         // Bug hunt 28 M7: straight in, not through addOwed's limit: a balance over one record's limit can still be settled.
-        Owed o=new Owed(name,-left,date);o.note="Settled up";owed.add(o);changed();return o;}
+        Owed o=new Owed(name,-left,date);o.note=SETTLED;owed.add(o);changed();return o;}
+    public static final String SETTLED="Settled up",SETTLED_NOTE="\"Settled up\" is kept for Settle up. Use another note.";
     /** Bug hunt 28 M6: a record corrected (amount, date, note) or, with [amount] 0, deleted. */
     public void editOwed(String id,long amount,String date,String note){Owed o=null;for(Owed w:owed)if(w.id.equals(id))o=w;
         if(o==null)throw new IllegalArgumentException("That record was deleted.");
         if(amount==0){owed.remove(o);changed();return;}
         if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
-        o.amount=amount;o.date=date;o.note=cut(note==null?"":note.trim(),200);changed();}
+        String typed=note==null?"":note.trim();if(SETTLED.equalsIgnoreCase(typed)&&!o.note.equals(SETTLED))throw new IllegalArgumentException(SETTLED_NOTE);
+        o.amount=amount;o.date=date;o.note=cut(typed,200);changed();}
 
     // ---- Month in review (user, 14 Oct) ----
     /** A month looked back on (review). */
