@@ -1120,6 +1120,17 @@ public final class Budget {
         if(amount==0)throw new IllegalArgumentException("Enter an amount.");if(Math.abs(amount)>OWED_MAX)throw new IllegalArgumentException("That amount is too large.");LocalDate.parse(date);
         for(String known:owedBalances(true).keySet())if(known.equalsIgnoreCase(name))name=known;
         Owed o=new Owed(name,amount,date);o.note=cut(note==null?"":note.trim(),200);o.entry=entry==null?"":entry;owed.add(o);changed();return o;}
+    /**
+     * The category what [person] owes you came from, when every open record linked to a transaction (since the last
+     * settling up) came from the same one, not a card's payment category; null otherwise (bug hunt 30 B7: paid back,
+     * it goes back there, not to To budget).
+     */
+    public String owedCategory(String person){String k=person.trim().toLowerCase(Locale.ROOT);String found=null;
+        for(int i=owed.size()-1;i>=0;i--){Owed o=owed.get(i);if(!o.person.trim().toLowerCase(Locale.ROOT).equals(k))continue;if(o.note.equals("Settled up"))break;
+            if(o.amount<=0||o.entry.isEmpty())continue;Entry e=null;for(Entry x:entries)if(x.id.equals(o.entry)){e=x;break;}
+            if(e==null||e.split()||e.transfer())continue;Category c=category(e.category);if(c==null||c.payment())continue;
+            if(found==null)found=c.id;else if(!found.equals(c.id))return null;}
+        return found;}
     /** Settles [person] up on [date]: one record of what's left, so their balance is zero. Null when there's nothing to settle. */
     public Owed settle(String person,String date){String name=null;long left=0;
         for(Map.Entry<String,Long> b:owedBalances(true).entrySet())if(b.getKey().equalsIgnoreCase(person.trim())){name=b.getKey();left=b.getValue();}

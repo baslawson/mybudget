@@ -255,18 +255,25 @@ final class AccountsScreen extends Ui {
      * the account it went to, or settle up only. Either way one change, which the Undo bar takes back whole.
      */
     private void settleWithIncome(String name,long cents){
-        List<Budget.Account> into=main.openAccounts();into.removeIf(Budget.Account::tracking);
-        if(into.isEmpty()){main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString()));return;}
+        // Bug hunt 30 B7: money paid back goes into a cash account, not onto a card.
+        List<Budget.Account> into=main.openAccounts();into.removeIf(a->a.tracking()||a.credit());
+        // B8: with no account for it, settled up only, and saying why.
+        if(into.isEmpty()){main.changeWithUndo(name+" settled up (no budget account for the income)",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString()));return;}
+        // B7: owed for part of a transaction, it goes back to that transaction's category (or To budget, if chosen).
+        String fromId=main.budget.owedCategory(name);Budget.Category from=fromId==null?null:main.budget.category(fromId);
         LinearLayout f=form();
-        f.addView(label(name+" paid you back "+money(cents)+"? It can go in as income to To budget as well.",14,main.ink,false));
+        f.addView(label(name+" paid you back "+money(cents)+"? It can go in as income as well.",14,main.ink,false));
         String[] names=new String[into.size()];for(int i=0;i<names.length;i++)names[i]=into.get(i).name;
         android.widget.Spinner account=spinner(f,"Into account",names,0);
         String[] ids=new String[into.size()];for(int i=0;i<ids.length;i++)ids[i]=into.get(i).id;
+        android.widget.Spinner back=from==null?null:spinner(f,"Into category",new String[]{from.name+" (where it was spent)","To budget"},0);
+        if(from==null)f.addView(label("It goes to To budget.",12,main.muted,false));
         new AlertDialog.Builder(main).setTitle("Settle up with "+name).setView(f).setNegativeButton("Cancel",null)
             .setNeutralButton("Settle up only",(d,w)->main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString())))
             .setPositiveButton("Add income too",(d,w)->{String accountId=ids[Math.max(0,account.getSelectedItemPosition())];String today=LocalDate.now().toString();
                 main.changeWithUndo(name+" settled up, "+money(cents)+" in",name+"'s settling up and income undone.",()->{
-                    Budget.Entry income=new Budget.Entry(name,"",accountId,today,cents);income.memo="Paid back (settled up)";
+                    String category=from!=null&&back.getSelectedItemPosition()==0?from.id:"";
+                    Budget.Entry income=new Budget.Entry(name,category,accountId,today,cents);income.memo="Paid back (settled up)";
                     main.budget.validate(income);main.budget.entries.add(0,income);main.budget.settle(name,today);});})
             .show();}
     /** A record corrected (which way, amount, date, note) or deleted (bug hunt 28 M6). */
