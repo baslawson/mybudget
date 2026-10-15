@@ -245,9 +245,30 @@ final class AccountsScreen extends Ui {
         f.addView(label("Tap a record to change or delete it. A record only: it doesn't change an account or a category. When they pay you back, also enter it as income.",12,main.muted,false));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);
         AlertDialog.Builder b=new AlertDialog.Builder(main).setTitle(name).setView(scroll).setNegativeButton("Close",null).setNeutralButton("Add",(d,w)->addOwed(name));
-        // With the Undo bar a delete has (2026-10-15): settling up was final at one tap.
-        if(left!=0)b.setPositiveButton("Settle up",(d,w)->main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString())));
+        // With the Undo bar a delete has (2026-10-15): settling up was final at one tap. When they owed you, it also offers
+        // to enter what they paid back as income, in the same change (one Undo takes back both).
+        if(left!=0)b.setPositiveButton("Settle up",(d,w)->{if(left>0)settleWithIncome(name,left);
+            else main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString()));});
         shown[0]=b.show();}
+    /**
+     * Settling up with someone who owed you [cents] (2026-10-15): also enter what they paid back as income to To budget, into
+     * the account it went to, or settle up only. Either way one change, which the Undo bar takes back whole.
+     */
+    private void settleWithIncome(String name,long cents){
+        List<Budget.Account> into=main.openAccounts();into.removeIf(Budget.Account::tracking);
+        if(into.isEmpty()){main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString()));return;}
+        LinearLayout f=form();
+        f.addView(label(name+" paid you back "+money(cents)+"? It can go in as income to To budget as well.",14,main.ink,false));
+        String[] names=new String[into.size()];for(int i=0;i<names.length;i++)names[i]=into.get(i).name;
+        android.widget.Spinner account=spinner(f,"Into account",names,0);
+        String[] ids=new String[into.size()];for(int i=0;i<ids.length;i++)ids[i]=into.get(i).id;
+        new AlertDialog.Builder(main).setTitle("Settle up with "+name).setView(f).setNegativeButton("Cancel",null)
+            .setNeutralButton("Settle up only",(d,w)->main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString())))
+            .setPositiveButton("Add income too",(d,w)->{String accountId=ids[Math.max(0,account.getSelectedItemPosition())];String today=LocalDate.now().toString();
+                main.changeWithUndo(name+" settled up, "+money(cents)+" in",name+"'s settling up and income undone.",()->{
+                    Budget.Entry income=new Budget.Entry(name,"",accountId,today,cents);income.memo="Paid back (settled up)";
+                    main.budget.validate(income);main.budget.entries.add(0,income);main.budget.settle(name,today);});})
+            .show();}
     /** A record corrected (which way, amount, date, note) or deleted (bug hunt 28 M6). */
     private void editRecord(String id){Budget.Owed o=null;for(Budget.Owed w:main.budget.owed)if(w.id.equals(id))o=w;if(o==null)return;String name=o.person;
         LinearLayout f=form();Spinner way=spinner(f,"Which way",new String[]{"They owe me","I owe them"},o.amount>0?0:1);
