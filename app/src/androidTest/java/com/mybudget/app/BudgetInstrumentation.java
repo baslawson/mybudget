@@ -242,7 +242,7 @@ public class BudgetInstrumentation extends Instrumentation {
     private void backups(Budget b)throws Exception{
         YearMonth month=YearMonth.now();b.entries.get(0).externalId="pay-b";b.entries.get(0).billKey="planner-series-b";
         String file=BudgetStore.backup(b,LocalDateTime.of(2026,10,7,12,30,15,999));JSONObject root=new JSONObject(file);
-        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=6||root.getInt("version")!=9||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
+        if(!root.getString("app").equals("MyBudget")||root.getInt("backupVersion")!=BudgetStore.BACKUP_VERSION||root.getInt("version")!=BudgetStore.VERSION||!root.getString("created").equals("2026-10-07T12:30:15"))throw new AssertionError("Backup header");
         BudgetStore.Backup read=BudgetStore.readBackup("\n"+file);Budget r=read.budget;
         if(!read.created.equals("2026-10-07T12:30:15")||!BudgetStore.encode(r).equals(BudgetStore.encode(b)))throw new AssertionError("Backup lost data");
         eq(r.cash(month),b.cash(month));eq(r.ready(month),b.ready(month));if(r.external("pay-b")==null||r.lastForBill("planner-series-b")==null)throw new AssertionError("Planner link ids lost");

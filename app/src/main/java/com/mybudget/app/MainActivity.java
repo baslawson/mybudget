@@ -341,12 +341,14 @@ public class MainActivity extends Activity {
     // Undo for deletes: the saved data from just before the delete and what the delete saved. A bar above the tabs offers
     // Undo for 8 seconds, until the tab changes or another change is saved; it puts [undoBefore] back through commit(),
     // only while the saved data is still [undoAfter] (DataSafety.undoAllowed), so nothing saved since is overwritten.
-    static final long UNDO_MILLIS=8000;String undoBefore,undoAfter,undoText,undoTab;private long undoUntil;private int undoShown;private View undoBar;
-    /** A delete, as change(), then the Undo bar ([done]: "Transaction deleted"). */
-    boolean deleteWithUndo(String done,Runnable action){String[] before={null};
+    static final long UNDO_MILLIS=8000;String undoBefore,undoAfter,undoText,undoBack,undoTab;private long undoUntil;private int undoShown;private View undoBar;
+    /** A delete, as change(), then the Undo bar ([done]: "Transaction deleted"; after Undo, "Transaction restored."). */
+    boolean deleteWithUndo(String done,Runnable action){return changeWithUndo(done,done.replace(" deleted"," restored")+".",action);}
+    /** Any change, as change(), then the Undo bar saying [done]; [undone] is said once Undo has put it back (2026-10-15: Settle up). */
+    boolean changeWithUndo(String done,String undone,Runnable action){String[] before={null};
         try{commit(()->{try{before[0]=loaded!=null?loaded:BudgetStore.encode(budget);}catch(Exception e){throw new IllegalStateException("Could not prepare save.");}action.run();});} // the budget matches the saved data until the change
         catch(Exception e){ui.toast(e.getMessage());return false;}
-        undoBefore=before[0];undoAfter=loaded;undoText=done;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+UNDO_MILLIS;render();
+        undoBefore=before[0];undoAfter=loaded;undoText=done;undoBack=undone;undoTab=tab;undoUntil=android.os.SystemClock.uptimeMillis()+UNDO_MILLIS;render();
         root.announceForAccessibility(done+". Undo is available for a few seconds.");return true;}
     private void hideUndo(){undoBefore=null;if(undoBar!=null&&undoBar.getParent()instanceof LinearLayout)((LinearLayout)undoBar.getParent()).removeView(undoBar);undoBar=null;}
     private void addUndoBar(){
@@ -358,14 +360,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,ui.dp(6),0,0);root.addView(bar,p);undoBar=bar;
         if(Ui.motion()&&left>UNDO_MILLIS-400){bar.setAlpha(0f);bar.setTranslationY(ui.dp(16));bar.animate().alpha(1f).translationY(0f).setDuration(220).start();} // slides up when it first shows
         int shown=++undoShown;getWindow().getDecorView().postDelayed(()->{if(shown==undoShown)hideUndo();},left);}
-    private void undo(){String before=undoBefore,after=undoAfter,done=undoText;hideUndo();if(before==null)return;
+    private void undo(){String before=undoBefore,after=undoAfter,back=undoBack;hideUndo();if(before==null)return;
         if(!DataSafety.undoAllowed(prefs().getString("data",null),after,loaded)){
             try{if(reloadIfChanged())for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();}catch(IllegalStateException e){ui.toast(e.getMessage());}
             render();ui.toast("This can't be undone now: your budget changed since (an expense from Planner came in, or a backup was restored).");return;}
         try{commit(()->{Budget previous;try{previous=BudgetStore.decode(before);}catch(Exception e){throw new IllegalStateException("The budget from before can't be read. Nothing was changed.");}
                 previous.fromPlanner.addAll(budget.fromPlanner);budget=previous;});}
         catch(Exception e){ui.toast(e.getMessage());render();return;}
-        for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();String back=done.replace(" deleted"," restored")+".";ui.toast(back);}
+        for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();ui.toast(back);}
     final List<AlertDialog> editors=new ArrayList<>();
     /** The ⋮ menu open now (MoveMenu.show): closed when the screen is drawn again, so it never acts on old figures (hunt 27 H2). */
     android.widget.PopupWindow popup;

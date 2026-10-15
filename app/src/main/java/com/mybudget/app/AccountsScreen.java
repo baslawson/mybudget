@@ -245,7 +245,8 @@ final class AccountsScreen extends Ui {
         f.addView(label("Tap a record to change or delete it. A record only: it doesn't change an account or a category. When they pay you back, also enter it as income.",12,main.muted,false));
         ScrollView scroll=new ScrollView(main);scroll.addView(f);
         AlertDialog.Builder b=new AlertDialog.Builder(main).setTitle(name).setView(scroll).setNegativeButton("Close",null).setNeutralButton("Add",(d,w)->addOwed(name));
-        if(left!=0)b.setPositiveButton("Settle up",(d,w)->{try{main.commit(()->main.budget.settle(name,LocalDate.now().toString()));toast(name+" is settled up.");main.render();}catch(Exception x){toast(x.getMessage());}});
+        // With the Undo bar a delete has (2026-10-15): settling up was final at one tap.
+        if(left!=0)b.setPositiveButton("Settle up",(d,w)->main.changeWithUndo(name+" settled up",name+"'s settling up undone.",()->main.budget.settle(name,LocalDate.now().toString())));
         shown[0]=b.show();}
     /** A record corrected (which way, amount, date, note) or deleted (bug hunt 28 M6). */
     private void editRecord(String id){Budget.Owed o=null;for(Budget.Owed w:main.budget.owed)if(w.id.equals(id))o=w;if(o==null)return;String name=o.person;
