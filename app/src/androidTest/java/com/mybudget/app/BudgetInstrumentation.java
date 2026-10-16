@@ -19,6 +19,11 @@ public class BudgetInstrumentation extends Instrumentation {
     private View find(View v,String text,boolean button){if(v instanceof TextView&&((TextView)v).getText().toString().equals(text)&&(!button||v instanceof Button))return v;if(v instanceof ViewGroup){ViewGroup group=(ViewGroup)v;for(int i=0;i<group.getChildCount();i++){View found=find(group.getChildAt(i),text,button);if(found!=null)return found;}}return null;}
     @Override public void onStart(){Bundle result=new Bundle();try{
         if(arguments!=null&&arguments.getString("sample")!=null){sample(arguments.getString("sample"),result);return;}
+        if(arguments!=null&&"true".equals(arguments.getString("plannerPayments"))){
+            plannerPaymentRetries();sentPayments(LocalDate.now().toString());
+            result.putString("stream","PASS: Planner payment retries, confirmation and undo\n");finish(Activity.RESULT_OK,result);return;
+        }
+        plannerPaymentRetries();
         YearMonth month=YearMonth.now();String day=month.atDay(1).toString();
         JSONObject legacy=new JSONObject().put("ready",10000).put("categories",new JSONArray().put(new JSONObject().put("name","Groceries").put("available",15000)).put(new JSONObject().put("name","Savings").put("available",50000))).put("entries",new JSONArray().put(new JSONObject().put("payee","Shop").put("category","Groceries").put("date",day).put("amount",-5000)));
         Budget migrated=BudgetStore.decode(legacy.toString());eq(migrated.cash(month),75000);eq(migrated.ready(month),10000);eq(migrated.available(migrated.categories.get(0),month),15000);eq(migrated.assigned(migrated.categories.get(0),month),20000);
@@ -391,30 +396,55 @@ public class BudgetInstrumentation extends Instrumentation {
     private void texts(View v,StringBuilder out){if(v.getVisibility()!=View.VISIBLE)return;if(v instanceof TextView)out.append(((TextView)v).getText()).append("|");
         if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)texts(((ViewGroup)v).getChildAt(i),out);}
     private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
-    // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. The saved budget is put back afterwards.
+    // Planner's already-counted payments must leave its unpaid bills unchanged.
+    private void plannerPaymentRetries()throws Exception{
+        String owed="[{\"id\":\"planner-bill-retry\",\"billKey\":\"planner-series-retry\",\"payee\":\"Power\",\"due\":\"2026-10-20\",\"amountCents\":10000}]";
+        // A retry must leave the remainder alone even when the payment equals or exceeds it.
+        for(long cents:new long[]{8000,5000,4000}){
+            String part=PlannerBills.without(owed,"planner-bill-retry","planner-series-retry","pay-retry",cents);
+            eq(new JSONArray(part).getJSONObject(0).getLong("amountCents"),10000-cents);
+            if(PlannerBills.without(part,"planner-bill-retry","planner-series-retry","pay-retry",cents)!=null)throw new AssertionError("Retry changed the "+(10000-cents)+" remainder");
+            eq(new JSONArray(PlannerBills.without(part,"planner-bill-retry","planner-series-retry","pay-rest",10000-cents)).length(),0);
+        }
+        // Planner may already have counted the payment before its expense arrives.
+        JSONObject counted=new JSONArray(owed).getJSONObject(0).put("amountCents",2000).put("paid",new JSONArray().put("pay-retry"));
+        for(boolean knownAmount:new boolean[]{true,false}){
+            if(!knownAmount)counted.remove("amountCents");
+            String list=PlannerBills.clean(new JSONArray().put(counted).toString());
+            if(PlannerBills.without(list,"planner-bill-retry","planner-series-retry","pay-retry",8000)!=null)throw new AssertionError("Payment already counted by Planner changed its bill");
+        }
+    }
+    // Planner's "Send paid bills to MyBudget", through AddExpenseActivity. Saved data is put back afterwards.
     private void sentPayments(String day)throws Exception{
-        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String saved=prefs.getString("data",null);
+        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String saved=prefs.getString("data",null),savedBills=prefs.getString("planner_bills",null);
         try{
             Budget seed=new Budget();Budget.Account bank=new Budget.Account("Everyday",day,100000);seed.accounts.add(bank);Budget.Category power=new Budget.Category("Utilities");seed.categories.add(power);seed.categories.add(new Budget.Category("Groceries"));
             Budget.Entry earlier=new Budget.Entry("Electricity",power.id,bank.id,day,-100);earlier.externalId="pay-old";earlier.billKey="planner-series-t";seed.entries.add(earlier);
             Budget roundTrip=BudgetStore.decode(BudgetStore.encode(seed));if(!roundTrip.entries.get(0).externalId.equals("pay-old")||!roundTrip.entries.get(0).billKey.equals("planner-series-t"))throw new AssertionError("Sent payment ids lost");
             JSONObject v2=new JSONObject(BudgetStore.encode(seed)).put("version",2);JSONObject v2Entry=v2.getJSONArray("entries").getJSONObject(0);v2Entry.remove("externalId");v2Entry.remove("billKey");
             if(!BudgetStore.decode(v2.toString()).entries.get(0).externalId.isEmpty())throw new AssertionError("Version 2 not read");
-            if(!prefs.edit().putString("data",BudgetStore.encode(seed)).commit())throw new AssertionError("Seed not saved");
+            String owed=new JSONArray().put(new JSONObject().put("id","planner-bill-t").put("billKey","planner-series-t").put("payee","Electricity").put("due",day).put("amountCents",10000)).toString();
+            if(!prefs.edit().putString("data",BudgetStore.encode(seed)).putString("planner_bills",owed).commit())throw new AssertionError("Seed not saved");
             Intent add=new Intent(AddExpenseActivity.ACTION_ADD).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra("paymentId","pay-t").putExtra("billKey","planner-series-t").putExtra("payee","Electricity").putExtra("amountCents",14280L).putExtra("currency","AUD").putExtra("date",LocalDate.now().toString()).putExtra("note","From Planner");
+                .putExtra("paymentId","pay-t").putExtra("billKey","planner-series-t").putExtra("upcomingId","planner-bill-t").putExtra("payee","Electricity").putExtra("amountCents",8000L).putExtra("currency","AUD").putExtra("date",LocalDate.now().toString()).putExtra("note","From Planner");
             AddExpenseActivity screen=(AddExpenseActivity)startActivitySync(add);waitForIdleSync();
             runOnMainSync(()->screen.dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());waitForIdleSync();
             Budget.Entry sent=BudgetStore.decode(prefs.getString("data",null)).external("pay-t");
-            if(sent==null||sent.amount!=-14280||!sent.category.equals(power.id)||!sent.memo.equals("From Planner"))throw new AssertionError("Sent payment not saved with the suggested category");
+            if(sent==null||sent.amount!=-8000||!sent.category.equals(power.id)||!sent.memo.equals("From Planner")||!sent.billKey.equals("planner-series-t"))throw new AssertionError("Sent payment not saved with the suggested category and link");
+            String paidBudget=prefs.getString("data",null),part=prefs.getString("planner_bills",null);eq(new JSONArray(part).getJSONObject(0).getLong("amountCents"),2000);
+            eq(BudgetStore.decode(paidBudget).balance(bank,false),91900);
             getTargetContext().startActivity(add);waitForIdleSync();Thread.sleep(1500);waitForIdleSync();
             int copies=0;for(Budget.Entry e:BudgetStore.decode(prefs.getString("data",null)).entries)if(e.externalId.equals("pay-t"))copies++;eq(copies,1);
+            if(!part.equals(prefs.getString("planner_bills",null))||!paidBudget.equals(prefs.getString("data",null)))throw new AssertionError("Retry changed the remaining bill or budget");
             Intent undo=new Intent(AddExpenseActivity.ACTION_UNDONE).setClassName(getTargetContext(),AddExpenseActivity.class.getName()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("paymentId","pay-t");
             AddExpenseActivity ask=(AddExpenseActivity)startActivitySync(undo);waitForIdleSync();
+            if(BudgetStore.decode(prefs.getString("data",null)).external("pay-t")==null)throw new AssertionError("Undo removed the expense before confirmation");
             runOnMainSync(()->ask.dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());waitForIdleSync();
             Budget after=BudgetStore.decode(prefs.getString("data",null));if(after.external("pay-t")!=null||after.external("pay-old")==null)throw new AssertionError("Undo removed the wrong expense");
+            eq(after.balance(bank,false),99900);
         }finally{
-            android.content.SharedPreferences.Editor restore=prefs.edit();if(saved==null)restore.remove("data");else restore.putString("data",saved);restore.commit();
+            android.content.SharedPreferences.Editor restore=prefs.edit();if(saved==null)restore.remove("data");else restore.putString("data",saved);
+            if(savedBills==null)restore.remove("planner_bills");else restore.putString("planner_bills",savedBills);if(!restore.commit())throw new AssertionError("Payment test data not restored");
         }
     }
     // Home's backup reminder and a delete's Undo, on the running Activity. The saved budget and backup dates are put back afterwards.

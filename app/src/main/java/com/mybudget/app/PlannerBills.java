@@ -65,10 +65,12 @@ public class PlannerBills extends BroadcastReceiver {
         for(int i=0;i<a.length()&&drop<0;i++)if(upcomingId!=null&&!upcomingId.isEmpty()&&upcomingId.equals(a.getJSONObject(i).optString("id")))drop=i;
         if(drop<0&&(upcomingId==null||upcomingId.isEmpty())&&billKey!=null&&!billKey.isEmpty())for(int i=0;i<a.length();i++)if(billKey.equals(a.getJSONObject(i).optString("billKey"))&&(drop<0||a.getJSONObject(i).optString("due").compareTo(a.getJSONObject(drop).optString("due"))<0))drop=i;
         if(drop<0)return null;JSONObject b=a.getJSONObject(drop);long due=b.optLong("amountCents",0);
+        // Check before comparing amounts: a retried payment may be larger than what's still due.
+        JSONArray paid=b.optJSONArray("paid");String id=paymentId==null?"":paymentId;
+        if(paid!=null&&!id.isEmpty())for(int i=0;i<paid.length();i++)if(id.equals(paid.optString(i)))return null;
         if(due>0&&paidCents>0&&paidCents<due){
             // The "paid" ids keep the same payment (sent again) from being taken off twice.
-            JSONArray paid=b.optJSONArray("paid");if(paid==null)b.put("paid",paid=new JSONArray());String id=paymentId==null?"":paymentId;
-            if(!id.isEmpty())for(int i=0;i<paid.length();i++)if(id.equals(paid.optString(i)))return null;
+            if(paid==null)b.put("paid",paid=new JSONArray());
             if(!id.isEmpty())paid.put(id);b.put("amountCents",due-paidCents);return a.toString();
         }
         a.remove(drop);return a.toString();
