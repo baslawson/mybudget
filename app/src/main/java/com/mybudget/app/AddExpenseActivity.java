@@ -17,6 +17,11 @@ import java.util.*;
  * so nothing is saved without the user's tap, and a payment id already saved is not added again.
  */
 public class AddExpenseActivity extends Activity {
+    // Open now: a Wise card payment arriving meanwhile waits (WiseListener), as this dialog's choice of "Use imported" was made
+    // when it opened and its save would add the expense a second time; it's added (or matched) once this window closes.
+    static int open;
+    @Override protected void onDestroy(){if(counted){counted=false;open--;WiseListener.catchUpSoon(this);}super.onDestroy();}
+    private boolean counted;
     public static final String ACTION_ADD="com.mybudget.app.action.ADD_EXPENSE",ACTION_UNDONE="com.mybudget.app.action.PAYMENT_UNDONE";
     private Budget budget;private String read; // the saved data [budget] matches (reading years of transactions again takes a while)
     AlertDialog dialog; // package-private for BudgetInstrumentation
@@ -27,6 +32,7 @@ public class AddExpenseActivity extends Activity {
         setTheme(dark?R.style.AppTheme_Overlay:R.style.AppTheme_Light_Overlay);
         expenseRed=dark?android.graphics.Color.rgb(255,142,150):android.graphics.Color.rgb(178,51,55); // MainActivity's red
         super.onCreate(state);
+        counted=true;open++;
         setResult(RESULT_CANCELED);
         String raw=getSharedPreferences("budget",0).getString("data",null);
         try{budget=raw==null?new Budget():BudgetStore.decode(raw);budget.cache(true);read=raw;}catch(Exception e){fail("MyBudget couldn't read its saved budget. Open MyBudget to check it.");return;}
@@ -95,7 +101,7 @@ public class AddExpenseActivity extends Activity {
         // Hunt 24 E2: the bank statement may have been imported first: a row with this amount within a week, not linked to
         // Planner yet, is offered instead of a second expense ("Use imported" links it to this payment).
         Budget.Entry imported=sent>0?importedFor(-sent,date):null;String importedId=imported==null?null:imported.id;
-        if(imported!=null)label(f,"Imported from your bank: "+imported.payee+" "+money(-imported.amount)+" on "+Ui.pretty(imported.date)+". If that's this payment, tap Use imported instead of saving another.",13);
+        if(imported!=null)label(f,(WiseNotifications.fromWise(imported)?"From a Wise notification: ":"Imported from your bank: ")+imported.payee+" "+money(-imported.amount)+" on "+Ui.pretty(imported.date)+". If that's this payment, tap Use imported instead of saving another.",13);
         // Hunt 25 C2: at large text a dialog's three buttons stack and the last is cut off (Ui.large), so Use imported goes into the form.
         boolean large=getResources().getConfiguration().fontScale>=1.3f;Button inForm=null;
         if(imported!=null&&large){inForm=new Button(this);inForm.setText("Use imported");inForm.setAllCaps(false);f.addView(inForm,new LinearLayout.LayoutParams(-1,-2));}
@@ -131,9 +137,9 @@ public class AddExpenseActivity extends Activity {
         dialog.show();
     }
 
-    /** Hunt 24 E2: an imported statement row (not linked to Planner) of [amount] dated within CsvImport.MATCH_DAYS of [date], the closest; or null. */
+    /** Hunt 24 E2: an imported statement row, or a Wise card payment from its notification (not linked to Planner), of [amount] dated within CsvImport.MATCH_DAYS of [date], the closest; or null. */
     private Budget.Entry importedFor(long amount,String date){Budget.Entry best=null;long gap=Long.MAX_VALUE;LocalDate day=LocalDate.parse(date);
-        for(Budget.Entry e:budget.entries){Budget.Account a=budget.account(e.account);if(e.transfer()||e.amount!=amount||!e.externalId.isEmpty()||Budget.statementPayee(e).isEmpty()||a==null||a.tracking())continue;
+        for(Budget.Entry e:budget.entries){Budget.Account a=budget.account(e.account);if(e.transfer()||e.amount!=amount||!e.externalId.isEmpty()||(Budget.statementPayee(e).isEmpty()&&!WiseNotifications.fromWise(e))||a==null||a.tracking())continue;
             long g=Math.abs(java.time.temporal.ChronoUnit.DAYS.between(day,LocalDate.parse(e.date)));if(g<=CsvImport.MATCH_DAYS&&g<gap){best=e;gap=g;}}
         return best;}
     // A payment sent again: its planned bill went when it was first added. Only by its own entry (an older Planner sends none,

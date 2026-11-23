@@ -55,6 +55,7 @@ final class SettingsScreen extends Ui {
         imports.addView(heading("Import a bank statement",20,main.ink));
         imports.addView(label("Pick a statement file from your bank: CSV (match its columns once), OFX, QFX or QIF. Rows already in the account are skipped, rows you entered yourself (or from Planner) are matched to them, and new payees go to "+CsvImport.TO_CATEGORIZE+" until you choose their category.",14,main.muted,false));
         imports.addView(button("Import transactions (CSV, OFX, QIF)",()->main.pick(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*"),MainActivity.IMPORT)));
+        wise();
         LinearLayout export=card();export.addView(heading("Export transactions",20,main.ink));
         export.addView(label("A CSV file of every transaction for a spreadsheet. It can't be restored; use a backup for that.",14,main.muted,false));
         export.addView(button("Export transactions (CSV)",()->main.pick(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("text/csv")
@@ -245,6 +246,40 @@ final class SettingsScreen extends Ui {
             }).show();
     }
     // Common currencies first, then the rest A to Z. Amounts stay as they are (no conversion), so the change asks first.
+    /**
+     * Wise card payments (WiseListener): on with an account chosen, and Android's notification access; the last outcome. Turning
+     * it off leaves what was added. [wiseAllowedShown]: what the card said about access, so coming back from Android's settings
+     * redraws it (MainActivity.onResume).
+     */
+    private Boolean wiseAllowedShown;
+    boolean wiseAccessChanged(){return wiseAllowedShown!=null&&wiseAllowedShown!=WiseListener.allowed(main);}
+    private void wise(){
+        LinearLayout wise=card();wise.addView(heading("Wise card payments",20,main.ink));
+        boolean on=main.prefs().getBoolean("wise_on",false),allowed=WiseListener.allowed(main);wiseAllowedShown=allowed;
+        Budget.Account account=main.budget.account(main.prefs().getString("wise_account",""));
+        wise.addView(label("When Wise notifies you of a card payment, MyBudget adds it to your Wise account to review, with the payee's usual category. Only Wise's notifications are read, and only its card payments in your budget's currency. Importing Wise's statement later matches them instead of adding them twice.",14,main.muted,false));
+        if(!on){wise.addView(button("Turn on",()->chooseWiseAccount(true)));return;}
+        wise.addView(label("On: card payments go to "+(WiseNotifications.usable(account)?account.name:"no account (choose one)")+".",14,main.muted,false));
+        if(!allowed){wise.addView(label("Android doesn't let MyBudget read notifications yet: allow \"MyBudget: Wise card payments\" under Notification access.",13,main.red,true));
+            wise.addView(button("Allow notification access",this::openWiseAccess));}
+        String status=main.prefs().getString("wise_status",null);if(status!=null)wise.addView(label("Last: "+status,13,main.muted,false));
+        wise.addView(button("Change the Wise account",()->chooseWiseAccount(false)));
+        wise.addView(button("Turn off",()->{main.prefs().edit().putBoolean("wise_on",false).apply();main.render();toast("Wise card payments are off. What was added stays.");}));
+    }
+    private void chooseWiseAccount(boolean turnOn){
+        List<MoveMenu.Choice> rows=new ArrayList<>();String chosen=main.prefs().getString("wise_account","");
+        for(Budget.Account a:main.budget.accounts)if(WiseNotifications.usable(a))rows.add(MoveMenu.Choice.pick(a.name,()->{
+            android.content.SharedPreferences.Editor e=main.prefs().edit().putString("wise_account",a.id);if(turnOn)e.putBoolean("wise_on",true).putLong("wise_since",System.currentTimeMillis());e.apply(); // from now on only: earlier payments may be in already (a statement import)
+            main.render();toast(turnOn?"Wise card payments go to "+a.name+".":"Wise card payments now go to "+a.name+".");
+            if(!WiseListener.allowed(main))openWiseAccess();}).selected(a.id.equals(chosen)));
+        if(rows.isEmpty()){toast("Add your Wise account first (Accounts › Add account).");return;}
+        MoveMenu.sheet(this,"Your Wise account","Card payments from Wise's notifications go here",Collections.singletonList(rows),null);
+    }
+    private void openWiseAccess(){
+        toast("Allow \"MyBudget: Wise card payments\". If Android says it's a restricted setting, allow restricted settings in MyBudget's App info (⋮) first.");
+        try{main.startActivity(WiseListener.accessSettings(main));}
+        catch(android.content.ActivityNotFoundException e){try{main.startActivity(new Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));}catch(android.content.ActivityNotFoundException x){toast("Open Android's Settings › Notifications › Notification access.");}}
+    }
     private void chooseCurrency(){
         List<String> codes=Budget.currencyChoices();List<MoveMenu.Choice> rows=new ArrayList<>();
         for(String chosen:codes){Currency cur=Currency.getInstance(chosen);MoveMenu.Choice row=MoveMenu.Choice.pick(cur.getDisplayName(Locale.getDefault()),()->{

@@ -1,6 +1,7 @@
 import com.mybudget.app.Budget;
 import com.mybudget.app.CsvImport;
 import com.mybudget.app.DataSafety;
+import com.mybudget.app.WiseNotifications;
 import com.mybudget.app.CardOrder;
 import java.time.YearMonth;
 import java.time.LocalDate;
@@ -16,6 +17,81 @@ public class BudgetTest {
     // Bug hunt 28: repeating charges leave out Planner's bills (M1) and tracking accounts (M2) and keep the usual day (M3);
     // money owed can be corrected and deleted (M6) and a large balance settled (M7).
     /** Bug hunt 32: notes that already say "Settled up" stay as they are and can be corrected; a large settling up can be. */
+    /** Wise card payments from Wise's notifications (WiseNotifications): reading the text, and what a payment becomes. */
+    static void wise(){
+        WiseNotifications.Payment p=WiseNotifications.read("Card payment","13.33 AUD spent at Steam.");
+        equal(p.cents,1333,"the amount");same(p.currency,"AUD","the currency");same(p.merchant,"Steam","the merchant, without the full stop");
+        p=WiseNotifications.read(" card payment ","1,234.5 AUD spent at Amazon.com.au.");equal(p.cents,123450,"thousands and one decimal");same(p.merchant,"Amazon.com.au","dots inside the name kept");
+        p=WiseNotifications.read("Card payment","5\u00A0AUD spent at Bob's Café");equal(p.cents,500,"a whole amount, a no-break space");same(p.merchant,"Bob's Café","no full stop");
+        p=WiseNotifications.read("Card payment","12.50 USD spent at Shop.");same(p.currency,"USD","another currency is read (and refused when adding)");
+        for(String[] no:new String[][]{{"Transfer update","13.33 AUD spent at Steam."},{"Card payment","13.33 AUD received from Sam."},{"Card payment","1,23 AUD spent at X."},
+                {"Card payment","13.333 AUD spent at X."},{"Card payment","0.00 AUD spent at X."},{"Card payment","13.33 AUD spent at ."},{"Card payment","13.33 aud spent at X."},
+                {"Card payment","9999999999.00 AUD spent at X."},{"Card payment","You spent 13.33 AUD at Steam."},{"Card payment","13.33 AUD spent at Steam.\nBalance 120.00 AUD"},{null,"13.33 AUD spent at Steam."},{"Card payment",null}})
+            if(WiseNotifications.read(no[0],no[1])!=null)throw new AssertionError("not read: "+no[0]+" / "+no[1]);
+        Budget b=new Budget();Budget.Account wise=new Budget.Account("Wise","2026-01-01",50000);b.accounts.add(wise);Budget.Account bank=new Budget.Account("Bank","2026-01-01",0);b.accounts.add(bank);
+        Budget.Category games=new Budget.Category("Games");b.categories.add(games);Budget.Category food=new Budget.Category("Food");b.categories.add(food);
+        java.util.Set<String> claimed=new java.util.HashSet<>();java.time.LocalDate day=java.time.LocalDate.parse("2026-11-20");
+        WiseNotifications.Result r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","13.33 AUD spent at Steam."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("added: "+r.outcome);Budget.Entry e=r.entry;
+        equal(e.amount,-1333,"money out");same(e.account,wise.id,"in the Wise account");same(e.date,"2026-11-20","on the notification's day");
+        same(b.category(e.category).name,CsvImport.TO_CATEGORIZE,"a new payee waits in To categorize");if(e.approved||e.cleared)throw new AssertionError("to review, not cleared");
+        same(e.memo,WiseNotifications.NOTE,"noted");same(e.bankPayee,"","not a statement row, so the statement matches it later");same(Budget.statementPayee(e),"","nor read as one");
+        b.rules.add(new Budget.Rule("steam","Steam games",games.id));claimed.add(e.id);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","13.33 AUD spent at Steam."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("a second equal payment is a second one: "+r.outcome);same(r.entry.payee,"Steam games","an import rule renames");same(r.entry.category,games.id,"and gives its category");
+        b.entries.add(new Budget.Entry("Coffee",food.id,wise.id,"2026-11-19",-450));Budget.Entry typed=b.entries.get(b.entries.size()-1);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","4.50 AUD spent at Cafe Roma."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ALREADY_HERE||r.entry!=typed)throw new AssertionError("typed already: "+r.outcome);
+        int count=b.entries.size();claimed.add(typed.id);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","4.50 AUD spent at Cafe Roma."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("a typed one taken by an earlier notification isn't taken again: "+r.outcome);equal(b.entries.size(),count+1,"one more");
+        b.entries.add(new Budget.Entry("Lunch",food.id,bank.id,"2026-11-20",-1200));count=b.entries.size();
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","12.00 AUD spent at Deli."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("another account's transaction isn't this one");
+        b.entries.add(new Budget.Entry("Groceries",food.id,wise.id,"2026-11-10",-3000));
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","30.00 AUD spent at IGA."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("over a week apart isn't this one: "+r.outcome);
+        Budget.Scheduled netflix=new Budget.Scheduled("Netflix",games.id,wise.id,"2026-11-22",-1999,"Monthly");b.scheduled.add(netflix);
+        Budget.Scheduled instalment=new Budget.Scheduled("Payment 2 of 4",""  ,wise.id,"2026-11-21",-2500,"Never");instalment.destination=bank.id;b.scheduled.add(instalment);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","19.99 AUD spent at Netflix.com."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ENTERED_UPCOMING)throw new AssertionError("an upcoming one due then is entered: "+r.outcome);
+        same(r.entry.date,"2026-11-20","dated as the payment");same(r.entry.payee,"Netflix","keeps its payee");same(netflix.next,"2026-12-22","and moves on");
+        if(r.entry.approved||!WiseNotifications.fromWise(r.entry))throw new AssertionError("entered from a notification: to review, from Wise");
+        Budget.Scheduled gym=new Budget.Scheduled("Gym",games.id,wise.id,"2026-11-20",-777,"Weekly");gym.memo="membership";b.scheduled.add(gym);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","7.77 AUD spent at Gym."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ENTERED_UPCOMING)throw new AssertionError("weekly entered: "+r.outcome);same(r.entry.memo,"membership · "+WiseNotifications.NOTE,"its own note first");claimed.add(r.entry.id);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","7.77 AUD spent at Gym."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("a second equal payment the same day doesn't take next week's: "+r.outcome);same(gym.next,"2026-11-27","next week stays upcoming");
+        Budget.Entry stated=new Budget.Entry("Kiosk",food.id,wise.id,"2026-11-18",-321);stated.bankPayee="Card transaction of 3.21 AUD issued by Kiosk";b.entries.add(stated);
+        Budget.Entry locked=new Budget.Entry("Kiosk",food.id,wise.id,"2026-11-18",-654);locked.reconciled=true;locked.cleared=true;b.entries.add(locked);
+        for(String t:new String[]{"3.21 AUD spent at Kiosk.","6.54 AUD spent at Kiosk."}){r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment",t),day,claimed);
+            if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("a statement row or a reconciled one is an earlier payment: "+t+" "+r.outcome);}
+        // Statement imported first (the notification read later): its row, a day apart at most, is this payment, once.
+        Budget.Entry row=new Budget.Entry("Card transaction of 8.88 AUD issued by Bar",food.id,wise.id,"2026-11-21",-888);row.bankPayee=row.payee;row.bankDate="2026-11-21";row.memo="Imported";b.entries.add(row);
+        Budget.Entry rec=new Budget.Entry("Bar",food.id,wise.id,"2026-11-20",-999);rec.reconciled=true;rec.cleared=true;b.entries.add(rec);
+        count=b.entries.size();
+        for(String t:new String[]{"8.88 AUD spent at Bar.","9.99 AUD spent at Bar."}){r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment",t),day,claimed);
+            if(r.outcome!=WiseNotifications.Outcome.ALREADY_HERE)throw new AssertionError("statement row or reconciled one the same day: "+t+" "+r.outcome);claimed.add(r.entry.id);}
+        equal(b.entries.size(),count,"nothing added twice");
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","8.88 AUD spent at Bar."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("a second payment is still a second one: "+r.outcome);
+        r=WiseNotifications.add(b,wise.id,WiseNotifications.read("Card payment","25.00 AUD spent at Shoes."),day,claimed);
+        if(r.outcome!=WiseNotifications.Outcome.ADDED)throw new AssertionError("an upcoming transfer (pay later) isn't a card payment: "+r.outcome);same(instalment.next,"2026-11-21","left as it was");
+        count=b.entries.size();
+        for(Object[] no:new Object[][]{{"12.50 USD spent at Shop.",wise.id,day,WiseNotifications.Outcome.OTHER_CURRENCY},{"12.50 AUD spent at Shop.","gone",day,WiseNotifications.Outcome.NO_ACCOUNT},
+                {"12.50 AUD spent at Shop.",wise.id,java.time.LocalDate.parse("2025-12-31"),WiseNotifications.Outcome.BEFORE_OPENING},{"12.50 AUD spent at Shop.",wise.id,Budget.latestToday().plusDays(1),WiseNotifications.Outcome.FUTURE}}){
+            r=WiseNotifications.add(b,(String)no[1],WiseNotifications.read("Card payment",(String)no[0]),(java.time.LocalDate)no[2],claimed);
+            if(r.outcome!=no[3]||r.changed())throw new AssertionError("refused: "+no[3]+" got "+r.outcome);}
+        equal(b.entries.size(),count,"nothing added by refusals");
+        Budget.Account old=new Budget.Account("Old","2026-01-01",0);old.closed=true;b.accounts.add(old);Budget.Account house=new Budget.Account("House","2026-01-01",0);house.type="tracking";b.accounts.add(house);
+        if(WiseNotifications.add(b,old.id,WiseNotifications.read("Card payment","1.00 AUD spent at X."),day,claimed).outcome!=WiseNotifications.Outcome.NO_ACCOUNT
+            ||WiseNotifications.add(b,house.id,WiseNotifications.read("Card payment","1.00 AUD spent at X."),day,claimed).outcome!=WiseNotifications.Outcome.NO_ACCOUNT)throw new AssertionError("closed and tracking accounts aren't the Wise account");
+        // Importing Wise's statement later: the row is the transaction the notification added (matched, not added again).
+        java.util.List<java.util.List<String>> rows=new java.util.ArrayList<>();rows.add(java.util.Arrays.asList("21/11/2026","Card transaction of 13.33 AUD issued by Steam","-13.33"));
+        CsvImport.Result imp=CsvImport.run(b,rows,false,0,1,2,-1,"d/M/uuuu",wise);equal(imp.added,0,"statement row not added again");equal(imp.matched,1,"it matches the notification's transaction");
+        Budget.Entry steam=imp.matches.get(0);if(!steam.cleared||steam.bankPayee.isEmpty())throw new AssertionError("cleared and knows its statement row now");
+        same(WiseNotifications.describe(new WiseNotifications.Result(WiseNotifications.Outcome.OTHER_CURRENCY,null),WiseNotifications.read("Card payment","12.5 USD spent at Shop."),"20 Nov 2026"),"Not added: 12.50 USD at Shop isn't in your budget's currency.","the Settings line");
+    }
     static void hunt32(){
         Budget b=new Budget();Budget.Owed old=b.addOwed("Sam",1000,"2026-10-01","Lunch","");old.note="settled UP"; // typed in an older version
         b.editOwed(old.id,1200,"2026-10-02","settled up");same(old.note,"settled UP","an older typed note kept as it was");equal(old.amount,1200,"and corrected");
@@ -184,7 +260,7 @@ public class BudgetTest {
         if(b.external("pay-1")!=power||b.external("pay-2")!=null||b.external("")!=null)throw new AssertionError("Payment id lookup");
         Budget.Entry older=new Budget.Entry("Electricity",savings.id,bank.id,"2025-01-01",-100);older.billKey="planner-series-s1";b.entries.add(older);
         if(b.lastForBill("planner-series-s1")!=power||b.lastForBill("planner-bill-9")!=null)throw new AssertionError("Newest expense for a bill");
-        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();hunt31();hunt32();
+        csv();batchOne();phaseB();phaseC();phaseD();phaseE();phaseF();phaseG();fixes();fixes2();suggestions();batch1();batch2();batch3();hunt21();hunt22();hunt23();dataSafety();knownGaps();currencies();yearly();csvCurrencies();firstRun();cachedSums();monthAhead();importMatching();payeeCategories();statementFiles();cardChargesAndReconciled();hunt24();hunt25();cardOrder();groupRename();hunt26();deleteAccounts();payLater();openingBalance();hunt27();features14Oct();hunt28();hunt30();hunt31();hunt32();wise();
         System.out.println("PASS: monthly accounting, rollover, targets, edits, transfers, clearing, future reservations, exact cents, sent payments, CSV export, category delete/reorder, account close/delete, reconcile adjustments, quick assign, payees and typing suggestions, weekly/by-date/debt targets, more quick amounts, month notes, running balances, split helpers, quick maths, tracking accounts, loan payoff, flags and filters, review, payee tools and import rules, spending breakdown and trends, income vs expense table, spending pace, pinned categories, bills due soon, backup reminder and snooze, undo after a delete, daily automatic backups, upcoming splits per category, money age with card spending, the budget currency (codes, choices, Planner's currency check, money format), the yearly report, currency symbols and codes in CSV amounts, first-run setup (starter categories, brand-new budgets, suggested currency), cached and uncached month maths matching the plain sums on a generated budget (also after assigning, moving, entering, deleting and direct changes), getting a month ahead, covering from a later month, To budget's parts, amount search, import matching (entered, Planner and upcoming transactions), payee category suggestions, CSV separators and decimal commas, OFX and QIF, card interest and fees, reconciled transactions locked, bug hunt 24 and 25 fixes, the saved order of movable sections, renaming and moving a group, bug hunt 26 fixes.");
     }
     static void batch1(){

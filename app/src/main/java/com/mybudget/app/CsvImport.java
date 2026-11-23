@@ -250,5 +250,5 @@ public final class CsvImport {
     /** Bug hunt 27 (M4): the statement row [e] is: its statement date, amount and payee when it has them (version 10), else its own. */
     private static String statementKey(Budget.Entry e){return key(e.bankDate.isEmpty()?e.date:e.bankDate,e.bankAmount==0?e.amount:e.bankAmount,e.bankPayee.isEmpty()?e.payee:e.bankPayee);}
     private static String key(String date,long cents,String payee){return date+"|"+cents+"|"+payee.trim().toLowerCase(Locale.ROOT);}
-    private static Budget.Category toCategorize(Budget b){for(Budget.Category c:b.categories)if(c.name.equalsIgnoreCase(TO_CATEGORIZE)&&!c.payment())return c;Budget.Category c=new Budget.Category(TO_CATEGORIZE);c.group="Everyday";b.categories.add(0,c);return c;}
+    static Budget.Category toCategorize(Budget b){for(Budget.Category c:b.categories)if(c.name.equalsIgnoreCase(TO_CATEGORIZE)&&!c.payment())return c;Budget.Category c=new Budget.Category(TO_CATEGORIZE);c.group="Everyday";b.categories.add(0,c);return c;}
 }

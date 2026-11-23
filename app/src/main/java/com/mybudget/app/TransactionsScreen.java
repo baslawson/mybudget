@@ -198,7 +198,7 @@ final class TransactionsScreen extends Ui {
             if(e.flag>0&&e.flag<FLAG_COLORS.length){SpannableString s=new SpannableString("● "+e.payee);
                 s.setSpan(new android.text.style.ForegroundColorSpan(FLAG_COLORS[e.flag]),0,1,Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);payee.setText(s);
                 payee.setContentDescription(e.payee+", "+main.budget.flagLabel(e.flag)+" flag");}middle.addView(payee);
-            if(!e.approved)middle.addView(label("To review · imported",12,main.amber,true));
+            if(!e.approved)middle.addView(label(WiseNotifications.fromWise(e)?"To review · from Wise":"To review · imported",12,main.amber,true));
             TextView where=label(categoryName(e)+" · "+main.budget.account(e.account).name,12,main.muted,false);where.setPadding(0,dp(2),0,0);middle.addView(where);
             if(running!=null&&running.containsKey(e.id)){long bal=running.get(e.id);middle.addView(greyLine("Balance "+money(bal),money(bal),amountColour(bal),12));}
             if(!e.memo.isEmpty())middle.addView(label(e.memo,12,main.muted,false));

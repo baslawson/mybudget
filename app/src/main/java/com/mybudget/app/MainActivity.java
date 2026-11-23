@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
             trendKey=state.getString("trendKey","");trendMonths=state.getInt("trendMonths",6)==12?12:6;reportYear=state.getInt("reportYear",0);
             String shot=state.getString("cameraFile",null);if(shot!=null)cameraFile=new File(PhotoProvider.dir(this),shot);} // so it's still deleted when the camera returns
         else{File[] left=PhotoProvider.dir(this).listFiles();if(left!=null)for(File f:left)f.delete();} // a fresh start: no capture is in progress
+        current=new java.lang.ref.WeakReference<>(this);
         load();if(state==null&&storageReadable&&!budget.accounts.isEmpty())tab=lastTab(); // opens on the screen it was last on
         if(storageReadable){render();cleanupPhotos();if(state==null)openFrom(getIntent());} // a recreated screen has opened it already
     }
@@ -88,6 +89,8 @@ public class MainActivity extends Activity {
         // Hunt 26 C4: left open across midnight on the 1st, the month that was current moves on (one picked on purpose stays).
         YearMonth now=YearMonth.now();if(!now.equals(seenNow)){if(month.equals(seenNow)){month=now;if(editors.isEmpty())render();}seenNow=now;}
         AutoBackup.schedule(this);BudgetWidget.refresh(this); // the widget may show last month after midnight on the 1st
+        if(tab.equals("Settings")&&editors.isEmpty()&&settingsScreen.wiseAccessChanged())render(); // back from Android's notification access
+        if(editors.isEmpty()&&!pickingPhoto)body.post(()->{if(editors.isEmpty()&&!isFinishing())WiseListener.catchUp(this);}); // Wise payments that waited
         // Reminders, as Planner on each open: a ringing alarm whose notification is gone is stopped; then missed reminders are
         // shown and every alarm is set again (at most once a minute: coming back from a picker or Settings is no new open).
         AlarmService.stopIfUnseen(this);long at=android.os.SystemClock.elapsedRealtime();if(remindersChecked==0||at-remindersChecked>60_000L){remindersChecked=at;BootReceiver.onAppOpen(this);}
@@ -368,7 +371,17 @@ public class MainActivity extends Activity {
                 previous.fromPlanner.addAll(budget.fromPlanner);budget=previous;});}
         catch(Exception e){ui.toast(e.getMessage());render();return;}
         for(AlertDialog editor:new ArrayList<>(editors))editor.dismiss();render();ui.toast(back);}
-    final List<AlertDialog> editors=new ArrayList<>();
+    // The open forms, sheets and menus. When the last one closes, a Wise card payment that waited for them is added (WiseListener).
+    final List<AlertDialog> editors=new ArrayList<AlertDialog>(){@Override public boolean remove(Object o){boolean was=super.remove(o);
+        if(was&&isEmpty()&&body!=null)body.post(()->{if(isEmpty()&&!isFinishing())WiseListener.catchUp(MainActivity.this);});return was;}};
+    // Wise card payments (WiseListener): this screen while it exists, so the listener can wait for its forms and redraw it.
+    private static java.lang.ref.WeakReference<MainActivity> current=new java.lang.ref.WeakReference<>(null);
+    /** Whether a MyBudget form (or the photo picker for one) is open: a Wise payment saved now would make its save refuse. */
+    static boolean formOpen(){if(AddExpenseActivity.open>0)return true; // Planner's add-expense dialog: the same reason
+        MainActivity m=current.get();return m!=null&&!m.isFinishing()&&!m.isDestroyed()&&(!m.editors.isEmpty()||m.pickingPhoto||m.photoForm!=null);}
+    /** A Wise payment was saved: read it in and redraw, unless a form is open (its save reads it in: commit). */
+    static void dataChangedElsewhere(){MainActivity m=current.get();if(m==null||m.isFinishing()||m.isDestroyed()||!m.storageReadable||!m.editors.isEmpty()||m.pickingPhoto)return;
+        try{if(m.reloadIfChanged())m.render();}catch(IllegalStateException e){m.ui.toast(e.getMessage());}}
     /** The ⋮ menu open now (MoveMenu.show): closed when the screen is drawn again, so it never acts on old figures (hunt 27 H2). */
     android.widget.PopupWindow popup;
     Budget.Account accountById(String id){Budget.Account a=budget.account(id);

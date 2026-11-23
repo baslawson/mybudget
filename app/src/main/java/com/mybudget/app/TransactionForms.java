@@ -23,6 +23,14 @@ final class TransactionForms extends Ui {
     private Budget.Category fresh(Budget.Category c){Budget.Category now=main.budget.category(c.id);return now==null?c:now;}
     private static final int CATEGORY_CHIPS=6; // the most-used categories shown as chips in Add transaction
     private static final String[] REPEAT_LABELS={"Doesn't repeat","Weekly","Every 2 weeks","Monthly","Every 3 months","Yearly"};
+    static final int NOTE_CHIPS=3; // the payee's recent notes offered under the note box
+    /** [payee]'s last few notes, newest first, each once (not what's typed now, nor the import and Wise markers). */
+    private List<String> recentNotes(String payee,String typed){List<String> notes=new ArrayList<>();String p=payee.trim();if(p.isEmpty())return notes;
+        List<Budget.Entry> theirs=new ArrayList<>();for(Budget.Entry e:main.budget.entries)if(e.payee.trim().equalsIgnoreCase(p))theirs.add(e);
+        theirs.sort((a,b)->b.date.compareTo(a.date));Set<String> seen=new HashSet<>();
+        for(Budget.Entry e:theirs){String m=e.memo.trim();if(m.isEmpty()||m.equals(Budget.IMPORTED)||WiseNotifications.fromWise(e)||m.equalsIgnoreCase(typed.trim())||!seen.add(m.toLowerCase(Locale.ROOT)))continue;
+            notes.add(m);if(notes.size()==NOTE_CHIPS)break;}
+        return notes;}
     void transaction(Budget.Entry old){transaction(old,null);}
     /**
      * Adds or edits a transaction ([old]) or an upcoming one ([sched]). A new one with a future date or a repeat
@@ -43,22 +51,29 @@ final class TransactionForms extends Ui {
             toast(onlyTracking?"Add a bank, cash or card account first. Tracking accounts change with Update balance.":"All your accounts are closed. Reopen one in Accounts first.");return;}
         boolean adding=old==null&&sched==null;
         LinearLayout f=form();
-        // 1. The amount: large, signed and coloured by where the money goes (− red out, + green in), with the kind under it.
-        // A - or + typed first picks Expense or Income and is taken off, so the box always holds the size of the amount.
-        LinearLayout amountRow=new LinearLayout(main);amountRow.setGravity(Gravity.CENTER_VERTICAL);amountRow.setPadding(0,dp(8),0,0);
+        // 1. What it is first (Expense, Income, Refund), then the amount: large, signed and coloured by where the money goes (− red
+        // out, + green in). A - or + typed first picks Expense or Income and is taken off, so the box always holds the size of the amount.
+        Choice kind=choice(f,new String[]{"− Expense","+ Income","↩ Refund"},new int[]{main.red,main.green,main.green},oldAmount<0?0:keepCategory.isEmpty()?1:2);
+        LinearLayout amountRow=new LinearLayout(main);amountRow.setGravity(Gravity.CENTER_VERTICAL);amountRow.setPadding(0,dp(4),0,dp(4));
         TextView sign=label("−",36,main.red,true);sign.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);sign.setPadding(0,0,dp(6),0);
         amountRow.addView(sign);EditText amount=new EditText(main);amount.setHint("0.00");amount.setSingleLine(true);amount.setInputType(AMOUNT_INPUT);
         amount.setTextSize(36);amount.setTypeface(null,android.graphics.Typeface.BOLD);amount.setFontFeatureSettings("tnum");sumsHint(amount,"Amount ("+code()+")");
         amountRow.addView(amount,new LinearLayout.LayoutParams(0,-2,1));TextView currency=label(code(),15,main.muted,true);
         currency.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);amountRow.addView(currency);f.addView(amountRow);
-        Choice kind=choice(f,new String[]{"− Expense","+ Income","↩ Refund"},new int[]{main.red,main.green,main.green},oldAmount<0?0:keepCategory.isEmpty()?1:2);
-        TextView guidance=label("",12,main.muted,false);f.addView(guidance);
         Runnable paint=()->{boolean out=kind.selected()==0;int c=out?main.red:main.green;sign.setText(out?"−":"+");sign.setTextColor(c);amount.setTextColor(c);};
-        // 2. Who and what. Payees used before are suggested; picking one on a new transaction fills in the category it had last
+        // 2. Who, and a note. Payees used before are suggested; picking one on a new transaction fills in the category it had last
         // time and offers last time's amount.
-        section(f,"Who and what");
         AutoCompleteTextView payee=suggestField(f,"Payee",()->main.budget.payees());
         TextView lastTime=label("",13,main.blue,true);lastTime.setVisibility(View.GONE);lastTime.setMinHeight(dp(48));lastTime.setGravity(Gravity.CENTER_VERTICAL);pressable(lastTime);f.addView(lastTime);
+        // The note, always in sight (it was folded away under More): notes used before are suggested as it's typed, those with this
+        // payee first, and this payee's last few notes are chips under it, one tap to use.
+        AutoCompleteTextView memo=suggestField(f,"Add a note (optional)",()->main.budget.memos(payee.getText().toString()));
+        Chips noteChips=chips(f);
+        Runnable showNotes=()->{List<String> notes=recentNotes(payee.getText().toString(),memo.getText().toString());
+            noteChips.view.setVisibility(notes.isEmpty()?View.GONE:View.VISIBLE);if(notes.isEmpty())return;
+            List<String> shown=new ArrayList<>();for(String m:notes)shown.add(m.length()>40?m.substring(0,39)+"…":m); // a long one shortened on its chip
+            noteChips.show(shown,-1,n->{memo.setText(notes.get(n),false);memo.setSelection(memo.length());});};
+        onText(payee,showNotes);onText(memo,showNotes);showNotes.run();
         LinearLayout categoryFields=column();f.addView(categoryFields);
         // Category: the 6 used most in the last 120 days as chips, then "All categories…" for the rest, wrapped onto more lines so
         // all of them are in sight. A category not among the 6 (picked from the list, or the one being edited) takes the 6th place.
@@ -68,13 +83,15 @@ final class TransactionForms extends Ui {
         List<Budget.Category> often=new ArrayList<>(categories);often.sort((a,b)->uses.getOrDefault(b.id,0)-uses.getOrDefault(a.id,0));
         List<Budget.Category> top=new ArrayList<>(often.subList(0,Math.min(CATEGORY_CHIPS,often.size()))),shown=new ArrayList<>(top);
         TextView categoryTitle=label("Category",12,main.muted,true);categoryFields.addView(categoryTitle);Chips categoryChips=chips(categoryFields,true);
-        TextView preview=label("",14,main.muted,true);categoryFields.addView(preview);
+        LinearLayout previewRow=new LinearLayout(main);previewRow.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);categoryFields.addView(previewRow,new LinearLayout.LayoutParams(-1,-2)); // Split at the end, also with no preview
+        TextView preview=label("",14,main.muted,true);previewRow.addView(preview,new LinearLayout.LayoutParams(0,-2,1));
         // Split: the parts (positive amounts while editing) replace the category; the amount becomes their total.
         List<Budget.Split> parts=new ArrayList<>();
         for(Budget.Split p:old!=null?old.splits:sched!=null?sched.splits:new ArrayList<Budget.Split>()){Budget.Split c=new Budget.Split(p.category,Math.abs(p.amount));c.memo=p.memo;parts.add(c);
             Budget.Category pc=main.budget.category(p.category);if(pc!=null&&!pc.payment()&&!categories.contains(pc))categories.add(pc);} // a part's hidden category stays choosable
         TextView splitSummary=label("",13,main.ink,false);categoryFields.addView(splitSummary);
-        Button splitButton=button("Split into categories",()->{});splitButton.setBackground(bg(Color.TRANSPARENT));splitButton.setTextSize(13);categoryFields.addView(splitButton);
+        Button splitButton=button("Split",()->{});splitButton.setBackground(bg(Color.TRANSPARENT));splitButton.setTextSize(13);
+        previewRow.addView(splitButton,new LinearLayout.LayoutParams(-2,-2)); // beside the preview: it's the category's own option
         // A card transaction that is really the card's interest or a fee (an imported one, say) becomes one (cardCharge).
         Budget.Account onCard=old==null?null:main.budget.account(old.account);
         if(onCard!=null&&onCard.credit()&&!old.split()){Button charge=button("It's interest or a fee on "+onCard.name,()->{for(AlertDialog ed:new ArrayList<>(main.editors))ed.dismiss();cardCharge(old.account,old);});
@@ -97,7 +114,7 @@ final class TransactionForms extends Ui {
                 MoveMenu.sheet(this,"Choose a category","Available this month",Collections.singletonList(all),null);});};
         showCategories[0].run();
         Runnable showSplit=()->{boolean on=!parts.isEmpty();categoryChips.view.setVisibility(on?View.GONE:View.VISIBLE);categoryTitle.setVisibility(categoryChips.view.getVisibility());
-            splitSummary.setVisibility(on?View.VISIBLE:View.GONE);splitButton.setText(on?"Edit split":"Split into categories");amount.setEnabled(!on);
+            splitSummary.setVisibility(on?View.VISIBLE:View.GONE);splitButton.setText(on?"Edit split":"Split");splitButton.setContentDescription(on?"Edit split":"Split into categories");amount.setEnabled(!on);
             if(on){long sum=0;StringBuilder s=new StringBuilder("Split: ");
                 for(int i=0;i<parts.size();i++){Budget.Split p=parts.get(i);Budget.Category c=main.budget.category(p.category);sum+=p.amount;
                     s.append(i>0?", ":"").append(c==null?"To budget":c.name).append(" ").append(money(p.amount));}splitSummary.setText(s);
@@ -119,7 +136,7 @@ final class TransactionForms extends Ui {
             String usual=main.budget.suggestedCategory(payee.getText().toString());if(usual==null)return;int i=categories.indexOf(main.budget.category(usual));if(i<0)return;
             cat[0]=i;showCategories[0].run();if(kind.selected()==1&&!kind.picked)kind.set(last.amount<0||last.category.isEmpty()?0:2);showPreview[0].run();});
         // 3. When and where: Today, Yesterday or a picked date; the account as chips (a new one starts on the account used last).
-        section(f,"When and where");
+        f.addView(label("Date",12,main.muted,true));
         LinearLayout hidden=column();EditText day=dateField(hidden,old!=null?old.date:sched!=null?sched.next:LocalDate.now().toString(),old==null);
         Chips dates=chips(f);
         Runnable[] showDates={null};showDates[0]=()->{LocalDate d=LocalDate.parse((String)day.getTag()),today=LocalDate.now();
@@ -132,11 +149,21 @@ final class TransactionForms extends Ui {
         int[] acc={Math.max(0,lastUsed)};TextView accountTitle=label("Account",12,main.muted,true);f.addView(accountTitle);Chips accountChips=chips(f);
         Runnable[] showAccounts={null};showAccounts[0]=()->{List<String> names=new ArrayList<>();for(Budget.Account a:accounts)names.add(a.name);
             accountChips.show(names,acc[0],n->{acc[0]=n;showAccounts[0].run();});};showAccounts[0].run();
+        // 4. More options, folded away: repeat, pay later, reminders, photo, flag and Cleared, the things most transactions don't
+        // need. Folded, a line under it says which of them this one has; it opens by itself when the one being edited has any.
+        Button moreButton=button("",()->{});moreButton.setBackground(bg(Color.TRANSPARENT));moreButton.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+        moreButton.setTextSize(15);moreButton.setPadding(0,dp(8),dp(12),dp(8));moreButton.setTypeface(null,android.graphics.Typeface.BOLD);
+        LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(-1,-2);mp.setMargins(0,dp(14),0,0);f.addView(moreButton,mp);
+        TextView moreSummary=label("",13,main.muted,false);moreSummary.setPadding(0,0,dp(12),dp(4));f.addView(moreSummary);
+        LinearLayout more=column();f.addView(more);
+        Spinner repeat=null;
+        if(old==null){repeat=spinner(more,"Repeat",REPEAT_LABELS,sched==null?0:Arrays.asList(Budget.Scheduled.REPEATS).indexOf(sched.repeat));
+            more.addView(label("A future date or a repeat makes it upcoming: it waits in Transactions, and you enter it when the day comes.",12,main.muted,false));}
         // Pay later (a new expense only): bought on a pay-later plan (Pay in 4, Afterpay, Zip), paid off in instalments from the
         // account chosen above (Budget.payLater). The purchase is spent in its category now; the payments are transfers.
         boolean[] later={false},firstNow={true},remindEach={false};String[] planId={""},every={"Every 2 weeks"};
         CheckBox laterBox=new CheckBox(main);laterBox.setText("Pay later: Pay in 4, Afterpay, Zip…");laterBox.setTextColor(main.ink);laterBox.setMinHeight(dp(48));
-        LinearLayout laterFields=column();laterFields.setVisibility(View.GONE);if(adding){f.addView(laterBox);f.addView(laterFields);}
+        LinearLayout laterFields=column();laterFields.setVisibility(View.GONE);if(adding){more.addView(laterBox);more.addView(laterFields);}
         laterFields.addView(label("Plan",12,main.muted,true));Chips planChips=chips(laterFields,true);
         laterFields.addView(label("Number of payments",12,main.muted,true));EditText payments=field(laterFields,"Number of payments",false);payments.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);payments.setText("4");
         laterFields.addView(label("Every",12,main.muted,true));Chips everyChips=chips(laterFields,true); // wrapped: large text fits
@@ -171,18 +198,9 @@ final class TransactionForms extends Ui {
             if(typed==0){preview.setTextColor(main.muted);preview.setText(tint(c.name+" has "+money(now)+" available",money(now),amountColour(now)));}
             else if(after>=0){preview.setText(c.name+" will have "+money(after)+" left");preview.setTextColor(amountColour(after));}
             else{preview.setText(c.name+" will be overspent by "+money(-after));preview.setTextColor(main.red);}};
-        // 4. Reminders, as Planner's: from 9:00 on the date (an upcoming one's next date, so they move on with it). None until added.
+        // Reminders, as Planner's: from 9:00 on the date (an upcoming one's next date, so they move on with it). None until added.
         ReminderEditor reminders=new ReminderEditor(main,old!=null?old.reminders:sched!=null?sched.reminders:new ArrayList<>(),()->(String)day.getTag());
-        reminders.addTo(f);onText(day,reminders::show);
-        // 5. More: note, photo, flag, Cleared and repeat, folded away unless this transaction already uses one of them.
-        LinearLayout more=column();Button moreButton=button("",()->{});moreButton.setBackground(bg(Color.TRANSPARENT));
-        f.addView(moreButton);f.addView(more);
-        // Notes used before are suggested, those with this payee first.
-        AutoCompleteTextView memo=suggestField(more,"Note (optional)",()->main.budget.memos(payee.getText().toString()));
-        CheckBox cleared=new CheckBox(main);cleared.setText("Cleared at the bank");cleared.setTextColor(main.ink);
-        cleared.setMinHeight(dp(48));more.addView(cleared);LinearLayout flagBox=column();more.addView(flagBox);
-        Spinner flag=spinner(flagBox,"Flag",flagChoices(),old!=null?old.flag:0);
-        if(sched!=null)flagBox.setVisibility(View.GONE); // upcoming transactions have no flag
+        reminders.addTo(more);onText(day,reminders::show);
         // A photo (e.g. a receipt), kept on this phone. Picking one leaves this form open (see onRestart).
         // Bug hunt 27 (M5): a photo that came back after Android closed MyBudget (and its form) starts a new transaction.
         String[] photo={old!=null?old.photo:sched==null&&main.recoveredPhoto!=null?main.recoveredPhoto:""};if(old==null&&sched==null)main.recoveredPhoto=null;LinearLayout photoBox=column();if(sched==null)more.addView(photoBox);
@@ -203,27 +221,52 @@ final class TransactionForms extends Ui {
                     img.setOnClickListener(v->viewPhoto(photo[0]));photoBox.addView(img,new LinearLayout.LayoutParams(-1,dp(160)));}
                 photoBox.addView(button("Remove photo",()->{photo[0]="";showPhotoBox[0].run();}));}};
         showPhotoBox[0].run();
-        Spinner repeat=null;
-        if(old==null){repeat=spinner(more,"Repeat",REPEAT_LABELS,sched==null?0:Arrays.asList(Budget.Scheduled.REPEATS).indexOf(sched.repeat));
-            more.addView(label("A future date or a repeat makes it upcoming: it waits in Transactions, and you enter it when the day comes.",12,main.muted,false));}
+        // Flag: a row of coloured dots, the chosen one ringed with a ✓ and named under them; tapping it again takes the flag off.
+        int[] flag={old!=null?old.flag:0};LinearLayout flagBox=column();if(sched==null)more.addView(flagBox); // upcoming transactions have no flag
+        flagBox.addView(label("Flag",12,main.muted,true));Flow dots=new Flow(main,0);flagBox.addView(dots,new LinearLayout.LayoutParams(-1,-2)); // wraps onto a second line when narrow
+        TextView flagName=label("",13,main.muted,false);flagBox.addView(flagName);
+        Runnable[] showFlags={null};showFlags[0]=()->{dots.removeAllViews();String[] names=flagChoices();
+            for(int i=1;i<names.length;i++){int n=i;boolean on=flag[0]==i;TextView dot=new TextView(main);dot.setGravity(Gravity.CENTER);dot.setTextSize(14);
+                FrameLayout target=new FrameLayout(main);target.addView(dot,new FrameLayout.LayoutParams(dp(36),dp(36),Gravity.CENTER)); // a 36dp dot in a 48dp target
+                android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();d.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+                d.setColor(FLAG_COLORS[i]);if(on){dot.setText("✓");dot.setTextColor(i==3?Color.BLACK:Color.WHITE);}
+                if(on)d.setStroke(dp(3),main.ink);dot.setBackground(d);dot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                target.setContentDescription(names[i]+(on?", selected. Double tap to take the flag off":" flag"));target.setOnClickListener(v->{tick(v);flag[0]=flag[0]==n?0:n;showFlags[0].run();});
+                target.setMinimumWidth(dp(48));target.setMinimumHeight(dp(48));dots.addView(target,new android.view.ViewGroup.LayoutParams(dp(48),dp(48)));}
+            flagName.setText(flag[0]==0?"No flag":names[flag[0]]+" · tap it again to take it off");};
+        showFlags[0].run();
+        CheckBox cleared=new CheckBox(main);cleared.setText("Cleared at the bank");cleared.setTextColor(main.ink);
+        cleared.setMinHeight(dp(48));more.addView(cleared);
+        // Editing: Delete (and Someone owes part of this) at the very end, apart from the rest.
+        LinearLayout endBox=column();View rule=new View(main);rule.setBackgroundColor(tint(main.ink,main.darkTheme?26:18));
+        LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,dp(1));rp.setMargins(0,dp(20),0,dp(8));endBox.addView(rule,rp);
+        java.util.function.Function<Button,Button> red=b->{b.setTextColor(main.red);return b;};
         if(sched!=null){cleared.setVisibility(View.GONE);payee.setText(sched.payee,false);amount.setText(decimal(Math.abs(sched.amount)));
-            memo.setText(sched.memo,false);f.addView(button("Delete upcoming transaction",()->deleteScheduled(sched.id)));}
+            memo.setText(sched.memo,false);endBox.addView(red.apply(button("Delete upcoming transaction",()->deleteScheduled(sched.id))));f.addView(endBox);}
         if(old!=null){payee.setText(old.payee,false);amount.setText(decimal(Math.abs(old.amount)));memo.setText(old.memo,false);
-            cleared.setChecked(old.cleared);f.addView(button("Delete transaction",()->delete(old)));
+            cleared.setChecked(old.cleared);
             // Money owed between people (Budget.Owed): part of this paid for someone else.
-            if(old.amount<0&&!old.transfer())f.addView(button("Someone owes part of this",()->main.accountsScreen.owedFor(old)));}
-        boolean used=old!=null&&(!old.memo.isEmpty()||!old.photo.isEmpty()||old.flag>0)||sched!=null&&(!sched.memo.isEmpty()||!sched.repeat.equals("Never"));
+            if(old.amount<0&&!old.transfer())endBox.addView(button("Someone owes part of this",()->main.accountsScreen.owedFor(old)));
+            endBox.addView(red.apply(button("Delete transaction",()->delete(old))));f.addView(endBox);}
+        Spinner repeatShown=repeat;
+        boolean used=old!=null&&(!old.photo.isEmpty()||old.flag>0||!old.reminders.isEmpty())||sched!=null&&(!sched.repeat.equals("Never")||!sched.reminders.isEmpty());
         boolean[] open={used};Runnable showMore=()->{more.setVisibility(open[0]?View.VISIBLE:View.GONE);
-            moreButton.setText((open[0]?"▾ ":"▸ ")+"More: note, photo, flag, cleared"+(old==null?", repeat":""));
-            moreButton.setContentDescription("More details: note, photo, flag, cleared"+(old==null?", repeat":"")+(open[0]?", shown":", hidden"));};
+            List<String> set=new ArrayList<>();if(repeatShown!=null&&repeatShown.getSelectedItemPosition()>0)set.add(REPEAT_LABELS[repeatShown.getSelectedItemPosition()]);
+            if(later[0])set.add("Pay later");if(!reminders.list.isEmpty())set.add(count(reminders.list.size(),"reminder","reminders"));
+            if(!photo[0].isEmpty())set.add("Photo");if(flag[0]>0&&sched==null)set.add("Flag: "+flagChoices()[flag[0]]);if(cleared.isChecked()&&sched==null)set.add("Cleared");
+            String inside=(old==null?"Repeat, ":"")+(adding?"pay later, ":"")+"reminders"+(sched==null?", photo, flag, cleared":"");
+            inside=Character.toUpperCase(inside.charAt(0))+inside.substring(1);
+            moreSummary.setVisibility(open[0]?View.GONE:View.VISIBLE);moreSummary.setTextColor(set.isEmpty()?main.muted:main.ink);
+            moreSummary.setText(set.isEmpty()?inside:String.join(" · ",set));
+            moreButton.setText((open[0]?"▾  ":"▸  ")+"More options");
+            moreButton.setContentDescription("More options: "+(set.isEmpty()?inside:String.join(", ",set))+(open[0]?", shown":", hidden"));};
         moreButton.setOnClickListener(v->{open[0]=!open[0];tick(v);showMore.run();});showMore.run();
         showSplit.run();
         Spinner repeatField=repeat;
         Runnable adapt=()->{int selected=kind.selected();boolean income=selected==1;
             categoryFields.setVisibility(income?View.GONE:View.VISIBLE);payee.setHint(income?"Income source":selected==2?"Refund from":"Payee");
-            guidance.setText(income?"Adds money into To budget.":selected==2?"Returns money to the original spending category.":"Reduces the available money in your category.");
             laterBox.setVisibility(selected==0?View.VISIBLE:View.GONE);if(selected!=0&&later[0])laterBox.setChecked(false); // pay later: expenses only
-            paint.run();showPreview[0].run();};
+            paint.run();showPreview[0].run();showMore.run();};
         adapt.run();kind.changed=adapt;
         amount.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}
             public void afterTextChanged(android.text.Editable s){
@@ -248,7 +291,7 @@ final class TransactionForms extends Ui {
                 int n;try{n=Integer.parseInt(payments.getText().toString().trim());}catch(NumberFormatException x){throw new IllegalArgumentException("Enter the number of payments.");}
                 Budget.Entry e=new Budget.Entry(p,cat2,plan.id,when.toString(),cents);e.memo=memoText;e.photo=photo[0];e.reminders.addAll(reminders.assignIds(main.budget));
                 if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,-part.amount);s.memo=part.memo;e.splits.add(s);}
-                e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();
+                e.cleared=cleared.isChecked();e.flag=flag[0];
                 for(Budget.Scheduled s:main.budget.payLater(e,acc2,n,every[0],firstNow[0]?when:Budget.instalmentDate(when,every[0],1)))
                     if(remindEach[0])s.reminders.add(new Budget.Reminder(main.budget.newReminderId(),1,"days")); // the day before, at 9:00
                 return;}
@@ -258,17 +301,17 @@ final class TransactionForms extends Ui {
                 if(sched!=null){s.id=sched.id;s.billKey=sched.billKey;
                     if(when.toString().equals(sched.next))s.day=sched.day;} // Hunt 23 M1: rent on the 31st, shown as 30 Nov, stays the 31st
                 if(sched==null&&!when.isAfter(LocalDate.now())){main.budget.validate(s);
-                    Budget.Entry entered=main.budget.enter(s,photo[0],cleared.isChecked());entered.flag=flag.getSelectedItemPosition();
+                    Budget.Entry entered=main.budget.enter(s,photo[0],cleared.isChecked());entered.flag=flag[0];
                     if(rep.equals("Never")){entered.reminders.addAll(s.reminders);s.reminders.clear();} // a one-off: its reminders go with it; a repeat's stay on the repeat
                     if(!rep.equals("Never"))main.budget.scheduled.add(s);
                     return;} // today or earlier: entered now (with its photo and Cleared tick), the repeat continues
                 main.budget.validate(s);main.budget.scheduled.removeIf(t->t.id.equals(s.id));main.budget.scheduled.add(s);
-                if(!photo[0].isEmpty()||flag.getSelectedItemPosition()>0)toast("Saved as upcoming: add the photo and flag when it's entered."); // hunt 26 C3: upcoming ones keep neither
+                if(!photo[0].isEmpty()||flag[0]>0)toast("Saved as upcoming: add the photo and flag when it's entered."); // hunt 26 C3: upcoming ones keep neither
                 return;
             }
             Budget.Entry e=new Budget.Entry(p,cat2,acc2,date(day),cents);e.memo=memoText;e.photo=photo[0];e.reminders.addAll(reminders.assignIds(main.budget));
             if(isSplit)for(Budget.Split part:parts){Budget.Split s=new Budget.Split(part.category,part.amount*(k==0?-1:1));s.memo=part.memo;
-                e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag.getSelectedItemPosition();main.budget.validate(e);
+                e.splits.add(s);}e.cleared=cleared.isChecked();e.flag=flag[0];main.budget.validate(e);
             if(old!=null){e.id=old.id;e.externalId=old.externalId;e.billKey=old.billKey;e.bankPayee=Budget.statementPayee(old);e.bankDate=old.bankDate;e.bankAmount=old.bankAmount;e.reconciled=old.reconciled&&e.cleared&&e.account.equals(old.account); // unticking Cleared, or another account (hunt 24 C6), unlocks it
                 if(!put(old.id,e))main.budget.entries.add(0,e);}else main.budget.entries.add(0,e);
             Budget.Account onPlan=main.budget.account(acc2); // a new refund on a pay-later plan with payments left: asked about after the save
@@ -280,8 +323,8 @@ final class TransactionForms extends Ui {
             if(refund[0]>0){long back=refund[0];refund[0]=0;lowerAfterRefund(refundPlan[0],back);}};
         // Save and add another (new transactions only): the kind, date and account stay; everything else starts afresh.
         Runnable again=!adding?null:()->{payee.setText("",false);amount.setText("");memo.setText("",false);photo[0]="";showPhotoBox[0].run();reminders.list.clear();reminders.show();
-            parts.clear();showSplit.run();flag.setSelection(0);cleared.setChecked(false);if(repeatField!=null)repeatField.setSelection(0);
-            cat[0]=-1;categoryChosen[0]=false;showCategories[0].run();lastTime.setVisibility(View.GONE);showPreview[0].run();amount.requestFocus();};
+            parts.clear();showSplit.run();flag[0]=0;showFlags[0].run();cleared.setChecked(false);if(repeatField!=null)repeatField.setSelection(0);
+            cat[0]=-1;categoryChosen[0]=false;showCategories[0].run();lastTime.setVisibility(View.GONE);showPreview[0].run();showMore.run();amount.requestFocus();};
         sheet(sched!=null?"Edit upcoming transaction":old==null?"Add transaction":"Edit transaction",f,save,saved,again,adding?amount:null);
     }
     /** Edits [parts] (category + positive amount per row); at least two parts. Remove split empties them. [sign] -1: an expense, so its parts show red as typed. */

@@ -23,6 +23,10 @@ public class BudgetInstrumentation extends Instrumentation {
             plannerPaymentRetries();sentPayments(LocalDate.now().toString());
             result.putString("stream","PASS: Planner payment retries, confirmation and undo\n");finish(Activity.RESULT_OK,result);return;
         }
+        if(arguments!=null&&"true".equals(arguments.getString("wise"))){
+            wiseNotifications();result.putString("stream","PASS: Wise card payments from notifications\n");finish(Activity.RESULT_OK,result);return;
+        }
+        wiseNotifications();
         plannerPaymentRetries();
         YearMonth month=YearMonth.now();String day=month.atDay(1).toString();
         JSONObject legacy=new JSONObject().put("ready",10000).put("categories",new JSONArray().put(new JSONObject().put("name","Groceries").put("available",15000)).put(new JSONObject().put("name","Savings").put("available",50000))).put("entries",new JSONArray().put(new JSONObject().put("payee","Shop").put("category","Groceries").put("date",day).put("amount",-5000)));
@@ -397,6 +401,39 @@ public class BudgetInstrumentation extends Instrumentation {
         if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)texts(((ViewGroup)v).getChildAt(i),out);}
     private void refused(String file,String reason){try{BudgetStore.readBackup(file);}catch(JSONException e){if(e.getMessage()!=null&&e.getMessage().contains(reason))return;throw new AssertionError("Wrong reason: "+e.getMessage());}throw new AssertionError("Accepted: "+reason);}
     // Planner's already-counted payments must leave its unpaid bills unchanged.
+    // Wise card payments (WiseListener.handle) with made-up Wise notifications: added once, to review; a second payment of the
+    // same amount is a second one; other Wise notifications are left alone. Saved data and the Wise settings are put back.
+    private android.service.notification.StatusBarNotification wiseNote(int id,String title,String text,long when){
+        android.app.Notification n=new android.app.Notification.Builder(getTargetContext(),"test").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(text).setWhen(when).build();
+        return new android.service.notification.StatusBarNotification(WiseNotifications.PACKAGE,WiseNotifications.PACKAGE,id,null,10165,0,0,n,android.os.Process.myUserHandle(),when);}
+    private void wiseNotifications()throws Exception{
+        android.content.SharedPreferences prefs=getTargetContext().getSharedPreferences("budget",0);String[] keys={"data","wise_on","wise_since","wise_account","wise_seen","wise_status","wise_unread"};
+        java.util.Map<String,Object> saved=new java.util.HashMap<>();for(String k:keys)if(prefs.contains(k))saved.put(k,prefs.getAll().get(k));
+        try{
+            Budget seed=new Budget();Budget.Account wise=new Budget.Account("Wise",LocalDate.now().minusDays(30).toString(),50000);seed.accounts.add(wise);seed.categories.add(new Budget.Category("Games"));
+            if(!prefs.edit().putString("data",BudgetStore.encode(seed)).putBoolean("wise_on",true).putString("wise_account",wise.id).remove("wise_since").remove("wise_seen").remove("wise_status").remove("wise_unread").commit())throw new AssertionError("Seed not saved");
+            long now=System.currentTimeMillis();android.content.Context c=getTargetContext();
+            runOnMainSync(()->{WiseListener.handle(c,wiseNote(1,"Card payment","13.33 AUD spent at Steam.",now));WiseListener.handle(c,wiseNote(1,"Card payment","13.33 AUD spent at Steam.",now+5_000)); // posted again, even with a new time: once
+                for(int k=1;k<=2;k++)WiseListener.handle(c,wiseNote(1,"Card payment","13.33 AUD spent at Steam.",now-k*86_400_000L)); // or another day (its time changed)
+                WiseListener.handle(c,wiseNote(2,"Transfer update","Your transfer is complete.",now));WiseListener.handle(c,wiseNote(3,"Card payment","13.33 AUD spent at Steam.",now+60_000));});
+            Budget after=BudgetStore.decode(prefs.getString("data",null));int steam=0;
+            for(Budget.Entry e:after.entries){if(!e.payee.equals("Steam"))throw new AssertionError("Only card payments are added: "+e.payee);
+                if(e.amount!=-1333||e.approved||!e.account.equals(wise.id)||!WiseNotifications.NOTE.equals(e.memo))throw new AssertionError("Wise payment not saved to review in the Wise account");steam++;}
+            eq(steam,2);eq(prefs.getString("wise_seen","").split("\n").length,2);
+            if(!prefs.getString("wise_status","").startsWith("Added 13.33 AUD at Steam"))throw new AssertionError("Settings line: "+prefs.getString("wise_status",""));
+            // Turned on after a payment: it's left alone (it may be in already, from a statement).
+            prefs.edit().putLong("wise_since",now+1).commit();runOnMainSync(()->WiseListener.handle(c,wiseNote(6,"Card payment","3.00 AUD spent at Before.",now)));prefs.edit().remove("wise_since").commit();
+            for(Budget.Entry e:BudgetStore.decode(prefs.getString("data",null)).entries)if(e.payee.equals("Before"))throw new AssertionError("added from before it was turned on");
+            // While Planner's add-expense dialog is open a payment waits (its save would add it again), then comes in once.
+            AddExpenseActivity.open++;try{runOnMainSync(()->WiseListener.handle(c,wiseNote(5,"Card payment","2.00 AUD spent at Waiting.",now)));}finally{AddExpenseActivity.open--;}
+            for(Budget.Entry e:BudgetStore.decode(prefs.getString("data",null)).entries)if(e.payee.equals("Waiting"))throw new AssertionError("added while Planner's dialog was open");
+            runOnMainSync(()->{WiseListener.handle(c,wiseNote(5,"Card payment","2.00 AUD spent at Waiting.",now));WiseListener.handle(c,wiseNote(5,"Card payment","2.00 AUD spent at Waiting.",now));});
+            int waited=0;for(Budget.Entry e:BudgetStore.decode(prefs.getString("data",null)).entries)if(e.payee.equals("Waiting"))waited++;eq(waited,1);
+            prefs.edit().putBoolean("wise_on",false).commit();runOnMainSync(()->WiseListener.handle(c,wiseNote(4,"Card payment","1.00 AUD spent at X.",now)));
+            eq(BudgetStore.decode(prefs.getString("data",null)).entries.size(),3); // off: nothing read (Steam twice, Waiting)
+        }finally{android.content.SharedPreferences.Editor e=prefs.edit();for(String k:keys){Object v=saved.get(k);if(v==null)e.remove(k);else if(v instanceof Boolean)e.putBoolean(k,(Boolean)v);else if(v instanceof Integer)e.putInt(k,(Integer)v);else if(v instanceof Long)e.putLong(k,(Long)v);else e.putString(k,(String)v);}
+            if(!e.commit())throw new AssertionError("Saved data not put back");}
+    }
     private void plannerPaymentRetries()throws Exception{
         String owed="[{\"id\":\"planner-bill-retry\",\"billKey\":\"planner-series-retry\",\"payee\":\"Power\",\"due\":\"2026-10-20\",\"amountCents\":10000}]";
         // A retry must leave the remainder alone even when the payment equals or exceeds it.
