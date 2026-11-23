@@ -2,17 +2,17 @@
 
 A native, offline envelope budgeting app. Give every dollar you have a job: put income into envelopes (categories), spend from them, roll what's left into next month, and move money between envelopes when one runs short.
 
-## Download 0.0.26
+## Download 0.0.27
 
-[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.26/MyBudget-0.0.26.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.26)
+[Download the signed APK](https://github.com/baslawson/mybudget/releases/download/v0.0.27/MyBudget-0.0.27.apk) · [Release notes](https://github.com/baslawson/mybudget/releases/tag/v0.0.27)
 
 Install it with [Obtainium](https://github.com/ImranR98/Obtainium) to get updates automatically:
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/baslawson/mybudget"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" width="300" alt="Get it on Obtainium"></a>
 
-Android 8+ (API 26). Version `0.0.26`, version code `29`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
+Android 8+ (API 26). Version `0.0.27`, version code `30`, package `com.mybudget.app`. The universal release APK is approximately 320 KB and uses a dedicated release-signing key. In Obtainium, you can also paste `https://github.com/baslawson/mybudget` as the app source. [Obtainium link documentation](https://wiki.obtainium.imranr.dev/deep_links/).
 
-This release uses local device storage, manual entries, CSV imports, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
+This release uses local device storage, manual entries, CSV imports, Wise card payments from Wise's notifications on the phone, and expenses and upcoming bills from Planner (below). It does not sync with banks; back up to a file or a folder (Settings > Backup). The release signature differs from development/debug builds, so it cannot update those installations in place. Do not uninstall a debug build containing a budget you need to retain: uninstalling deletes that local budget.
 
 ## Screenshots
 
@@ -26,6 +26,7 @@ All accounts, payees, amounts and transactions shown below are fictional demo da
 
 ## Versions
 
+- **0.0.27**: **Wise card payments** are added from Wise's notifications (Settings > Wise card payments; needs notification access), marked To review and never added twice; a clearer **Add transaction** form with the note always in sight and the payee's recent notes one tap away, and the rarer options under More options; a Planner bill keeps what's left when a payment is sent again. Same saved-data version (11).
 - **0.0.26**: a settle-up for a very large balance no longer stops the budget from opening; a settle-up's note keeps its exact wording when the record is corrected, and records with an older typed "settled up" note can be corrected again. Same saved-data version (11).
 - **0.0.25**: what someone pays back goes into a category only when everything they still owe came from transactions in that one category (anything else, or a hidden category, goes to To budget); what they still owe now counts from when their balance was last zero; "Settled up" can't be typed as a note. Same saved-data version (11).
 - **0.0.24**: settling up with someone who owed you for part of a transaction puts what they paid back into that transaction's category (or To budget, if you choose); the money goes into a cash account, not a card; with no account for it, settling up says so. Same saved-data version (11) as 0.0.22 and 0.0.23.
